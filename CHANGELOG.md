@@ -13,6 +13,14 @@ Your settings (Windows user environment variables) and your `data` folder are no
   `backtest_trades.csv` and `trades_paper.csv` / `trades_live.csv`. An older paper or live log gets the new
   header automatically, and its old rows are kept. Recording only: the backtest gives exactly the same
   84 trades and numbers as before. 101 tests pass.
+- **Phase 2:** candle archive. `archive.py` saves every finished trading day's 15-minute candles for the
+  watchlist and its indexes to `data/candles/` (one file per day). The bot saves the day automatically after
+  the close, while that day's Kite login still works. Kite data is preferred and is never replaced by Yahoo
+  data. `archive.py --status` shows what is saved. The first run saved 247 trading days (17 Nov 2025 to
+  13 Nov 2026) from Kite. Trading and the backtest are unchanged (same 84 trades). 110 tests pass.
+  - Note: from 3 Aug 2026 Kite has no 15:15 candle for the stocks (NSE's closing auction session); the
+    indexes still have it. The archive also keeps two Sunday special sessions (1 Feb Budget day and
+    8 Nov Diwali Muhurat, 4 candles), which the weekly report will leave out.
 
 ## v1.2.0 (15 Nov 2026): Ramayana edition
 

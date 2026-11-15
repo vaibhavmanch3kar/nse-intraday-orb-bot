@@ -17,6 +17,7 @@ import sys
 import threading
 import time
 
+import archive
 import config as C
 import costs
 import data_yahoo
@@ -350,6 +351,19 @@ class Bot:
         return not any(b["t"].date() == now.date() for b in bars)
 
     # -- main loop
+    def end_of_day(self, now):
+        """After the close: save today's (and any missed recent days') candles to the archive,
+        while today's Kite login still works. Never stops the bot if it fails."""
+        try:
+            res = archive.fetch_and_save("5d", now=now)
+            msg = (f"Candle archive: saved {len(res['days'])} day(s) from {res['source'].title()}"
+                   if res["days"] else "Candle archive: already up to date")
+            if res["failed"]:
+                msg += f" (no data for {', '.join(res['failed'])})"
+            self.note(msg)
+        except Exception as e:
+            self.note(f"{T.WARN_ICON} candle archive failed: {e!r}", logging.WARNING)
+
     def run(self):
         if not holidays.year_listed(now_ist().year):
             self.note(f"nse_holidays.json has no {now_ist().year} list - add it from the NSE circular "
@@ -384,6 +398,7 @@ class Bot:
             if now >= at(C.MARKET_CLOSE, today) + dt.timedelta(minutes=5):
                 self.note(f"{T.name('square_off')}: market closed. Day P&L ₹{self.state.d['day_pnl']:.2f}, "
                           f"equity ₹{self.state.equity():.2f}")
+                self.end_of_day(now)
                 self.write_status(now)
                 break
             if not self.ensure_live_broker():
