@@ -210,6 +210,8 @@ def main():
     if not res.get("n"):
         print("Not enough 5-minute history for that time.")
         return
+    import theme as T
+    print(T.banner(f"{T.SEER} {T.term('time_machine')}"))
     print(f"Time Machine: {a.symbol.upper()} {d} entry {a.entry} stop {a.stop} from {a.at} to {C.SQUARE_OFF} "
           f"({res['minutes']} min, {res['n']:,} replays)")
     for r, v in res["targets"].items():

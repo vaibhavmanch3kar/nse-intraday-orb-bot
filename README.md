@@ -1,12 +1,13 @@
-# NSE Intraday ORB Bot
+# 🏹 Ayodhya ORB: NSE Intraday ORB Bot (Ramayana edition)
 
 A Windows app that **paper-trades Indian stocks (NSE)** with an *opening range breakout* strategy,
-and shows everything on a simple dashboard in your browser.
+and shows everything on a simple dashboard in your browser. The app is themed on the **Ramayana**
+(see [the glossary](#the-ramayana-theme)). Every themed name is shown next to the plain trading term, so nothing is hidden.
 
 - **Paper trading by default**: pretend money (₹1,00,000), real live prices. No Zerodha account, API key or payment needed.
 - Watches 12 big, liquid stocks (RELIANCE, HDFCBANK, ICICIBANK, INFY, TCS, SBIN, AXISBANK, KOTAKBANK, LT, ITC, BHARTIARTL, TATASTEEL).
 - Free price data from Yahoo Finance. Knows NSE market hours and holidays.
-- Dashboard pages: **Live**, **Session review** (with a 10,000-replay *Time Machine*), **Swing scanner**, **Trades**.
+- Dashboard pages: **Ayodhya Darbar · Live**, **Chitrakoot · Session review** (with a 10,000-replay *Time Machine*, "Valmiki's Vision"), **Hanuman's Watch · Swing scanner**, **Rajkosh · Trades**.
 - Can trade real money through Zerodha Kite Connect, but only if you deliberately switch it on ([advanced guide](docs/LIVE-TRADING.md)).
 
 > ⚠️ **Please read**
@@ -81,16 +82,52 @@ To undo it, double-click `5-UNSCHEDULE.bat`.
 
 | Page | What you see |
 |---|---|
-| **Live** | Is the bot running? Paper equity, today's P&L, open positions (profit in ₹ and R, how far the stop is, where the EMA trail is, when the 1-hour time stop is checked, time in trade), every stock's opening range and why it is or isn't a trade, recent events, NSE holiday calendar, Pause/Stop buttons |
-| **Session review** | Pick any recent trading day. For each stock: a mini chart, whether the rules fired, and how the trade would have ended. Each trade also shows the **Time Machine**: the odds from 10,000 replays of that stock's own moves, a plain verdict ("coin flip", "leans toward the stop"…) and the rule's real track record over 60 days |
-| **Swing scanner** | Nifty 50 stocks with a multi-day setup on the last daily candle (20-day breakout, bull flag, 20-day average reclaim, oversold, oversold bounce), with a suggested stop, target and quantity. **Research only: the bot doesn't trade these** |
-| **Trades** | An **equity curve** (with drawdowns shaded), a **profit/loss bar per trade**, breakdowns **by exit reason, long vs short and stock**, every trade with a **chart** link (the day's candles with entry, exit, stop and trail drawn on), the last backtest shown the same way, and the **30-trade edge check**: after 30 trades it tells you whether the average result per trade is positive, and to stop if it isn't |
+| 🏹 **Ayodhya Darbar · Live** | Is the bot running? Paper equity, today's P&L, open positions (profit in ₹ and R, how far the stop is, where the EMA trail is, when the 1-hour time stop is checked, time in trade), every stock's opening range and why it is or isn't a trade, recent events, NSE holiday calendar, Pause/Stop buttons |
+| 🪔 **Chitrakoot · Session review** | Pick any recent trading day. For each stock: a mini chart, whether the rules fired, and how the trade would have ended. Each trade also shows the **Time Machine**: the odds from 10,000 replays of that stock's own moves, a plain verdict ("coin flip", "leans toward the stop"…) and the rule's real track record over 60 days |
+| 🚩 **Hanuman's Watch · Swing scanner** | Nifty 50 stocks with a multi-day setup on the last daily candle (20-day breakout, bull flag, 20-day average reclaim, oversold, oversold bounce), with a suggested stop, target and quantity. **Research only: the bot doesn't trade these** |
+| 📜 **Rajkosh · Trades** | An **equity curve** (with drawdowns shaded), a **profit/loss bar per trade**, breakdowns **by exit reason, long vs short and stock**, every trade with a **chart** link (the day's candles with entry, exit, stop and trail drawn on), the last backtest shown the same way, and the **30-trade edge check**: after 30 trades it tells you whether the average result per trade is positive, and to stop if it isn't |
 
 | Trades: equity curve and P&L bars | Trade chart |
 |---|---|
 | ![Trades](docs/screenshots/04-trades.png) | ![Trade chart](docs/screenshots/06-trade-chart.png) |
 
 ![Swing scanner](docs/screenshots/03-swing-scanner.png)
+
+## The Ramayana theme
+
+The dashboard, console windows and log messages use names from the Ramayana. The plain trading term is
+always shown next to the themed name (for example **Lakshman Rekha · stop**), and the trade files
+(`data\*.csv`) keep the plain words, so spreadsheets and analysis don't change.
+
+| Themed name | Plain meaning | Why this name |
+|---|---|---|
+| **Ayodhya ORB** | the bot | Rama's kingdom: home |
+| **Ayodhya Darbar** | Live page | the royal court, where today's business happens |
+| **Chitrakoot** | Session review | where Rama and Bharata met to reflect |
+| **Hanuman's Watch** | Swing scanner | Hanuman scouted Lanka before the battle |
+| **Rajkosh** | Trades | the royal treasury's ledger |
+| **Yatra** | one trade's chart | the journey of a trade |
+| **Valmiki's Vision** | Time Machine | the sage who saw the whole story |
+| **Agni Pariksha** | backtest / 30-trade edge check | the trial by fire |
+| **Lakshman Rekha** | stop-loss | the line that must not be crossed |
+| **Lakshya** | target | the aim |
+| **Anusaran** | 21 EMA trailing exit | "following" the price |
+| **Muhurat** | 1-hour time stop | the trade's window has passed |
+| **Sandhya** | 15:10 square-off | dusk: everything is closed |
+| **Maryada** | 2% daily loss limit | Rama's self-imposed limits |
+| **Vanvas** | 2-day cool-down after 3 losses | exile from the market |
+| **Vanar Sena** | index filter | trade with the army (the sector index), not against it |
+| **Pushpaka** | Kite real-time data | the swift flying chariot |
+| **Setu** | Zerodha login | the bridge to the exchange |
+| **Abhyas / Yuddha** | PAPER / LIVE mode | practice / battle |
+| **Vishram** | pause | rest |
+| **Sandesh** | recent events | messages |
+| **Panchang** | NSE calendar | the almanac |
+| **Utsav** | market holiday | festival |
+| **Aadesh** | controls | commands |
+| **Jagrat / Nidra** | running / not running | awake / asleep |
+
+All names live in one file, [`theme.py`](theme.py). Change them there to rename anything.
 
 ---
 

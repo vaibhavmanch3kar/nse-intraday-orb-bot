@@ -11,10 +11,10 @@ if (-not (Test-Path $py)) { Write-Host "[x] .venv missing - double-click 1-SETUP
 # Don't start twice
 $running = Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
            Where-Object { $_.CommandLine -like "*$PSScriptRoot*" -and $_.CommandLine -like "* bot.py*" }
-if ($running) { Write-Host "[i] Bot already running - opening dashboard"; Start-Process "http://127.0.0.1:5000"; exit 0 }
+if ($running) { Write-Host "[i] Ayodhya ORB already running - opening the Ayodhya Darbar dashboard"; Start-Process "http://127.0.0.1:5000"; exit 0 }
 
 Start-Job -ScriptBlock { Start-Sleep 4; Start-Process "http://127.0.0.1:5000" } | Out-Null
 & $py bot.py
 Write-Host ""
-Write-Host "Bot stopped (it stops by itself after 3:35 PM, on weekends and on NSE holidays)." -ForegroundColor Yellow
+Write-Host "Ayodhya ORB stopped (it rests by itself after 3:35 PM, on weekends and on NSE holidays)." -ForegroundColor Yellow
 Write-Host "To look at the dashboard any time, double-click 3-DASHBOARD.bat"

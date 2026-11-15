@@ -16,5 +16,5 @@ if ($listening) {
     Start-Process "http://127.0.0.1:5000"
     exit 0
 }
-Write-Host "[i] Starting dashboard only (no trading) - pages: Live, Session review, Trades"
+Write-Host "[i] Starting the Ayodhya Darbar dashboard only (no trading)"; Write-Host "    Pages: Ayodhya Darbar (Live), Chitrakoot (Session review), Hanuman's Watch (Swing scanner), Rajkosh (Trades)"
 & $py web.py

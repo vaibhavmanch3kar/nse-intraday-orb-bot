@@ -171,7 +171,9 @@ def report(trades, st, start_cash, curve, data, sim_from, verbose):
         for t in trades:
             w.writerow({k: (round(v, 2) if isinstance(v, float) else v) for k, v in t.items()})
     if verbose:
-        print(f"\nORB backtest  {res['start']} -> {res['end']}  ({len(data)} stocks, ₹{start_cash:,.0f})")
+        import theme as T
+        print("\n" + T.banner(f"{T.FIRE} {T.term('backtest')}"))
+        print(f"ORB backtest  {res['start']} -> {res['end']}  ({len(data)} stocks, ₹{start_cash:,.0f})")
         print(f"  Return        {res['return_pct']:+.2f}%   (net ₹{res['net_pnl']:,.0f})")
         print(f"  Max drawdown  {res['max_dd_pct']:.2f}%")
         print(f"  Trades        {res['trades']}   win rate {res['win_rate']:.1f}%   avg {res['avg_r']:+.2f}R")
@@ -185,7 +187,7 @@ def report(trades, st, start_cash, curve, data, sim_from, verbose):
             reasons[t["reason"]] += 1
         if per:
             print("  P&L by stock  " + ", ".join(f"{s} {v:+,.0f}" for s, v in sorted(per.items(), key=lambda x: -x[1])))
-            print("  Exit reasons  " + ", ".join(f"{r} {n}" for r, n in reasons.most_common()))
+            print("  Exit reasons  " + ", ".join(f"{T.reason_label(r)} {n}" for r, n in reasons.most_common()))
         print(f"  Trade list    {path}")
     return res
 

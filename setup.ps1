@@ -21,7 +21,7 @@ function Fail($m) {
 }
 
 Write-Host ""
-Write-Host "=== NSE Intraday ORB Bot - setup (paper trading) ===" -ForegroundColor Yellow
+Write-Host "=== Ayodhya ORB (Ramayana edition) - setup for Abhyas (paper trading) ===" -ForegroundColor Yellow
 Write-Host ""
 
 # 1. Python ------------------------------------------------------------------
@@ -77,9 +77,9 @@ if ($LASTEXITCODE -ne 0) { Fail "Some self-tests failed - copy the red text abov
 Ok "All self-tests passed"
 
 Write-Host ""
-Write-Host "=== Setup complete ===" -ForegroundColor Green
+Write-Host "=== Setup complete - Ayodhya is ready ===" -ForegroundColor Green
 Write-Host "Next:"
-Write-Host "  * 3-DASHBOARD.bat    look around any time (weekends too)"
-Write-Host "  * 2-START-BOT.bat    run the bot in PAPER mode on a market day (start before 9:15 AM IST)"
+Write-Host "  * 3-DASHBOARD.bat    Ayodhya Darbar dashboard - look around any time (weekends too)"
+Write-Host "  * 2-START-BOT.bat    run the bot in Abhyas (PAPER) mode on a market day (start before 9:15 AM IST)"
 Write-Host "  * 4-SCHEDULE.bat     optional: start the bot automatically at 9:00 AM every weekday"
 Write-Host ""

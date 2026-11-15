@@ -24,6 +24,6 @@ $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopIfGoingOnB
 $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
 
 Register-ScheduledTask -TaskName $name -Action $action -Trigger $trigger -Settings $settings `
-    -Principal $principal -Description "Starts the Kite ORB bot and dashboard (http://127.0.0.1:5000)" -Force | Out-Null
-Write-Host "[ok] Task '$name' will start the bot at $At, Monday-Friday."
+    -Principal $principal -Description "Starts Ayodhya ORB (NSE intraday ORB bot, Ramayana edition) and its dashboard (http://127.0.0.1:5000)" -Force | Out-Null
+Write-Host "[ok] Task '$name' will start Ayodhya ORB at $At, Monday-Friday."
 Write-Host "     Keep the PC on and logged in during market hours (9:15-15:30 IST); disable sleep in Power settings."

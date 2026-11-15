@@ -2,12 +2,17 @@
 Small dependency-free SVG charts for the dashboard (equity curve, P&L bars, trade journey).
 
 Every function returns an <svg> string that scales to its container (viewBox + width 100%).
-Colours match the dashboard's dark theme.
+Colours come from theme.py (Ramayana palette: saffron opening range, violet EMA trail;
+profit stays green and loss red).
 """
 
 import html
 
-UP, DN, ACC, MUTED, LINE, WARN, FG = "#22c55e", "#ef4444", "#38bdf8", "#94a3b8", "#334155", "#f59e0b", "#e2e8f0"
+import theme
+
+_c = theme.COLORS
+UP, DN, ACC, MUTED, LINE, WARN, FG = _c["up"], _c["dn"], _c["acc"], _c["muted"], _c["line"], _c["trail"], _c["fg"]
+BG = _c["bg"]
 
 
 def _fmt_inr(v):
@@ -123,9 +128,9 @@ def journey(bars, trade, ema=None, or_range=None, w=900, h=320, title="Trade jou
                      f"{html.escape(label)} {v:,.2f}</text>")
 
     if trade.get("stop"):
-        hline(trade["stop"], DN, "stop")
+        hline(trade["stop"], DN, "stop")          # Lakshman Rekha
     if trade.get("target"):
-        hline(trade["target"], UP, "target")
+        hline(trade["target"], UP, "target")      # Lakshya
     if trade.get("entry"):
         hline(trade["entry"], MUTED, "entry", "2 3")
     bw = max(2.0, slot * 0.6)
@@ -165,7 +170,7 @@ def journey(bars, trade, ema=None, or_range=None, w=900, h=320, title="Trade jou
         tri = (f"{cx(i):.1f},{tip_y:.1f} {cx(i) - 7:.1f},{tip_y + 12:.1f} {cx(i) + 7:.1f},{tip_y + 12:.1f}"
                if pointing_up else
                f"{cx(i):.1f},{tip_y:.1f} {cx(i) - 7:.1f},{tip_y - 12:.1f} {cx(i) + 7:.1f},{tip_y - 12:.1f}")
-        parts.append(f"<polygon points='{tri}' fill='{col}' stroke='#0f172a' stroke-width='1'>"
+        parts.append(f"<polygon points='{tri}' fill='{col}' stroke='{BG}' stroke-width='1'>"
                      f"<title>{label} {px:,.2f}</title></polygon>")
     # time axis: first, middle, last bar
     for i in sorted({0, len(bars) // 2, len(bars) - 1}):

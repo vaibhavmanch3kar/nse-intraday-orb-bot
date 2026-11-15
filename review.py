@@ -196,11 +196,13 @@ def latest_cached():
 
 if __name__ == "__main__":
     import sys
+    import theme as T
     r = build(sys.argv[1] if len(sys.argv) > 1 else None, refresh=True)
+    print(T.banner(f"{T.LAMP} {T.term('review')}"))
     print(f"Review {r['day']}: {r['signals']} signals, {r['wins']} wins, total {r['total_r']:+.2f}R")
     for s, row in sorted(r["rows"].items()):
         if row.get("direction"):
             print(f"  {s:11s} {row['signal_time']} {row['direction']:5s} entry {row['entry']:.2f} "
-                  f"-> {row['exit_reason']} {row['exit_time']} {row['r']:+.2f}R")
+                  f"-> {T.reason_label(row['exit_reason'])} {row['exit_time']} {row['r']:+.2f}R")
         else:
             print(f"  {s:11s} {row.get('note', '')}")

@@ -166,7 +166,9 @@ def latest(max_age_min=30):
 
 
 if __name__ == "__main__":
+    import theme as T
     r = scan()
+    print(T.banner(f"{T.FLAG} {T.term('scanner')}"))
     print(f"Swing scan for {r['day']} ({len(r['rows'])} stocks) - research only, the bot doesn't trade these")
     for k in SETUPS:
         names = [s for s, x in sorted(r["rows"].items()) if k in x["setups"]]

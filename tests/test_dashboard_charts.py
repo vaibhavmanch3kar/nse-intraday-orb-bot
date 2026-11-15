@@ -34,7 +34,7 @@ def test_chart_helpers_render_svg():
     assert eq.startswith("<svg") and "polyline" in eq and "polygon" in eq   # line + drawdown area
     assert "Trade 3: equity ₹100,300" in eq
     bars = charts.pnl_bars([100, -50, 25])
-    assert bars.count("<rect") == 3 and "#ef4444" in bars and "#22c55e" in bars
+    assert bars.count("<rect") == 3 and charts.DN in bars and charts.UP in bars
     assert "No trades" in charts.equity_curve([], 100000) and "No trades" in charts.pnl_bars([])
     day = dt.date(2026, 11, 13)
     b = [bar(day, "09:15", 100, 101, 99.5, 100.5), bar(day, "09:30", 100.5, 102, 100.4, 101.8),

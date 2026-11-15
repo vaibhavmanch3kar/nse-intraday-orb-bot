@@ -6,6 +6,19 @@ Every version is on the [Releases page](https://github.com/vaibhavmanch3kar/nse-
 with a ZIP you can download. To go back to an older version, download that version's ZIP.
 Your settings (Windows user environment variables) and your `data` folder are not part of the ZIP, so keep them.
 
+## v1.2.0 (15 Nov 2026): Ramayana edition
+
+- The bot is now **Ayodhya ORB**, themed on the Ramayana across the dashboard, console windows, log
+  messages, launcher titles and setup scripts. Every themed name sits next to the plain term
+  (e.g. **Lakshman Rekha · stop**, **Rajkosh · Trades**). See the glossary in the README.
+- New dashboard look: a saffron and gold palette on a night-sky background, a serif title, a torana-style border,
+  a bow icon in the browser tab, the Devanagari heading ॥ अयोध्या ॥, and footprints (👣) for the trade-chart (Yatra) page.
+  Profit stays green and loss stays red.
+- Log lines: 🏹 ENTER, 🏆 EXIT (win), 🛡 EXIT (loss), with themed exit reasons.
+- All names are in one file, `theme.py`. Trade files, status data and the strategy and risk rules are **unchanged**.
+- The Windows scheduled task keeps its name ("Kite ORB Bot"), so nothing needs re-registering.
+- New README screenshots (no personal data). 96 tests pass, including 5 new theme tests.
+
 ## v1.1.1 (15 Nov 2026): Kite check fixes
 
 - `6-CHECK-KITE-DATA.bat` now says whether the bot already uses Kite data, and otherwise shows the one

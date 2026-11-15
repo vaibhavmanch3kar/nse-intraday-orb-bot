@@ -24,10 +24,11 @@ import marketdata
 import holidays
 import risk
 import strategy
+import theme as T
 from broker import LiveBroker, PaperBroker
 
 IST = dt.timezone(dt.timedelta(hours=5, minutes=30))
-log = logging.getLogger("bot")
+log = logging.getLogger("ayodhya")
 
 
 def now_ist():
@@ -141,7 +142,7 @@ class Bot:
         pos = self.state.positions[sym]
         qty, price = self.broker.exit(sym, pos, ref_price, reason)
         if qty <= 0:
-            self.note(f"{sym}: exit FAILED ({reason}) - check Kite", logging.ERROR)
+            self.note(f"{T.WARN_ICON} {sym}: exit FAILED ({reason}) - check Kite", logging.ERROR)
             return
         if qty < pos["qty"]:
             self.note(f"{sym}: only {qty}/{pos['qty']} closed", logging.ERROR)
@@ -149,8 +150,9 @@ class Bot:
         row = self.state.record_exit(sym, price, when)
         row["reason"] = reason
         log_trade(row, self.mode)
-        self.note(f"EXIT {row['direction']} {sym} x{qty} @ {price:.2f} ({reason}) net ₹{row['net']:.2f} "
-                  f"({row['r']:+.2f}R)")
+        icon = T.EXIT_WIN if row["net"] > 0 else T.EXIT_LOSS
+        self.note(f"{icon} EXIT {row['direction']} {sym} x{qty} @ {price:.2f} ({T.reason_label(reason)}) "
+                  f"net ₹{row['net']:.2f} ({row['r']:+.2f}R)")
 
     # -- one cycle
     def cycle(self):
@@ -189,7 +191,7 @@ class Bot:
                     b, _, _ = marketdata.fetch(ix, C.INTERVAL_MIN, "5d")
                     index_bars[ix] = data_yahoo.closed_bars(b, now, C.INTERVAL_MIN)
                 except data_yahoo.DataError as e:
-                    self.note(f"index {ix}: {e} - index filter skipped", logging.WARNING)
+                    self.note(f"index {ix}: {e} - {T.term('index_filter')} skipped", logging.WARNING)
         if C.VIX_SIZING and self.vix_day != today:
             try:
                 vix = marketdata.vix_by_day("1mo")
@@ -213,7 +215,7 @@ class Bot:
                 row = self.state.record_exit(sym, filled_stop, now)
                 row["reason"] = "exchange stop"
                 log_trade(row, self.mode)
-                self.note(f"EXIT {sym} by exchange stop @ {filled_stop:.2f} net ₹{row['net']:.2f}")
+                self.note(f"{T.EXIT_LOSS} EXIT {sym} by exchange stop ({T.name('stop')}) @ {filled_stop:.2f} net ₹{row['net']:.2f}")
                 continue
             if now >= square_off_time:
                 self.close_position(sym, px, "square-off", now)
@@ -285,8 +287,10 @@ class Bot:
             target = strategy.target_for(fill_price, stop, direction)
             self.state.record_entry(sym, direction, filled, fill_price, stop, target, now,
                                     {**extra, "checked_upto": last["t"].isoformat()})
-            self.note(f"ENTER {direction} {sym} x{filled} @ {fill_price:.2f} stop {stop:.2f} "
-                      + (f"target {target:.2f}" if target is not None else "no fixed target (trailing)"))
+            self.note(f"{T.ENTER_ICON} ENTER {direction} {sym} x{filled} @ {fill_price:.2f} "
+                      f"{T.name('stop')} (stop) {stop:.2f} "
+                      + (f"{T.name('target')} (target) {target:.2f}" if target is not None
+                         else "no fixed target (trailing)"))
         self.write_status(now)
 
     def write_status(self, now):
@@ -330,24 +334,25 @@ class Bot:
         if not holidays.year_listed(now_ist().year):
             self.note(f"nse_holidays.json has no {now_ist().year} list - add it from the NSE circular "
                       "(using the NIFTY-data fallback meanwhile)", logging.WARNING)
-        self.note(f"Bot started in {self.mode.upper()} mode, watching {len(C.WATCHLIST)} stocks")
+        print(T.banner(f"{T.mode_label(self.mode)} mode"), flush=True)
+        self.note(f"{T.BOW} {T.APP} started in {T.mode_label(self.mode)} mode, watching {len(C.WATCHLIST)} stocks")
         if C.DRY_RUN is False and not self.live:
             self.note("DRY_RUN=false but CONFIRM_LIVE is not YES - staying in PAPER mode", logging.WARNING)
         waiting_login_logged = False
         while True:
             if os.path.exists(C.STOP_FILE):
-                self.note("STOP file found - shutting down (open positions stay protected by exchange stops in live mode)")
+                self.note("STOP file found - Ayodhya ORB shutting down (open positions stay protected by exchange stops in live mode)")
                 os.remove(C.STOP_FILE)
                 break
             now = now_ist()
             today = now.date()
             if now.weekday() >= 5:
-                self.note(f"Weekend - next trading day {holidays.next_trading_day(today):%a %d %b}")
+                self.note(f"Weekend - Ayodhya rests. Next trading day {holidays.next_trading_day(today):%a %d %b}")
                 self.write_status(now)
                 break
             hname = holidays.holiday_name(today)
             if hname:
-                self.note(f"NSE holiday today ({hname}) - next trading day "
+                self.note(f"{T.term('holiday')} today ({hname}) - next trading day "
                           f"{holidays.next_trading_day(today):%a %d %b}")
                 self.write_status(now)
                 break
@@ -357,13 +362,13 @@ class Bot:
                 self.write_status(now)
                 break
             if now >= at(C.MARKET_CLOSE, today) + dt.timedelta(minutes=5):
-                self.note(f"Market closed. Day P&L ₹{self.state.d['day_pnl']:.2f}, "
+                self.note(f"{T.name('square_off')}: market closed. Day P&L ₹{self.state.d['day_pnl']:.2f}, "
                           f"equity ₹{self.state.equity():.2f}")
                 self.write_status(now)
                 break
             if not self.ensure_live_broker():
                 if not waiting_login_logged:
-                    self.note("LIVE mode: waiting for today's Kite login - open http://127.0.0.1:5000", logging.WARNING)
+                    self.note(f"{T.term('live')} mode: waiting for today's Kite login ({T.name('login')}) - open http://127.0.0.1:5000", logging.WARNING)
                     waiting_login_logged = True
                 self.write_status(now)
                 time.sleep(15)

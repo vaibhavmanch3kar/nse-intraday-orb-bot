@@ -224,6 +224,8 @@ def vix_by_day(range_="6mo"):
 # ---------------------------------------------------------------- check
 def check():
     """Plain-language check after upgrading the Kite app."""
+    import theme as T
+    print(T.banner(f"{T.name('kite_data')} · Kite data check"))
     print("Checking Kite Connect market data ...")
     try:
         _client()
@@ -246,9 +248,9 @@ def check():
     except DataError as e:
         print(f"[x] {e}")
         return 1
-    print("[ok] Kite data works.")
+    print(f"[ok] Kite data works - {T.name('kite_data')} is ready to fly.")
     if (C.DATA_SOURCE or "").lower() == "kite":
-        print("[ok] The bot is set to use Kite data (DATA_SOURCE = kite). Nothing else to do.")
+        print(f"[ok] The bot is set to use {T.name('kite_data')} · Kite data (DATA_SOURCE = kite). Nothing else to do.")
     else:
         print("     To use it, run once in PowerShell, then restart the bot:")
         print('     [Environment]::SetEnvironmentVariable("DATA_SOURCE", "kite", "User")')

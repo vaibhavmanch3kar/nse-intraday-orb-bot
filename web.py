@@ -18,6 +18,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 import config as C
+import theme as T
 
 STATUS_FILE = os.path.join(C.DATA_DIR, "status.json")
 
@@ -63,34 +64,51 @@ def _fmt(v, nd=2):
     return html.escape(str(v))
 
 
-CSS = """
-:root{--bg:#0f172a;--card:#1e293b;--fg:#e2e8f0;--muted:#94a3b8;--up:#22c55e;--dn:#ef4444;--acc:#38bdf8;--warn:#f59e0b;--line:#334155}
-body{margin:0;background:var(--bg);color:var(--fg);font:14px system-ui,Segoe UI,sans-serif}
+SERIF = "Georgia,'Palatino Linotype','Times New Roman',serif"
+CSS = (":root{" + "".join(f"--{k.replace('_', '-')}:{v};" for k, v in T.COLORS.items()) + "}" + """
+body{margin:0;background:var(--bg);color:var(--fg);font:14px system-ui,Segoe UI,sans-serif;
+ background-image:radial-gradient(ellipse at top,#3d2047 0,var(--bg) 55%);background-attachment:fixed}
 main{max-width:1100px;margin:0 auto;padding:16px}
-.card{background:var(--card);border-radius:10px;padding:14px 16px;margin:12px 0;overflow-x:auto}
-h1{font-size:20px;margin:4px 0} h2{font-size:15px;margin:0 0 8px;color:var(--muted)}
+header.realm{text-align:center;padding:6px 0 12px;margin-bottom:8px;border-bottom:4px solid transparent;
+ border-image:repeating-linear-gradient(90deg,var(--acc) 0 14px,#b91c1c 14px 28px,var(--gold) 28px 42px) 1}
+header.realm .dev{color:var(--gold);font-size:14px}
+header.realm .app{font:600 26px SERIF;color:var(--gold);letter-spacing:1px}
+header.realm .line2{color:var(--muted);font-size:12px}
+.card{background:var(--card);border:1px solid var(--line);border-top:2px solid rgba(245,158,11,.5);border-radius:10px;
+ padding:14px 16px;margin:12px 0;overflow-x:auto}
+h1{font:600 22px SERIF;color:var(--gold);margin:8px 0 4px} h2{font:600 15px SERIF;margin:0 0 8px;color:var(--acc)}
 .kpis{display:flex;flex-wrap:wrap;gap:18px} .kpis div b{display:block;font-size:18px}
 table{border-collapse:collapse;width:100%} td,th{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+th{color:var(--gold);font-weight:600}
 .up{color:var(--up)} .dn{color:var(--dn)} .muted{color:var(--muted)} .warn{color:var(--warn)} .sig{color:var(--acc);font-weight:600}
-.btn,button{background:var(--acc);color:#0f172a;border:0;border-radius:6px;padding:8px 14px;font-weight:600;text-decoration:none;cursor:pointer;display:inline-block;margin:4px 6px 4px 0}
+.btn,button{background:linear-gradient(180deg,var(--gold),var(--acc));color:#2a1204;border:0;border-radius:6px;padding:8px 14px;
+ font-weight:600;text-decoration:none;cursor:pointer;display:inline-block;margin:4px 6px 4px 0}
 button.red{background:var(--dn);color:#fff} .tag{padding:2px 8px;border-radius:999px;background:var(--line);font-size:12px}
 ul{margin:0;padding-left:18px} .msg{color:var(--up)}
-nav{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 2px} nav a{color:var(--fg);text-decoration:none;padding:6px 12px;border-radius:6px;background:var(--card)}
-nav a.on{background:var(--acc);color:#0f172a;font-weight:600}
-.banner{background:#422006;color:#fde68a;border-radius:8px;padding:10px 14px;margin:10px 0}
-.tm{color:#c4b5fd;font-size:13px}
+nav{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 2px;justify-content:center}
+nav a{color:var(--fg);text-decoration:none;padding:6px 12px;border-radius:6px;background:var(--card);border:1px solid var(--line)}
+nav a small{color:var(--muted)} nav a.on{background:var(--acc);color:#2a1204;font-weight:600;border-color:var(--gold)}
+nav a.on small{color:#4a2508}
+.banner{background:var(--banner-bg);color:var(--banner-fg);border:1px solid #7c3a10;border-radius:8px;padding:10px 14px;margin:10px 0}
+.tm{color:#d8b4fe;font-size:13px}
 table.wrap td{white-space:normal}
 .days a{color:var(--acc);margin-right:10px;text-decoration:none} .days a.on{color:var(--fg);font-weight:700;text-decoration:underline}
-"""
+footer{text-align:center;color:var(--muted);font-size:11px;margin:20px 0 6px}
+""").replace("SERIF", SERIF)
 
 
 def page(title, active, body, refresh=None):
-    tabs = [("/", "Live"), ("/review", "Session review"), ("/scanner", "Swing scanner"), ("/trades", "Trades")]
-    nav = "".join(f"<a href='{u}' class='{'on' if u == active else ''}'>{t}</a>" for u, t in tabs)
+    nav = "".join(f"<a href='{u}' class='{'on' if u == active else ''}'>{icon} {T.name(key)} "
+                  f"<small>· {T.plain(key)}</small></a>" for u, key, icon in T.PAGES)
     meta = f'<meta http-equiv="refresh" content="{refresh}">' if refresh else ""
+    head = (f"<header class='realm'><div class='dev'>{T.DEVANAGARI}</div><div class='app'>{T.BOW} {T.APP}</div>"
+            f"<div class='line2'>{html.escape(T.TAGLINE)}</div></header>")
+    foot = (f"<footer>{T.APP} · {T.term('paper')} trading by default · "
+            f"software only, not investment advice</footer>")
     return (f'<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" '
-            f'content="width=device-width, initial-scale=1">{meta}<title>{html.escape(title)}</title>'
-            f'<style>{CSS}</style></head><body><main><nav>{nav}</nav>{body}</main></body></html>')
+            f'content="width=device-width, initial-scale=1">{meta}<title>{html.escape(title)} · {T.APP}</title>'
+            f'<link rel="icon" href="{T.FAVICON}"><style>{CSS}</style></head>'
+            f'<body><main>{head}<nav>{nav}</nav>{body}{foot}</main></body></html>')
 
 
 def read_status():
@@ -117,7 +135,7 @@ def data_source_kpi(s):
     using = ds.get("using")
     if not using:
         return ""
-    label = "Kite (real-time)" if using == "kite" else "Yahoo (free, may lag)"
+    label = f"{T.name('kite_data')} · Kite (real-time)" if using == "kite" else "Yahoo (free, may lag)"
     cls = "up" if using == "kite" else ("warn" if ds.get("wanted") == "kite" else "")
     tip = f" title='{html.escape(ds.get('reason') or '')}'" if ds.get("reason") else ""
     note = "<br><span class='muted' style='font-size:11px'>Kite unavailable, see tooltip</span>" if ds.get("reason") else ""
@@ -133,14 +151,14 @@ def market_calendar():
     if today.weekday() >= 5:
         state = "Weekend"
     elif name:
-        state = f"NSE holiday: {html.escape(name)}"
+        state = f"{T.term('holiday')}: {html.escape(name)}"
     else:
         state = "Trading day"
     nxt = holidays.next_trading_day(today)
     up = " · ".join(f"{d:%a %d %b} {html.escape(n)}" for d, n in holidays.upcoming(today, 3)) or "none listed"
     warn = ("" if holidays.year_listed(today.year) else
             f" <span class='warn'>nse_holidays.json has no {today.year} list - add it.</span>")
-    return (f"<div class='card'><h2>NSE calendar</h2>Today: <b>{state}</b> · next trading day "
+    return (f"<div class='card'><h2>{T.term('calendar')}</h2>Today: <b>{state}</b> · next trading day "
             f"<b>{nxt:%a %d %b}</b><br><span class='muted'>Upcoming holidays: {up}</span>{warn}</div>")
 
 
@@ -209,41 +227,46 @@ def render(msg=""):
     sig_rows = "".join(
         f"<tr><td>{_fmt(sym)}</td><td>{_fmt(r.get('bar'))}</td><td>{_fmt(r.get('or_low'))} – {_fmt(r.get('or_high'))}</td>"
         f"<td>{_fmt(r.get('close'))}</td><td>{_fmt(r.get('vwap'))}</td><td>{_fmt(r.get('vol_ratio'), 1)}</td>"
-        f"<td class='{'sig' if 'breakout' in (r.get('reason') or '') else ''}'>{_fmt(r.get('reason'))}</td></tr>"
+        f"<td class='{'sig' if 'breakout' in (r.get('reason') or '') else ''}'>{_fmt(T.decorate(r.get('reason')) or None)}</td></tr>"
         for sym, r in sorted(s.get("rows", {}).items())) or "<tr><td colspan=7 class='muted'>Waiting for market data</td></tr>"
 
     events = "".join(f"<li>{html.escape(e)}</li>" for e in s.get("events", [])) or "<li class='muted'>-</li>"
     login_btn = (f"<a class='btn' href='{html.escape(url)}'>Log in to Zerodha</a>" if url and not ok else "")
     when = (s.get("time") or "")
     banner = "" if running else (
-        f"<div class='banner'><b>Bot is not running</b> (markets closed, weekend, or stopped). "
+        f"<div class='banner'><b>Bot is not running</b> ({T.name('not_running')}: markets closed, weekend, or stopped). "
         f"Showing the last saved state{' from ' + html.escape(when[:16].replace('T', ' ')) if when else ''}. "
-        f"See <a href='/review' style='color:#fde68a'>Session review</a> for how the last trading day played out, "
-        f"or <a href='/trades' style='color:#fde68a'>Trades</a> for history.</div>")
+        f"See <a href='/review' style='color:#fde68a'>{T.term('review')}</a> for how the last trading day played out, "
+        f"or <a href='/trades' style='color:#fde68a'>{T.term('trades')}</a> for history.</div>")
     calendar = market_calendar()
-    controls = (f"""<div class="card"><h2>Controls</h2>
-<form method="post" action="/{'resume' if paused else 'pause'}" style="display:inline"><button>{'Resume new entries' if paused else 'Pause new entries'}</button></form>
+    controls = (f"""<div class="card"><h2>{T.term('controls')}</h2>
+<form method="post" action="/{'resume' if paused else 'pause'}" style="display:inline"><button>{'Resume new entries' if paused else T.name('pause') + ' · Pause new entries'}</button></form>
 <form method="post" action="/stop" style="display:inline" onsubmit="return confirm('Stop the bot? In live mode open positions keep their exchange stop-loss.')"><button class="red">Stop bot</button></form></div>"""
                 if running else "")
-    return page("ORB Bot", "/", f"""
-<h1>ORB Bot <span class="tag">{mode}</span> <span class="tag {'up' if running else 'warn'}">{'RUNNING' if running else 'NOT RUNNING'}</span> {'<span class="tag warn">PAUSED</span>' if paused else ''}</h1>
-<div class="muted">Updated {_fmt(when[11:19])} IST · auto-refreshes every 20 s</div>
+    cooldown = s.get("cooldown_until")
+    streak_note = (f"<br><span class='warn' style='font-size:11px'>{T.name('cooldown')} until {html.escape(str(cooldown))}</span>"
+                   if cooldown else f"<br><span class='muted' style='font-size:11px'>{T.name('cooldown')} after {C.LOSS_STREAK_LIMIT}</span>")
+    run_tag = T.term("running") if running else T.term("not_running")
+    return page(T.plain("live_page"), "/", f"""
+<h1>{T.BOW} {T.name('live_page')} <span class="tag">{html.escape(T.mode_label(mode))}</span> <span class="tag {'up' if running else 'warn'}">{run_tag}</span> {f'<span class="tag warn">{T.name("pause").upper()} · PAUSED</span>' if paused else ''}</h1>
+<div class="muted">{T.plain('live_page')} · updated {_fmt(when[11:19])} IST · auto-refreshes every 20 s</div>
 {banner}
 {calendar}
 {f'<p class="msg">{html.escape(msg)}</p>' if msg else ''}
-<div class="card"><h2>Zerodha login</h2>
+<div class="card"><h2>{T.term('login')}</h2>
 <div class="{'up' if ok else 'warn'}">{html.escape(login_msg)}</div>{login_btn}
-<div class="muted">Paper mode doesn't need a login. Live mode needs one every day (tokens expire ~06:00 IST).</div></div>
+<div class="muted">{T.term('paper')} mode doesn't need a login, except for {T.name('kite_data')} (Kite) price data.
+{T.term('live')} mode needs one every day (tokens expire ~06:00 IST).</div></div>
 <div class="card kpis">
 <div>Equity<b>₹{_fmt(s.get('equity'))}</b></div><div>Today P&amp;L<b class="{'up' if (s.get('day_pnl') or 0)>=0 else 'dn'}">₹{_fmt(s.get('day_pnl'))}</b></div>
 <div>Total P&amp;L<b>₹{_fmt(s.get('realized_pnl'))}</b></div><div>Charges paid<b>₹{_fmt(s.get('charges_paid'))}</b></div>
-<div>Trades today<b>{_fmt(s.get('trades_today'))}</b></div><div>Loss streak<b>{_fmt(s.get('loss_streak'))}</b></div>
+<div>Trades today<b>{_fmt(s.get('trades_today'))}</b></div><div>Loss streak<b>{_fmt(s.get('loss_streak'))}</b>{streak_note}</div>
 <div>Data delay<b class="{lag_cls}">{lag_txt}</b></div>{data_source_kpi(s)}</div>
-<div class="card"><h2>Open positions</h2><table class="wrap"><tr><th>Stock</th><th>Side · Qty</th><th>Entry → Price</th><th>Open P&amp;L</th>
-<th>Stop</th><th>Trail</th><th>Time stop</th><th>In trade</th></tr>{pos_rows}</table></div>
-<div class="card"><h2>Watchlist (last closed 15-min bar)</h2><table><tr><th>Stock</th><th>Bar</th><th>Opening range</th><th>Close</th><th>VWAP</th><th>Vol ×</th><th>Status</th></tr>{sig_rows}</table></div>
+<div class="card"><h2>{T.term('positions')}</h2><table class="wrap"><tr><th>Stock</th><th>Side · Qty</th><th>Entry → Price</th><th>Open P&amp;L</th>
+<th>{T.term('stop')}</th><th>{T.term('trail')}</th><th>{T.term('time_stop')}</th><th>In trade</th></tr>{pos_rows}</table></div>
+<div class="card"><h2>{T.term('watchlist')} (last closed 15-min bar)</h2><table><tr><th>Stock</th><th>Bar</th><th>Opening range</th><th>Close</th><th>VWAP</th><th>Vol ×</th><th>Status</th></tr>{sig_rows}</table></div>
 {controls}
-<div class="card"><h2>Recent events</h2><ul>{events}</ul></div>""", refresh=20)
+<div class="card"><h2>{T.term('events')}</h2><ul>{events}</ul></div>""", refresh=20)
 
 
 def sparkline(closes, or_hi, or_lo, w=160, h=36):
@@ -261,20 +284,21 @@ def sparkline(closes, or_hi, or_lo, w=160, h=36):
     band = ""
     if or_hi and or_lo:
         band = (f"<rect x='0' y='{y(or_hi):.1f}' width='{w}' height='{max(1, y(or_lo) - y(or_hi)):.1f}' "
-                f"fill='#38bdf8' opacity='0.15'/>")
-    col = "#22c55e" if closes[-1] >= closes[0] else "#ef4444"
+                f"fill='{T.COLORS['acc']}' opacity='0.18'/>")
+    col = T.COLORS["up"] if closes[-1] >= closes[0] else T.COLORS["dn"]
     return (f"<svg width='{w}' height='{h}' viewBox='0 0 {w} {h}' role='img' aria-label='intraday closes'>"
             f"{band}<polyline points='{pts}' fill='none' stroke='{col}' stroke-width='1.5'/></svg>")
 
 
 def render_review(day=None, refresh=False):
     import review
+    h1 = f"<h1>{T.LAMP} {T.term('review')}</h1>"
     try:
         r = review.build(day, refresh=refresh) if (day or refresh) else review.latest()
     except Exception as e:
-        return page("Session review", "/review", f"<h1>Session review</h1><div class='banner'>Could not build the review: {html.escape(str(e))}</div>")
+        return page("Session review", "/review", f"{h1}<div class='banner'>Could not build the review: {html.escape(str(e))}</div>")
     if not r.get("day"):
-        return page("Session review", "/review", "<h1>Session review</h1><div class='banner'>No data from Yahoo right now - try Refresh later.</div>")
+        return page("Session review", "/review", f"{h1}<div class='banner'>No price data right now - try Refresh later.</div>")
     days = "".join(f"<a class='{'on' if d == r['day'] else ''}' href='/review?day={d}'>{d[5:]}</a>"
                    for d in r.get("days", [])[-10:])
     rows = []
@@ -284,10 +308,10 @@ def render_review(day=None, refresh=False):
             res = x["r"]
             outcome = (f"<span class='{'up' if x['direction'] == 'LONG' else 'dn'}'>{x['direction']}</span> "
                        f"{x['signal_time']} → entry {_fmt(x['entry'])}, stop {_fmt(x['stop'])}, target {_fmt(x['target'])}"
-                       f"<br><span class='muted'>exit {html.escape(str(x['exit_reason']))} {x['exit_time']} @ {_fmt(x['exit'])}</span>")
+                       f"<br><span class='muted'>exit {html.escape(T.reason_label(str(x['exit_reason'])))} {x['exit_time']} @ {_fmt(x['exit'])}</span>")
             tm = x.get("time_machine") or {}
             if tm.get("text"):
-                outcome += (f"<br><span class='tm'>⏱ Time Machine ({tm.get('n', 0):,} replays, seed {tm.get('seed', '-')}): "
+                outcome += (f"<br><span class='tm'>{T.SEER} {T.term('time_machine')} ({tm.get('n', 0):,} replays, seed {tm.get('seed', '-')}): "
                             f"{html.escape(tm['text'])}</span>")
             if tm.get("verdict"):
                 v = tm["verdict"]
@@ -307,23 +331,23 @@ def render_review(day=None, refresh=False):
     settings = " · ".join(f"{k}={v}" for k, v in st.items())
     total = r.get("total_r", 0.0)
     body = f"""
-<h1>Session review <span class="tag">{r['day']}</span></h1>
-<div class="muted">Replays the day through the strategy rules, one stock at a time (portfolio limits not applied).
-Built {html.escape(str(r.get('built', ''))[:16].replace('T', ' '))} from Yahoo 15-min data.</div>
+<h1>{T.LAMP} {T.term('review')} <span class="tag">{r['day']}</span></h1>
+<div class="muted">At Chitrakoot we look back calmly: the day replayed through the strategy rules, one stock at a time
+(portfolio limits not applied). Built {html.escape(str(r.get('built', ''))[:16].replace('T', ' '))} from 15-min data.</div>
 <div class="card days">Day: {days} <form method="get" action="/review" style="display:inline">
 <input type="hidden" name="day" value="{r['day']}"><input type="hidden" name="refresh" value="1"><button>Refresh</button></form></div>
 <div class="card kpis"><div>Signals<b>{r.get('signals', 0)}</b></div><div>Winners<b>{r.get('wins', 0)}</b></div>
 <div>Total<b class="{'up' if total > 0 else 'dn'}">{total:+.2f}R</b></div>
 <div>At 0.5% risk on ₹1L<b class="{'up' if total > 0 else 'dn'}">≈ ₹{total * C.PAPER_START_INR * C.RISK_PER_TRADE_PCT / 100:+,.0f}</b></div></div>
-<div class="card"><h2>Stocks — chart shows 15-min closes, blue band = opening range</h2><table>
+<div class="card"><h2>Stocks — chart shows 15-min closes, saffron band = opening range</h2><table>
 <tr><th>Stock</th><th>Day</th><th>Opening range</th><th>Day %</th><th>Signal → outcome</th><th>Result</th></tr>{''.join(rows)}</table></div>
 <div class="card muted">Rules: {html.escape(settings)}. R = profit or loss as a multiple of the risk
 (entry to stop), after 0.05% slippage and Zerodha charges.<br>
-⏱ Time Machine: the trade replayed 10,000 times using this stock's own 5-minute moves from the same
+{T.SEER} {T.term('time_machine')}: the trade replayed 10,000 times using this stock's own 5-minute moves from the same
 time of day (±10 min) over the last 60 days, shuffled. It assumes no edge, so it's a baseline: a good setup
 should beat these odds. The replays also inherit the stock's recent intraday drift.
 The verdict compares target-first vs stop-first at 1R with break-even (50%): within 5 points is a coin flip.
-📜 History is the real record: the bot's same rules (same direction) run on each earlier session.</div>"""
+{T.SCROLL} History is the real record: the bot's same rules (same direction) run on each earlier session.</div>"""
     return page("Session review", "/review", body)
 
 
@@ -332,7 +356,7 @@ def render_scanner(refresh=False):
     try:
         r = scanner.scan() if refresh else scanner.latest()
     except Exception as e:
-        return page("Swing scanner", "/scanner", f"<h1>Swing scanner</h1><div class='banner'>Scan failed: {html.escape(str(e))}</div>")
+        return page("Swing scanner", "/scanner", f"<h1>{T.FLAG} {T.term('scanner')}</h1><div class='banner'>Scan failed: {html.escape(str(e))}</div>")
     counts = "".join(f"<div>{html.escape(k)}<b>{v}</b></div>" for k, v in r.get("counts", {}).items())
     rows = []
     hits = [(s, x) for s, x in r.get("rows", {}).items() if x["setups"]]
@@ -350,8 +374,8 @@ def render_scanner(refresh=False):
     table = "".join(rows) or "<tr><td colspan=7 class='muted'>No setups on the last session.</td></tr>"
     risk_rs = C.PAPER_START_INR * C.RISK_PER_TRADE_PCT / 100
     body = f"""
-<h1>Swing scanner <span class="tag">{html.escape(str(r.get('day')))}</span></h1>
-<div class="banner">Research only - the bot does not trade these. They are multi-day (CNC) setups on daily candles;
+<h1>{T.FLAG} {T.term('scanner')} <span class="tag">{html.escape(str(r.get('day')))}</span></h1>
+<div class="banner">Research only - Hanuman scouts, the bot does not trade these. They are multi-day (CNC) setups on daily candles;
 check the chart yourself before acting. Built {html.escape(str(r.get('built', ''))[:16].replace('T', ' '))}.</div>
 <div class="card kpis">{counts}</div>
 <form method="get" action="/scanner"><input type="hidden" name="refresh" value="1"><button>Re-scan</button></form>
@@ -393,6 +417,8 @@ def breakdown_table(rows, key, title):
     groups = {}
     for r in rows:
         k = (r.get(key) or "-").split(" (")[0]
+        if key == "reason":
+            k = T.reason_label(k)
         groups.setdefault(k, []).append(r)
     out = []
     for k, g in sorted(groups.items(), key=lambda kv: sum(_num(r.get("net")) for r in kv[1])):
@@ -442,9 +468,9 @@ def trade_section(rows, src, label, start_cash, show_log=True):
             f"<tr><td>{html.escape(r.get('closed', '')[:16])}</td><td>{html.escape(r.get('symbol', ''))}</td>"
             f"<td class='{'up' if r.get('direction') == 'LONG' else 'dn'}'>{html.escape(r.get('direction', ''))}</td>"
             f"<td>{html.escape(r.get('qty', ''))}</td><td>{html.escape(r.get('entry', ''))}</td><td>{html.escape(r.get('exit', ''))}</td>"
-            f"<td>{html.escape(r.get('reason', ''))}</td><td>{html.escape(r.get('charges', ''))}</td>"
+            f"<td>{html.escape(T.reason_label(r.get('reason', '')))}</td><td>{html.escape(r.get('charges', ''))}</td>"
             f"<td class='{'up' if _num(r.get('net')) > 0 else 'dn'}'>{_num(r.get('net')):,.2f}</td><td>{_num(r.get('r')):+.2f}</td>"
-            f"<td><a class='sig' href='/journey?src={src}&amp;i={i}'>chart</a></td></tr>"
+            f"<td><a class='sig' href='/journey?src={src}&amp;i={i}' title='{T.name('journey')}: the trade on its chart'>{T.PATH} chart</a></td></tr>"
             for i, r in idx_rows)
         table = (f"<table><tr><th>Closed</th><th>Stock</th><th>Side</th><th>Qty</th><th>Entry</th><th>Exit</th>"
                  f"<th>Reason</th><th>Charges ₹</th><th>Net ₹</th><th>R</th><th></th></tr>{body}</table>")
@@ -455,20 +481,21 @@ def trade_section(rows, src, label, start_cash, show_log=True):
 
 
 def render_trades():
-    parts = ["<h1>Trades</h1>"]
+    parts = [f"<h1>{T.SCROLL} {T.term('trades')}</h1>"
+             f"<div class='muted'>The royal treasury's ledger: every closed trade, after Zerodha charges.</div>"]
     for mode in ("paper", "live"):
         rows = trade_rows(mode)
         if not rows and mode == "live":
             continue
         start = C.PAPER_START_INR
-        parts.append(trade_section(rows, mode, mode.title(), start))
+        parts.append(trade_section(rows, mode, f"{T.name(mode)} · {mode.title()}", start))
         parts.append(edge_card(rows, f"{mode.title()} trading"))
         if not rows:
             parts.append("<div class='card muted'>No trades yet - the bot records them here once it trades on a market day.</div>")
     bt = trade_rows("backtest")
     if bt:
         first, last = bt[0].get("opened", "")[:10], max(r.get("closed", "")[:10] for r in bt)
-        parts.append(f"<h1 style='margin-top:26px'>Last backtest <span class='tag'>{html.escape(first)} → {html.escape(last)}</span></h1>"
+        parts.append(f"<h1 style='margin-top:26px'>{T.FIRE} {T.name('backtest')} · Last backtest <span class='tag'>{html.escape(first)} → {html.escape(last)}</span></h1>"
                      f"<div class='muted'>Run <code>.venv\\Scripts\\python.exe backtest.py</code> to update. "
                      f"Full list: data\\backtest_trades.csv</div>")
         parts.append(trade_section(bt, "backtest", "Backtest", C.PAPER_START_INR))
@@ -501,8 +528,9 @@ def render_journey(src, i):
     import charts
     import strategy
     rows = trade_rows(src)
+    h1 = f"<h1>{T.PATH} {T.term('journey')}</h1>"
     if i is None or not 0 <= i < len(rows):
-        return page("Trade chart", "/trades", "<h1>Trade chart</h1><div class='banner'>Trade not found.</div>")
+        return page("Trade chart", "/trades", f"{h1}<div class='banner'>Trade not found.</div>")
     r = rows[i]
     sym = r.get("symbol", "")
 
@@ -513,7 +541,7 @@ def render_journey(src, i):
             return None
     opened, closed = ts(r.get("opened")), ts(r.get("closed"))
     if not opened:
-        return page("Trade chart", "/trades", "<h1>Trade chart</h1><div class='banner'>This trade has no entry time.</div>")
+        return page("Trade chart", "/trades", f"{h1}<div class='banner'>This trade has no entry time.</div>")
     try:
         upto, today = day_bars(sym, opened.date())
     except Exception as e:  # data errors
@@ -538,18 +566,18 @@ def render_journey(src, i):
     net, rr = _num(r.get("net")), _num(r.get("r"))
     held = f"{int((closed - opened).total_seconds() // 60)} min" if closed else "-"
     body = f"""
-<h1>{html.escape(sym)} <span class="tag {'up' if r.get('direction') == 'LONG' else 'dn'}">{html.escape(r.get('direction', ''))}</span>
+<h1>{T.PATH} {T.name('journey')}: {html.escape(sym)} <span class="tag {'up' if r.get('direction') == 'LONG' else 'dn'}">{html.escape(r.get('direction', ''))}</span>
 <span class="tag">{opened:%a %d %b %Y}</span> <span class="tag">{html.escape(src)}</span></h1>
-<div class="muted"><a class="sig" href="/trades">← back to Trades</a></div>
+<div class="muted"><a class="sig" href="/trades">← back to {T.term('trades')}</a></div>
 <div class="card kpis"><div>Result<b class="{'up' if net > 0 else 'dn'}">₹{net:,.2f} ({rr:+.2f}R)</b></div>
 <div>Entry<b>{_fmt(_num(r.get('entry')))} at {opened:%H:%M}</b></div>
 <div>Exit<b>{_fmt(_num(r.get('exit')))} at {closed.strftime('%H:%M') if closed else '-'}</b></div>
-<div>Exit reason<b>{html.escape(r.get('reason', '-'))}</b></div><div>Held<b>{held}</b></div>
+<div>Exit reason<b>{html.escape(T.reason_label(r.get('reason', '-')))}</b></div><div>Held<b>{held}</b></div>
 <div>Qty<b>{html.escape(r.get('qty', '-'))}</b></div><div>Charges<b>₹{_num(r.get('charges')):,.2f}</b></div></div>
-<div class="card"><h2>15-minute candles · blue band = opening range · red dashed = stop · grey dotted = entry ·
-yellow = {f'EMA{C.TRAIL_EMA} trail' if C.TRAIL_EMA > 0 else 'no trail'} · ▲▼ = entry and exit</h2>{chart}</div>
-<div class="card muted">Hover a candle for its prices. The chart uses today's Yahoo data, so it can differ slightly
-from what the bot saw live if Yahoo has since corrected a bar.</div>"""
+<div class="card"><h2>15-minute candles · saffron band = opening range · red dashed = {T.term('stop')} · grey dotted = entry ·
+violet = {f'EMA{C.TRAIL_EMA} trail' if C.TRAIL_EMA > 0 else 'no trail'} · ▲▼ = entry and exit</h2>{chart}</div>
+<div class="card muted">Hover a candle for its prices. The chart uses today's price data, so it can differ slightly
+from what the bot saw live if a bar has since been corrected.</div>"""
     return page(f"{sym} trade", "/trades", body)
 
 
@@ -577,7 +605,7 @@ def edge_card(rows, label, compact=False):
                  f"<div>95% range<b>{rng}</b></div></div>")
     head = "" if compact else ("<div class='muted'>Rule from Trading With Sidhant: after 30 trades, check that the average "
                                "result per trade is positive. If it isn't, stop trading the setup.</div>")
-    return (f"<div class='card'><h2>30-trade edge check: {html.escape(label)}</h2>{head}"
+    return (f"<div class='card'><h2>{T.FIRE} {T.name('edge')} · 30-trade edge check: {html.escape(label)}</h2>{head}"
             f"<div style='margin-top:8px'><b class='{cls}'>{html.escape(title)}</b> "
             f"<span>{html.escape(text)}</span></div>{bar}{stats}</div>")
 
@@ -636,7 +664,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             try:
                 user = exchange_token(q["request_token"][0])
-                self._redirect(f"/?msg=Logged+in+as+{user}.+Token+saved+for+today.")
+                self._redirect(f"/?msg=Setu+crossed:+logged+in+as+{user}.+Token+saved+for+today.")
             except Exception as e:
                 self._send(render(f"Token exchange failed: {e}"), 500)
         else:
@@ -665,7 +693,8 @@ def serve():
 
 
 if __name__ == "__main__":
-    print(f"Dashboard: http://{C.WEB_HOST}:{C.WEB_PORT}   (Ctrl+C to stop)")
+    print(T.banner(f"{T.name('live_page')} dashboard only (no trading)"))
+    print(f"  Dashboard: http://{C.WEB_HOST}:{C.WEB_PORT}   (Ctrl+C to stop)")
     if "--no-browser" not in sys.argv:
         webbrowser.open(f"http://{C.WEB_HOST}:{C.WEB_PORT}")
     try:
