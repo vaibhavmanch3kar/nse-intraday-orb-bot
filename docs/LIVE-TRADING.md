@@ -23,7 +23,8 @@ trades pretend money.
    - After creating it, note the **API key** and **API secret**. Never share them or put them in a file.
 3. **A static IP.** SEBI rules require API orders to come from an IP registered on your Kite app.
    Home internet usually has a changing IP, so this project sends Kite traffic through a
-   **static-IP proxy** (for example TrueIP). Get one, and register its IP in your Kite app's settings.
+   **static-IP proxy** (for example TrueIP). Get one, and add its IP on the developer site under
+   **Profile → IP Whitelist** (account-wide, covers all your apps).
 
 ## One-time setup
 

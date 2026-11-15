@@ -77,17 +77,18 @@ account. This is separate from your normal Kite login. If you don't have one, cl
 The new app has a **new API key and API secret** (open the app under **My apps** to see them).
 **Never share them or paste them into a file, chat, issue or screenshot.**
 
-Then, in the app's settings, **register your static IP address** (SEBI's rule for API orders; see
-[LIVE-TRADING.md](LIVE-TRADING.md)).
-
 In a normal PowerShell window in the bot's folder, run:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\setup_kite_proxy.ps1 -ResetSecrets
+powershell -ExecutionPolicy Bypass -File .\set_kite_keys.ps1
 ```
 
-Paste the new API key and secret when asked (right-click pastes; the input stays hidden). It also asks for
-your proxy details again.
+Paste the new API key and secret when asked (right-click pastes; the input stays hidden). It changes only
+the Kite key and secret and keeps your proxy settings. (First-time setup uses `setup_kite_proxy.ps1` instead.)
+
+**Static IP:** SEBI requires API orders to come from a registered IP. On the developer site this is set
+**once for the whole account** under **Profile → IP Whitelist** (up to 2 IPs), so it covers every app,
+including a new Connect app. If your proxy IP is already listed there, there's nothing to do.
 
 ### Step 5: Check that Kite data works
 
@@ -107,19 +108,14 @@ Billing and My apps.
 
 ### Step 6: Switch the bot to Kite data
 
-Open `config.py` in Notepad and change
+In PowerShell, save the setting for your Windows user (it stays after restarts):
 
-```python
-DATA_SOURCE = _env("DATA_SOURCE", "yahoo")
+```powershell
+[Environment]::SetEnvironmentVariable("DATA_SOURCE", "kite", "User")
 ```
 
-to
-
-```python
-DATA_SOURCE = _env("DATA_SOURCE", "kite")
-```
-
-Save it and restart the bot. The **Live** page now shows **Price data: Kite (real-time)**.
+Restart the bot. The **Live** page now shows **Price data: Kite (real-time)**. To go back to Yahoo, run the
+same line with `"yahoo"`. (You can also change the default in `config.py` instead.)
 
 ---
 

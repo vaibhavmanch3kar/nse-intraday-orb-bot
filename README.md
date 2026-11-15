@@ -118,10 +118,10 @@ Free Yahoo data can lag a few minutes and only goes back ~60 days. With Zerodha'
 [docs/KITE-CONNECT-PLAN.md](docs/KITE-CONNECT-PLAN.md)**. Short version:
 
 1. On https://developers.kite.trade, add **500 credits** under **Billing** and create a **Connect** app under **My apps**,
-   then save its API key with `setup_kite_proxy.ps1 -ResetSecrets` (see the guide).
+   then save its API key with `set_kite_keys.ps1` (see the guide).
 2. Double-click **`3-DASHBOARD.bat`** and click **Log in to Zerodha** (Kite data needs a login every day).
 3. Double-click **`6-CHECK-KITE-DATA.bat`**. It should say *Kite data works* and how many days of history you get.
-4. Open `config.py` in Notepad, change `DATA_SOURCE = _env("DATA_SOURCE", "yahoo")` to `"kite"`, save.
+4. In PowerShell run `[Environment]::SetEnvironmentVariable("DATA_SOURCE", "kite", "User")`, then restart the bot.
 
 The Live page shows **Price data: Kite (real-time)**. If Kite can't be used that moment (you didn't log in
 today, the plan lapsed, network trouble), the bot automatically uses Yahoo and the page says why.

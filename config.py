@@ -8,24 +8,28 @@ e.g.  $env:RISK_PER_TRADE_PCT = "0.25"
 import os
 import sys
 
-# Variables that setup_kite_proxy.ps1 stores in the Windows *user* environment.
-_USER_VARS = ("TRUEIP_HOST", "TRUEIP_PORT", "TRUEIP_USER", "TRUEIP_PASS",
-              "EXPECTED_EGRESS_IP", "KITE_API_KEY", "KITE_API_SECRET")
+# Settings the setup scripts store in the Windows *user* environment.
+# Secrets: the saved value always wins, so a terminal opened before a key change can't use an old key.
+_SECRET_VARS = ("TRUEIP_HOST", "TRUEIP_PORT", "TRUEIP_USER", "TRUEIP_PASS",
+                "EXPECTED_EGRESS_IP", "KITE_API_KEY", "KITE_API_SECRET")
+# Preferences: only filled in when not set for this window, so `$env:DATA_SOURCE = ...` still overrides.
+_PREF_VARS = ("DATA_SOURCE",)
 
 
 def load_user_env():
-    """Terminals opened before setup don't see new user variables; read them from the registry."""
+    """Read the saved user settings from the registry (terminals don't see changes made after they opened)."""
     if sys.platform != "win32":
         return
     try:
         import winreg
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as k:
-            for name in _USER_VARS:
-                if not os.environ.get(name):
-                    try:
-                        os.environ[name] = winreg.QueryValueEx(k, name)[0]
-                    except FileNotFoundError:
-                        pass
+            for name in _SECRET_VARS + _PREF_VARS:
+                if name in _PREF_VARS and os.environ.get(name):
+                    continue
+                try:
+                    os.environ[name] = winreg.QueryValueEx(k, name)[0]
+                except FileNotFoundError:
+                    pass
     except OSError:
         pass
 
