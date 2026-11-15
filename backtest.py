@@ -76,6 +76,7 @@ def simulate(data, start_cash, verbose=True, index_data=None, vix=None):
         days_sorted = sorted({t.date() for t in times})
         sim_from = days_sorted[min(len(days_sorted) - 1, C.VOLUME_LOOKBACK_DAYS)]
     equity_curve = []
+    last_close = {}  # symbol -> latest bar close, to value open positions at market (not at entry)
 
     for t in times:
         day = t.date()
@@ -108,6 +109,7 @@ def simulate(data, start_cash, verbose=True, index_data=None, vix=None):
             if i is None:
                 continue
             b = bars[i]
+            last_close[s] = b["c"]
             # 2) exits on this bar
             if s in st.positions:
                 pos = st.positions[s]
@@ -128,7 +130,8 @@ def simulate(data, start_cash, verbose=True, index_data=None, vix=None):
                 if ev["signal"]:
                     pending[s] = {"direction": ev["signal"], "stop": ev["stop"], "day": day,
                                   "rank": ev["vol_ratio"] or 0.0}
-        equity_curve.append((t, st.equity()))
+        # mark open positions to this bar's close, so drawdowns inside open trades are counted
+        equity_curve.append((t, st.equity(last_close)))
 
     return report(trades, st, start_cash, equity_curve, data, sim_from, verbose)
 
