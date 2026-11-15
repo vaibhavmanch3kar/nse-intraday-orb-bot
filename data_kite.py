@@ -246,7 +246,12 @@ def check():
     except DataError as e:
         print(f"[x] {e}")
         return 1
-    print("[ok] Kite data works. To use it, set DATA_SOURCE = \"kite\" in config.py (or $env:DATA_SOURCE='kite').")
+    print("[ok] Kite data works.")
+    if (C.DATA_SOURCE or "").lower() == "kite":
+        print("[ok] The bot is set to use Kite data (DATA_SOURCE = kite). Nothing else to do.")
+    else:
+        print("     To use it, run once in PowerShell, then restart the bot:")
+        print('     [Environment]::SetEnvironmentVariable("DATA_SOURCE", "kite", "User")')
     return 0
 
 

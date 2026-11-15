@@ -49,6 +49,8 @@ def isolated(tmp_path, monkeypatch):
                  "COOLDOWN_DAYS": 2, "ORDER_FILL_TIMEOUT_SEC": 2, "EXIT_RETRIES": 3,
                  # rule tests switch these on explicitly; core tests use the original rules
                  "INDEX_FILTER": False, "TRAIL_EMA": 0, "TIME_STOP_BARS": 0, "TIME_STOP_MIN_R": 0.5,
-                 "VIX_SIZING": False}.items():
+                 "VIX_SIZING": False,
+                 # tests fake data_yahoo; never reach real Kite even if the user saved DATA_SOURCE=kite
+                 "DATA_SOURCE": "yahoo"}.items():
         monkeypatch.setattr(C, k, v)
     yield tmp_path

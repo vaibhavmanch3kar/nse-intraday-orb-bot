@@ -6,6 +6,13 @@ Every version is on the [Releases page](https://github.com/vaibhavmanch3kar/nse-
 with a ZIP you can download. To go back to an older version, download that version's ZIP.
 Your settings (Windows user environment variables) and your `data` folder are not part of the ZIP, so keep them.
 
+## v1.1.1 (15 Nov 2026): Kite check fixes
+
+- `6-CHECK-KITE-DATA.bat` now says whether the bot already uses Kite data, and otherwise shows the one
+  PowerShell line that switches it on. It no longer tells you to edit `config.py`.
+- Self-tests always use their own fake prices. With `DATA_SOURCE=kite` saved, 8 tests used to reach real
+  Kite data and fail. 91 tests pass.
+
 ## v1.1.0 (15 Nov 2026): switching to a new Kite app
 
 - **New `set_kite_keys.ps1`:** changes only the Kite API key and secret, for example after creating a paid
