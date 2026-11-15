@@ -126,8 +126,34 @@ always shown next to the themed name (for example **Lakshman Rekha · stop**), a
 | **Utsav** | market holiday | festival |
 | **Aadesh** | controls | commands |
 | **Jagrat / Nidra** | running / not running | awake / asleep |
+| **Guru Vashishtha** | learning advisor | Ayodhya's royal advisor: he counsels, the king decides |
 
 All names live in one file, [`theme.py`](theme.py). Change them there to rename anything.
+
+---
+
+## Learning advisor: Guru Vashishtha (weekly report)
+
+The advisor reports which rules helped and which hurt. **It never changes a setting or the bot**: it only
+writes files to `data\advisor\`. Run these in PowerShell inside the project folder:
+
+```powershell
+.venv\Scripts\python.exe archive.py --status      # what the candle archive holds
+.venv\Scripts\python.exe archive.py               # save every finished day the data source still has
+.venv\Scripts\python.exe advisor.py report        # the weekly report (about 10 minutes for a year)
+.venv\Scripts\python.exe advisor.py report --no-rules --days 120   # quicker: no rule check, last 120 days
+```
+
+- **Every trade records its conditions at entry:** signal time, range width, breakout volume, distance
+  from VWAP, index change and gap. They're the last six columns of the trade files.
+- **Candle archive:** after each close the bot saves the day's 15-minute candles to `data\candles\`, so
+  history keeps growing. With the Kite plan, the first `archive.py` run saves about a year.
+- **The report:**
+  - Backtests your current settings on the archive.
+  - Breaks the trades down by entry time, direction, range width, volume, weekday, stock and exit reason,
+    with a 95% range for each.
+  - Replays the same data with one rule switched off at a time.
+  - Shows paper trades separately.
 
 ---
 

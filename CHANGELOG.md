@@ -6,7 +6,11 @@ Every version is on the [Releases page](https://github.com/vaibhavmanch3kar/nse-
 with a ZIP you can download. To go back to an older version, download that version's ZIP.
 Your settings (Windows user environment variables) and your `data` folder are not part of the ZIP, so keep them.
 
-## Unreleased: learning advisor, Phases 1-3
+## v1.3.0 (16 Nov 2026): learning advisor, Phases 1-3 (Guru Vashishtha)
+
+The advisor only reports. It never changes a setting, and it can't trade. Later phases (proposals tested
+on unseen data, which you approve) are not part of this version. See the README section
+"Learning advisor".
 
 - **Phase 1:** every trade now saves the conditions at its signal bar: signal time, opening range width,
   volume ratio, distance from VWAP, index change and opening gap. These are six new columns at the end of
