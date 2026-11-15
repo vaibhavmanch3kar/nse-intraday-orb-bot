@@ -83,7 +83,7 @@ To undo it, double-click `5-UNSCHEDULE.bat`.
 | **Live** | Is the bot running? Paper equity, today's P&L, open positions, every stock's opening range and why it is or isn't a trade, recent events, NSE holiday calendar, Pause/Stop buttons |
 | **Session review** | Pick any recent trading day. For each stock: a mini chart, whether the rules fired, and how the trade would have ended. Each trade also shows the **Time Machine**: the odds from 10,000 replays of that stock's own moves, a plain verdict ("coin flip", "leans toward the stop"…) and the rule's real track record over 60 days |
 | **Swing scanner** | Nifty 50 stocks with a multi-day setup on the last daily candle (20-day breakout, bull flag, 20-day average reclaim, oversold, oversold bounce), with a suggested stop, target and quantity. **Research only: the bot doesn't trade these** |
-| **Trades** | Every paper trade (entry, exit, charges, profit or loss), win rate, plus the last backtest result |
+| **Trades** | Every paper trade (entry, exit, charges, profit or loss), win rate, the last backtest result, and the **30-trade edge check**: after 30 trades it tells you whether the average result per trade is positive, and to stop if it isn't |
 
 | Swing scanner | Trades |
 |---|---|
@@ -129,7 +129,7 @@ Each December, add next year's NSE holidays to `nse_holidays.json` (the list is 
 - **[How the strategy works, and the test results](docs/STRATEGY.md)**: rules, risk limits, backtest, Time Machine, files
 - **[Real-money trading with Zerodha (advanced)](docs/LIVE-TRADING.md)**: Kite Connect app, static IP, daily login, safety switches
 
-For developers: `.\.venv\Scripts\python.exe -m pytest -q` runs 65 offline tests;
+For developers: `.\.venv\Scripts\python.exe -m pytest -q` runs 69 offline tests;
 `.\.venv\Scripts\python.exe backtest.py` runs the 60-day backtest.
 
 ![Backtest output](docs/screenshots/05-backtest.png)

@@ -338,6 +338,7 @@ def render_trades():
             for r in reversed(rows[-200:])) or "<tr><td colspan=10 class='muted'>No trades yet - the bot records them here once it trades on a market day.</td></tr>"
         parts.append(f"""<div class="card kpis"><div>{mode.title()} trades<b>{len(rows)}</b></div>
 <div>Win rate<b>{(wins / len(rows) * 100 if rows else 0):.0f}%</b></div><div>Net P&amp;L<b class="{'up' if net >= 0 else 'dn'}">₹{net:,.2f}</b></div></div>
+{edge_card(rows, f"{mode.title()} trading")}
 <div class="card"><h2>{mode.title()} trade log (newest first)</h2><table><tr><th>Closed</th><th>Stock</th><th>Side</th><th>Qty</th>
 <th>Entry</th><th>Exit</th><th>Reason</th><th>Charges ₹</th><th>Net ₹</th><th>R</th></tr>{body}</table></div>""")
     bt = _read_csv(os.path.join(C.DATA_DIR, "backtest_trades.csv"))
@@ -348,8 +349,38 @@ def render_trades():
         parts.append(f"""<div class="card"><h2>Last backtest ({html.escape(first)} → {html.escape(last)})</h2>
 <div class="kpis"><div>Trades<b>{len(bt)}</b></div><div>Win rate<b>{wins / len(bt) * 100:.0f}%</b></div>
 <div>Net P&amp;L<b class="{'up' if net >= 0 else 'dn'}">₹{net:,.0f}</b></div></div>
-<div class="muted">Run <code>.venv\\Scripts\\python.exe backtest.py</code> to update. Full list: data\\backtest_trades.csv</div></div>""")
+<div class="muted">Run <code>.venv\\Scripts\\python.exe backtest.py</code> to update. Full list: data\\backtest_trades.csv</div></div>
+{edge_card(bt, "Backtest", compact=True)}""")
     return page("Trades", "/trades", "".join(parts))
+
+
+def edge_card(rows, label, compact=False):
+    """The 30-trade edge check: progress bar until 30 trades, then a verdict on expectancy."""
+    import edge
+    c = edge.edge_check(rows)
+    title, text = edge.message(c)
+    cls = {"positive": "up", "unproven": "warn", "too_early": "muted"}.get(c["verdict"], "dn")
+    n, need = c["n"], c["min_trades"]
+    bar = ""
+    if c["verdict"] == "too_early":
+        pct = min(100, n / need * 100)
+        bar = (f"<div style='background:var(--line);border-radius:6px;height:10px;margin:8px 0;max-width:420px'>"
+               f"<div style='background:var(--acc);width:{pct:.0f}%;height:10px;border-radius:6px'></div></div>"
+               f"<div class='muted'>{n} of {need} trades logged</div>")
+    stats = ""
+    if n:
+        pf = c["profit_factor"]
+        rng = "-" if n < 2 else f"{c['r_low']:+.2f} to {c['r_high']:+.2f}R"
+        stats = (f"<div class='kpis' style='margin-top:10px'><div>Expectancy<b class='{'up' if c['avg_r'] > 0 else 'dn'}'>"
+                 f"{c['avg_r']:+.2f}R</b></div><div>Per trade<b>₹{c['avg_net']:,.0f}</b></div>"
+                 f"<div>Avg win / loss<b>₹{c['avg_win']:,.0f} / ₹{c['avg_loss']:,.0f}</b></div>"
+                 f"<div>Profit factor<b>{'-' if pf is None else f'{pf:.2f}'}</b></div>"
+                 f"<div>95% range<b>{rng}</b></div></div>")
+    head = "" if compact else ("<div class='muted'>Rule from Trading With Sidhant: after 30 trades, check that the average "
+                               "result per trade is positive. If it isn't, stop trading the setup.</div>")
+    return (f"<div class='card'><h2>30-trade edge check: {html.escape(label)}</h2>{head}"
+            f"<div style='margin-top:8px'><b class='{cls}'>{html.escape(title)}</b> "
+            f"<span>{html.escape(text)}</span></div>{bar}{stats}</div>")
 
 
 class Handler(BaseHTTPRequestHandler):

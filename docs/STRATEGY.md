@@ -86,6 +86,14 @@ It assumes no edge, so treat the odds as a baseline: a good setup should beat th
 .\.venv\Scripts\python.exe scanner.py               # the swing scan in the terminal
 ```
 
+## 30-trade edge check
+
+From Trading With Sidhant's discipline rules: keep a journal, and after 30 trades check that the average
+result per trade (expectancy, in R) is positive; if it isn't, stop trading the setup. The Trades page shows
+a progress bar until 30 trades, then a verdict. Because 30 trades is a small sample it also shows a rough
+95% range (average ± 2 standard errors): if that range includes zero, the result could still be luck.
+On the 84 backtest trades it says **No edge** (−0.10R per trade, range −0.21R to +0.02R).
+
 ## Files
 
 | File | Purpose |
@@ -104,5 +112,6 @@ It assumes no edge, so treat the odds as a baseline: a good setup should beat th
 | `backtest.py` | Portfolio backtest |
 | `kite_proxy.py`, `setup_kite_proxy.ps1` | Live trading only: Kite client through a static-IP proxy |
 | `run_bot.ps1`, `dashboard.ps1`, `register_task.ps1` | What the `.bat` files run |
-| `tests/` | 65 offline tests (`.venv\Scripts\python.exe -m pytest -q`) |
+| `edge.py` | The 30-trade edge check shown on the Trades page |
+| `tests/` | 69 offline tests (`.venv\Scripts\python.exe -m pytest -q`) |
 | `data/` | Created at run time: paper state, trade log, bot log (not in git) |
