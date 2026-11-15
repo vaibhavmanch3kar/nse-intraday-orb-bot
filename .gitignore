@@ -1,0 +1,9 @@
+.kite_token.json
+.venv/
+__pycache__/
+.pytest_cache/
+data/
+STOP
+*.log
+.env
+.claude/

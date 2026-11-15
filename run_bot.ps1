@@ -1,0 +1,20 @@
+#Requires -Version 5.1
+<#
+  Starts the ORB bot (paper mode unless DRY_RUN=false and CONFIRM_LIVE=YES are set)
+  and opens the dashboard. Used by Task Scheduler (register_task.ps1) or by hand:
+      powershell -ExecutionPolicy Bypass -File .\run_bot.ps1
+#>
+Set-Location -Path $PSScriptRoot
+$py = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
+if (-not (Test-Path $py)) { Write-Host "[x] .venv missing - double-click 1-SETUP.bat first" -ForegroundColor Red; exit 1 }
+
+# Don't start twice
+$running = Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
+           Where-Object { $_.CommandLine -like "*$PSScriptRoot*" -and $_.CommandLine -like "* bot.py*" }
+if ($running) { Write-Host "[i] Bot already running - opening dashboard"; Start-Process "http://127.0.0.1:5000"; exit 0 }
+
+Start-Job -ScriptBlock { Start-Sleep 4; Start-Process "http://127.0.0.1:5000" } | Out-Null
+& $py bot.py
+Write-Host ""
+Write-Host "Bot stopped (it stops by itself after 3:35 PM, on weekends and on NSE holidays)." -ForegroundColor Yellow
+Write-Host "To look at the dashboard any time, double-click 3-DASHBOARD.bat"
