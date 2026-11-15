@@ -34,6 +34,7 @@ Already have Python 3.12 or newer? Skip this step.
 ### Step 2: Download this project
 
 1. On this GitHub page, click the green **`<> Code`** button, then **Download ZIP**.
+   (Or download a fixed version from the **Releases** page; see [CHANGELOG.md](CHANGELOG.md).)
 2. Find the ZIP in your *Downloads* folder, right-click it, choose **Extract All…**, then **Extract**.
 3. Open the extracted folder. You should see files named `1-SETUP.bat`, `2-START-BOT.bat`, `3-DASHBOARD.bat`…
 
@@ -153,6 +154,7 @@ Each December, add next year's NSE holidays to `nse_holidays.json` (the list is 
 - **[How the strategy works, and the test results](docs/STRATEGY.md)**: rules, risk limits, backtest, Time Machine, files
 - **[Real-money trading with Zerodha (advanced)](docs/LIVE-TRADING.md)**: Kite Connect app, static IP, daily login, safety switches
 - **[Paid Kite Connect plan for real-time data](docs/KITE-CONNECT-PLAN.md)**: 500 credits a month, adding credits, creating the app, switching the bot
+- **[Versions (CHANGELOG)](CHANGELOG.md)**: what changed in each release, and how to go back to an older one
 
 For developers: `.\.venv\Scripts\python.exe -m pytest -q` runs 91 offline tests;
 `.\.venv\Scripts\python.exe backtest.py` runs the 60-day backtest.
