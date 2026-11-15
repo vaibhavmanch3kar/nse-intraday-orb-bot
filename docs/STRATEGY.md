@@ -29,7 +29,7 @@ R = profit or loss as a multiple of the risk (entry to stop). +1R means you made
 | Max per stock / all stocks | 25% / 75% of equity (no leverage) |
 | Max open positions · trades per day | 3 · 4 |
 | One trade per stock per day | yes |
-| Daily loss limit | 2% → no new entries that day |
+| Daily loss limit | 2% of the day's starting equity, counting booked **and open** losses → no new entries that day |
 | Loss streak | 3 losses → 2 days off |
 | Charges | Zerodha intraday: 0.03% or ₹20 brokerage, STT 0.025% on sell, NSE transaction, SEBI, stamp duty, 18% GST |
 
@@ -37,7 +37,7 @@ R = profit or loss as a multiple of the risk (entry to stop). +1R means you made
 
 | Stocks · rules | Return | Max DD | Trades | Win rate | Profit factor | Charges | Buy & hold |
 |---|---|---|---|---|---|---|---|
-| **12 stocks · current rules (default)** | **−2.3%** | 2.6% | 84 | 34.5% | 0.59 | ₹2,130 | +6.8% |
+| **12 stocks · current rules (default)** | **−2.3%** | 2.65% | 84 | 34.5% | 0.59 | ₹2,130 | +6.8% |
 | Nifty 50 · current rules | −7.9% | 8.1% | 115 | 33.0% | 0.25 | ₹2,766 | +1.3% |
 | 12 stocks · original rules (2R target, no extra rules) | −4.9% | 5.5% | 121 | 43.8% | 0.64 | ₹3,034 | +6.8% |
 
@@ -46,6 +46,9 @@ R = profit or loss as a multiple of the risk (entry to stop). +1R means you made
 - The current rules were picked from about 10 variants on the same 60 days, so their result
   flatters them. Forward paper trading is the real test.
 - Yahoo keeps only about 60 days of 15-minute data, which is a small sample.
+- Fills: entries at the **next** candle's open + 0.05% slippage; stops at the stop − slippage, or at the
+  open if price gaps through; open positions are valued at each candle's close for the drawdown.
+  Tests in `tests/test_backtest_engine.py` pin these rules and check for look-ahead.
 
 ```powershell
 .\.venv\Scripts\python.exe backtest.py                       # 60 days, trade list -> data\backtest_trades.csv
@@ -114,5 +117,5 @@ On the 84 backtest trades it says **No edge** (−0.10R per trade, range −0.21
 | `run_bot.ps1`, `dashboard.ps1`, `register_task.ps1` | What the `.bat` files run |
 | `edge.py` | The 30-trade edge check shown on the Trades page |
 | `charts.py` | Equity curve, P&L bars and trade-chart drawings (plain SVG, no extra packages) |
-| `tests/` | 74 offline tests (`.venv\Scripts\python.exe -m pytest -q`) |
+| `tests/` | 82 offline tests (`.venv\Scripts\python.exe -m pytest -q`) |
 | `data/` | Created at run time: paper state, trade log, bot log (not in git) |

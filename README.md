@@ -118,7 +118,7 @@ Common ones:
 | `PAPER_START_INR` | `100000.0` | Pretend money you start with |
 | `RISK_PER_TRADE_PCT` | `0.5` | Most you can lose on one trade, % of your money (charges included) |
 | `MAX_OPEN_POSITIONS` | `3` | Most trades open at the same time |
-| `MAX_DAILY_LOSS_PCT` | `2.0` | Stop new trades for the day after losing this % |
+| `MAX_DAILY_LOSS_PCT` | `2.0` | Stop new trades for the day once booked + open losses reach this % |
 | `WATCHLIST` | 12 stocks | Which stocks the bot trades (NSE symbols) |
 | `LAST_ENTRY` / `SQUARE_OFF` | `12:00` / `15:10` | No new trades after this time / close everything at this time |
 
@@ -131,7 +131,7 @@ Each December, add next year's NSE holidays to `nse_holidays.json` (the list is 
 - **[How the strategy works, and the test results](docs/STRATEGY.md)**: rules, risk limits, backtest, Time Machine, files
 - **[Real-money trading with Zerodha (advanced)](docs/LIVE-TRADING.md)**: Kite Connect app, static IP, daily login, safety switches
 
-For developers: `.\.venv\Scripts\python.exe -m pytest -q` runs 74 offline tests;
+For developers: `.\.venv\Scripts\python.exe -m pytest -q` runs 82 offline tests;
 `.\.venv\Scripts\python.exe backtest.py` runs the 60-day backtest.
 
 ![Backtest output](docs/screenshots/05-backtest.png)
