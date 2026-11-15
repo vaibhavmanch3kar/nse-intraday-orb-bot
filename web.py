@@ -79,6 +79,7 @@ nav{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 2px} nav a{color:var(--fg);
 nav a.on{background:var(--acc);color:#0f172a;font-weight:600}
 .banner{background:#422006;color:#fde68a;border-radius:8px;padding:10px 14px;margin:10px 0}
 .tm{color:#c4b5fd;font-size:13px}
+table.wrap td{white-space:normal}
 .days a{color:var(--acc);margin-right:10px;text-decoration:none} .days a.on{color:var(--fg);font-weight:700;text-decoration:underline}
 """
 
@@ -130,6 +131,54 @@ def market_calendar():
             f"<b>{nxt:%a %d %b}</b><br><span class='muted'>Upcoming holidays: {up}</span>{warn}</div>")
 
 
+def _badge(text, cls, tip=""):
+    t = f" title='{html.escape(tip)}'" if tip else ""
+    return f"<span class='tag {cls}' style='font-size:11px;margin-left:4px'{t}>{html.escape(text)}</span>"
+
+
+def position_row(p):
+    """One open position: P&L in ₹ and R, stop distance, EMA trail, time-stop check, time in trade."""
+    long_ = p.get("direction") == "LONG"
+    r = p.get("r_unreal")
+    pnl_cls = "up" if (p.get("unrealised") or 0) >= 0 else "dn"
+    stop_d = p.get("stop_dist_pct")
+    stop_cell = f"{_fmt(p.get('stop'))}" + (f"<br><span class='muted'>{stop_d:.2f}% away</span>" if stop_d is not None else "")
+    if stop_d is not None and stop_d < 0.3:
+        stop_cell += _badge("NEAR STOP", "dn")
+    if p.get("trail_ema") is not None:
+        td = p.get("trail_dist_pct")
+        trail_cell = (f"EMA {_fmt(p['trail_ema'])}<br><span class='muted'>"
+                      f"{'' if td is None else f'{td:+.2f}% from price'}</span>")
+        if td is not None and td < 0:
+            trail_cell += _badge("PAST TRAIL", "dn", "Price is on the wrong side of the EMA: if the 15-min bar "
+                                 "closes here, the bot exits")
+        elif td is not None and td < 0.2:
+            trail_cell += _badge("NEAR TRAIL", "warn", "Within 0.2% of the EMA trail")
+        else:
+            trail_cell += _badge("TRAIL", "warn", "Exit when a 15-min close crosses the EMA")
+    else:
+        trail_cell = f"target {_fmt(p.get('target'))}" if p.get("target") else "-"
+    tc = p.get("time_check")
+    if tc == "passed":
+        time_cell = _badge("PASSED", "up")
+    elif tc == "pending":
+        need = C.TIME_STOP_MIN_R
+        ok_now = r is not None and r >= need
+        time_cell = (f"at {html.escape(str(p.get('time_check_at')))}<br><span class='muted'>needs ≥ {need:+.1f}R</span>"
+                     + _badge("ON TRACK" if ok_now else "AT RISK", "up" if ok_now else "warn",
+                              "Exits at the time-stop check unless the trade is at least this far in profit"))
+    else:
+        time_cell = "-"
+    held = p.get("held_min")
+    held_cell = "-" if held is None else (f"{held} min" if held < 60 else f"{held // 60} h {held % 60:02d} min")
+    return (f"<tr><td><b>{_fmt(p.get('symbol'))}</b></td>"
+            f"<td class='{'up' if long_ else 'dn'}'>{html.escape(str(p.get('direction')))} · {p.get('qty')}</td>"
+            f"<td>{_fmt(p.get('entry'))} → {_fmt(p.get('price'))}</td>"
+            f"<td class='{pnl_cls}'><b>₹{_fmt(p.get('unrealised'))}</b>"
+            f"{'' if r is None else f'<br>{r:+.2f}R'}</td>"
+            f"<td>{stop_cell}</td><td>{trail_cell}</td><td>{time_cell}</td><td>{held_cell}</td></tr>")
+
+
 def render(msg=""):
     s = read_status()
     running = bot_running(s)
@@ -141,11 +190,8 @@ def render(msg=""):
     lag_cls = "warn" if (lag or 0) > 20 else ""
     paused = s.get("paused")
 
-    pos_rows = "".join(
-        f"<tr><td>{_fmt(p['symbol'])}</td><td class='{'up' if p['direction']=='LONG' else 'dn'}'>{p['direction']}</td>"
-        f"<td>{p['qty']}</td><td>{_fmt(p['entry'])}</td><td>{_fmt(p['price'])}</td><td>{_fmt(p['stop'])}</td>"
-        f"<td>{_fmt(p['target'])}</td><td class='{'up' if p['unrealised']>=0 else 'dn'}'>{_fmt(p['unrealised'])}</td></tr>"
-        for p in s.get("positions", [])) or "<tr><td colspan=8 class='muted'>No open positions</td></tr>"
+    pos_rows = "".join(position_row(p) for p in s.get("positions", [])) or \
+        "<tr><td colspan=8 class='muted'>No open positions</td></tr>"
 
     sig_rows = "".join(
         f"<tr><td>{_fmt(sym)}</td><td>{_fmt(r.get('bar'))}</td><td>{_fmt(r.get('or_low'))} – {_fmt(r.get('or_high'))}</td>"
@@ -180,7 +226,8 @@ def render(msg=""):
 <div>Total P&amp;L<b>₹{_fmt(s.get('realized_pnl'))}</b></div><div>Charges paid<b>₹{_fmt(s.get('charges_paid'))}</b></div>
 <div>Trades today<b>{_fmt(s.get('trades_today'))}</b></div><div>Loss streak<b>{_fmt(s.get('loss_streak'))}</b></div>
 <div>Data delay<b class="{lag_cls}">{lag_txt}</b></div></div>
-<div class="card"><h2>Open positions</h2><table><tr><th>Stock</th><th>Side</th><th>Qty</th><th>Entry</th><th>Price</th><th>Stop</th><th>Target</th><th>Unrealised ₹</th></tr>{pos_rows}</table></div>
+<div class="card"><h2>Open positions</h2><table class="wrap"><tr><th>Stock</th><th>Side · Qty</th><th>Entry → Price</th><th>Open P&amp;L</th>
+<th>Stop</th><th>Trail</th><th>Time stop</th><th>In trade</th></tr>{pos_rows}</table></div>
 <div class="card"><h2>Watchlist (last closed 15-min bar)</h2><table><tr><th>Stock</th><th>Bar</th><th>Opening range</th><th>Close</th><th>VWAP</th><th>Vol ×</th><th>Status</th></tr>{sig_rows}</table></div>
 {controls}
 <div class="card"><h2>Recent events</h2><ul>{events}</ul></div>""", refresh=20)
@@ -321,37 +368,175 @@ def _num(x):
         return 0.0
 
 
-def render_trades():
-    parts = ["<h1>Trades</h1>"]
-    for mode in ("paper", "live"):
-        rows = _read_csv(os.path.join(C.DATA_DIR, f"trades_{mode}.csv"))
-        if not rows and mode == "live":
-            continue
-        net = sum(_num(r.get("net")) for r in rows)
-        wins = sum(1 for r in rows if _num(r.get("net")) > 0)
+TRADE_FILES = {"paper": "trades_paper.csv", "live": "trades_live.csv", "backtest": "backtest_trades.csv"}
+
+
+def trade_rows(src):
+    return _read_csv(os.path.join(C.DATA_DIR, TRADE_FILES[src])) if src in TRADE_FILES else []
+
+
+def breakdown_table(rows, key, title):
+    """Count, win rate, net ₹ and average R per group (exit reason, side, stock)."""
+    groups = {}
+    for r in rows:
+        k = (r.get(key) or "-").split(" (")[0]
+        groups.setdefault(k, []).append(r)
+    out = []
+    for k, g in sorted(groups.items(), key=lambda kv: sum(_num(r.get("net")) for r in kv[1])):
+        net = sum(_num(r.get("net")) for r in g)
+        wins = sum(1 for r in g if _num(r.get("net")) > 0)
+        avg_r = sum(_num(r.get("r")) for r in g) / len(g)
+        out.append(f"<tr><td>{html.escape(k)}</td><td>{len(g)}</td><td>{wins / len(g):.0%}</td>"
+                   f"<td class='{'up' if net > 0 else 'dn'}'>{'-' if net < 0 else ''}₹{abs(net):,.0f}</td>"
+                   f"<td class='{'up' if avg_r > 0 else 'dn'}'>{avg_r:+.2f}R</td></tr>")
+    return (f"<div style='flex:1 1 260px'><h2>{html.escape(title)}</h2><table><tr><th></th><th>Trades</th>"
+            f"<th>Won</th><th>Net</th><th>Avg</th></tr>{''.join(out)}</table></div>")
+
+
+def trade_section(rows, src, label, start_cash, show_log=True):
+    """KPIs, equity curve, P&L bars, breakdowns and the trade log (with chart links) for one trade list."""
+    import charts
+    nets = [_num(r.get("net")) for r in rows]
+    equity, eq = [], start_cash
+    for v in nets:
+        eq += v
+        equity.append(eq)
+    peak, max_dd = start_cash, 0.0
+    for v in equity:
+        peak = max(peak, v)
+        max_dd = max(max_dd, (peak - v) / peak * 100 if peak else 0)
+    net, wins = sum(nets), sum(1 for v in nets if v > 0)
+    tips = [f"{r.get('symbol', '')} {r.get('direction', '')} {r.get('closed', '')[:10]} ({_num(r.get('r')):+.2f}R)"
+            for r in rows]
+    kpis = (f"<div class='card kpis'><div>{html.escape(label)} trades<b>{len(rows)}</b></div>"
+            f"<div>Win rate<b>{(wins / len(rows) * 100 if rows else 0):.0f}%</b></div>"
+            f"<div>Net P&amp;L<b class='{'up' if net >= 0 else 'dn'}'>₹{net:,.2f}</b></div>"
+            f"<div>Max drawdown<b class='{'dn' if max_dd else ''}'>{max_dd:.2f}%</b></div></div>")
+    if not rows:
+        return kpis
+    charts_html = (f"<div class='card'><h2>{html.escape(label)}: equity after each closed trade "
+                   f"(red area = drawdown from the peak)</h2>{charts.equity_curve(equity, start_cash, tips)}"
+                   f"<h2 style='margin-top:12px'>Profit or loss per trade (hover a bar for details)</h2>"
+                   f"{charts.pnl_bars(nets, tips)}</div>"
+                   f"<div class='card' style='display:flex;flex-wrap:wrap;gap:18px'>"
+                   f"{breakdown_table(rows, 'reason', 'By exit reason')}"
+                   f"{breakdown_table(rows, 'direction', 'Long vs short')}"
+                   f"{breakdown_table(rows, 'symbol', 'By stock')}</div>")
+    log = ""
+    if show_log:
+        idx_rows = list(enumerate(rows))[-200:][::-1]
         body = "".join(
             f"<tr><td>{html.escape(r.get('closed', '')[:16])}</td><td>{html.escape(r.get('symbol', ''))}</td>"
             f"<td class='{'up' if r.get('direction') == 'LONG' else 'dn'}'>{html.escape(r.get('direction', ''))}</td>"
             f"<td>{html.escape(r.get('qty', ''))}</td><td>{html.escape(r.get('entry', ''))}</td><td>{html.escape(r.get('exit', ''))}</td>"
             f"<td>{html.escape(r.get('reason', ''))}</td><td>{html.escape(r.get('charges', ''))}</td>"
-            f"<td class='{'up' if _num(r.get('net')) > 0 else 'dn'}'>{_num(r.get('net')):,.2f}</td><td>{_num(r.get('r')):+.2f}</td></tr>"
-            for r in reversed(rows[-200:])) or "<tr><td colspan=10 class='muted'>No trades yet - the bot records them here once it trades on a market day.</td></tr>"
-        parts.append(f"""<div class="card kpis"><div>{mode.title()} trades<b>{len(rows)}</b></div>
-<div>Win rate<b>{(wins / len(rows) * 100 if rows else 0):.0f}%</b></div><div>Net P&amp;L<b class="{'up' if net >= 0 else 'dn'}">₹{net:,.2f}</b></div></div>
-{edge_card(rows, f"{mode.title()} trading")}
-<div class="card"><h2>{mode.title()} trade log (newest first)</h2><table><tr><th>Closed</th><th>Stock</th><th>Side</th><th>Qty</th>
-<th>Entry</th><th>Exit</th><th>Reason</th><th>Charges ₹</th><th>Net ₹</th><th>R</th></tr>{body}</table></div>""")
-    bt = _read_csv(os.path.join(C.DATA_DIR, "backtest_trades.csv"))
+            f"<td class='{'up' if _num(r.get('net')) > 0 else 'dn'}'>{_num(r.get('net')):,.2f}</td><td>{_num(r.get('r')):+.2f}</td>"
+            f"<td><a class='sig' href='/journey?src={src}&amp;i={i}'>chart</a></td></tr>"
+            for i, r in idx_rows)
+        table = (f"<table><tr><th>Closed</th><th>Stock</th><th>Side</th><th>Qty</th><th>Entry</th><th>Exit</th>"
+                 f"<th>Reason</th><th>Charges ₹</th><th>Net ₹</th><th>R</th><th></th></tr>{body}</table>")
+        log = (f"<div class='card'><h2>{html.escape(label)} trade log (newest first)</h2>{table}</div>" if src != "backtest" else
+               f"<div class='card'><details><summary class='sig' style='cursor:pointer'>Show all {len(rows)} backtest trades "
+               f"(with charts)</summary>{table}</details></div>")
+    return kpis + charts_html + log
+
+
+def render_trades():
+    parts = ["<h1>Trades</h1>"]
+    for mode in ("paper", "live"):
+        rows = trade_rows(mode)
+        if not rows and mode == "live":
+            continue
+        start = C.PAPER_START_INR
+        parts.append(trade_section(rows, mode, mode.title(), start))
+        parts.append(edge_card(rows, f"{mode.title()} trading"))
+        if not rows:
+            parts.append("<div class='card muted'>No trades yet - the bot records them here once it trades on a market day.</div>")
+    bt = trade_rows("backtest")
     if bt:
-        net = sum(_num(r.get("net")) for r in bt)
-        wins = sum(1 for r in bt if _num(r.get("net")) > 0)
-        first, last = bt[0].get("opened", "")[:10], bt[-1].get("closed", "")[:10]
-        parts.append(f"""<div class="card"><h2>Last backtest ({html.escape(first)} → {html.escape(last)})</h2>
-<div class="kpis"><div>Trades<b>{len(bt)}</b></div><div>Win rate<b>{wins / len(bt) * 100:.0f}%</b></div>
-<div>Net P&amp;L<b class="{'up' if net >= 0 else 'dn'}">₹{net:,.0f}</b></div></div>
-<div class="muted">Run <code>.venv\\Scripts\\python.exe backtest.py</code> to update. Full list: data\\backtest_trades.csv</div></div>
-{edge_card(bt, "Backtest", compact=True)}""")
+        first, last = bt[0].get("opened", "")[:10], max(r.get("closed", "")[:10] for r in bt)
+        parts.append(f"<h1 style='margin-top:26px'>Last backtest <span class='tag'>{html.escape(first)} → {html.escape(last)}</span></h1>"
+                     f"<div class='muted'>Run <code>.venv\\Scripts\\python.exe backtest.py</code> to update. "
+                     f"Full list: data\\backtest_trades.csv</div>")
+        parts.append(trade_section(bt, "backtest", "Backtest", C.PAPER_START_INR))
+        parts.append(edge_card(bt, "Backtest", compact=True))
     return page("Trades", "/trades", "".join(parts))
+
+
+_BARS_CACHE = {}
+
+
+def day_bars(symbol, day):
+    """15-min bars of `symbol` for `day` plus all earlier bars (for the EMA), cached for 10 minutes."""
+    import time
+    import data_yahoo
+    hit = _BARS_CACHE.get(symbol)
+    if not hit or time.time() - hit[0] > 600:
+        bars, _, _ = data_yahoo.fetch(symbol, C.INTERVAL_MIN, "60d")
+        import datetime as dt
+        bars = data_yahoo.closed_bars(bars, dt.datetime.now(data_yahoo.IST), C.INTERVAL_MIN)
+        _BARS_CACHE[symbol] = hit = (time.time(), bars)
+    allbars = hit[1]
+    upto = [b for b in allbars if b["t"].date() <= day]
+    return upto, [b for b in upto if b["t"].date() == day]
+
+
+def render_journey(src, i):
+    """One trade drawn on its day's 15-min candles, with stop, entry/exit markers and the EMA trail."""
+    import datetime as dt
+    import charts
+    import strategy
+    rows = trade_rows(src)
+    if i is None or not 0 <= i < len(rows):
+        return page("Trade chart", "/trades", "<h1>Trade chart</h1><div class='banner'>Trade not found.</div>")
+    r = rows[i]
+    sym = r.get("symbol", "")
+
+    def ts(v):
+        try:
+            return dt.datetime.fromisoformat(v)
+        except (TypeError, ValueError):
+            return None
+    opened, closed = ts(r.get("opened")), ts(r.get("closed"))
+    if not opened:
+        return page("Trade chart", "/trades", "<h1>Trade chart</h1><div class='banner'>This trade has no entry time.</div>")
+    try:
+        upto, today = day_bars(sym, opened.date())
+    except Exception as e:  # data errors
+        upto, today = [], []
+        err = str(e)
+    else:
+        err = ""
+    if not today:
+        note = err or "Yahoo keeps only about 60 days of 15-minute data, so older trades can't be drawn."
+        chart = f"<div class='banner'>No price data for {html.escape(sym)} on {opened:%d %b %Y}. {html.escape(note)}</div>"
+    else:
+        ema = None
+        if C.TRAIL_EMA > 0:
+            start = len(upto) - len(today)
+            ema = [strategy.ema([b["c"] for b in upto[max(0, k - 4 * C.TRAIL_EMA): k + 1]], C.TRAIL_EMA)
+                   for k in range(start, len(upto))]
+        orng = strategy.opening_range(today)
+        trade = {"direction": r.get("direction"), "entry": _num(r.get("entry")), "exit": _num(r.get("exit")),
+                 "stop": _num(r.get("stop")), "target": _num(r.get("target")) or None,
+                 "opened": opened, "closed": closed}
+        chart = charts.journey(today, trade, ema, (orng["low"], orng["high"]) if orng else None)
+    net, rr = _num(r.get("net")), _num(r.get("r"))
+    held = f"{int((closed - opened).total_seconds() // 60)} min" if closed else "-"
+    body = f"""
+<h1>{html.escape(sym)} <span class="tag {'up' if r.get('direction') == 'LONG' else 'dn'}">{html.escape(r.get('direction', ''))}</span>
+<span class="tag">{opened:%a %d %b %Y}</span> <span class="tag">{html.escape(src)}</span></h1>
+<div class="muted"><a class="sig" href="/trades">← back to Trades</a></div>
+<div class="card kpis"><div>Result<b class="{'up' if net > 0 else 'dn'}">₹{net:,.2f} ({rr:+.2f}R)</b></div>
+<div>Entry<b>{_fmt(_num(r.get('entry')))} at {opened:%H:%M}</b></div>
+<div>Exit<b>{_fmt(_num(r.get('exit')))} at {closed.strftime('%H:%M') if closed else '-'}</b></div>
+<div>Exit reason<b>{html.escape(r.get('reason', '-'))}</b></div><div>Held<b>{held}</b></div>
+<div>Qty<b>{html.escape(r.get('qty', '-'))}</b></div><div>Charges<b>₹{_num(r.get('charges')):,.2f}</b></div></div>
+<div class="card"><h2>15-minute candles · blue band = opening range · red dashed = stop · grey dotted = entry ·
+yellow = {f'EMA{C.TRAIL_EMA} trail' if C.TRAIL_EMA > 0 else 'no trail'} · ▲▼ = entry and exit</h2>{chart}</div>
+<div class="card muted">Hover a candle for its prices. The chart uses today's Yahoo data, so it can differ slightly
+from what the bot saw live if Yahoo has since corrected a bar.</div>"""
+    return page(f"{sym} trade", "/trades", body)
 
 
 def edge_card(rows, label, compact=False):
@@ -417,6 +602,12 @@ class Handler(BaseHTTPRequestHandler):
             self._send(render_review(day, refresh=q.get("refresh", ["0"])[0] == "1"))
         elif u.path == "/trades":
             self._send(render_trades())
+        elif u.path == "/journey":
+            try:
+                idx = int(q.get("i", [""])[0])
+            except ValueError:
+                idx = None
+            self._send(render_journey(q.get("src", ["paper"])[0], idx))
         elif u.path == "/scanner":
             self._send(render_scanner(refresh=q.get("refresh", ["0"])[0] == "1"))
         elif u.path == "/api/status":

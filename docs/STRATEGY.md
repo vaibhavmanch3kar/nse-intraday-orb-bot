@@ -113,5 +113,6 @@ On the 84 backtest trades it says **No edge** (−0.10R per trade, range −0.21
 | `kite_proxy.py`, `setup_kite_proxy.ps1` | Live trading only: Kite client through a static-IP proxy |
 | `run_bot.ps1`, `dashboard.ps1`, `register_task.ps1` | What the `.bat` files run |
 | `edge.py` | The 30-trade edge check shown on the Trades page |
-| `tests/` | 69 offline tests (`.venv\Scripts\python.exe -m pytest -q`) |
+| `charts.py` | Equity curve, P&L bars and trade-chart drawings (plain SVG, no extra packages) |
+| `tests/` | 74 offline tests (`.venv\Scripts\python.exe -m pytest -q`) |
 | `data/` | Created at run time: paper state, trade log, bot log (not in git) |

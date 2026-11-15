@@ -58,6 +58,37 @@ def log_trade(row, mode):
         w.writerow({k: (round(v, 2) if isinstance(v, float) else v) for k, v in row.items()})
 
 
+def position_details(p, price, bars, now):
+    """Extra live facts about an open position for the dashboard: open profit in R, how far the
+    stop is, time in the trade, where the EMA trail is, and when the time stop is checked."""
+    sign = 1 if p["direction"] == "LONG" else -1
+    risk_ps = abs(p["entry"] - p["stop"]) or 1e-9
+    out = {"r_unreal": (price - p["entry"]) * sign / risk_ps,
+           "stop_dist_pct": abs(price - p["stop"]) / price * 100 if price else None,
+           "held_min": None, "trail_ema": None, "trail_dist_pct": None,
+           "time_check_at": None, "time_check": None}
+    try:
+        opened = dt.datetime.fromisoformat(p["opened"])
+        out["held_min"] = int((now - opened).total_seconds() // 60)
+    except (KeyError, TypeError, ValueError):
+        opened = None
+    if C.TRAIL_EMA > 0 and bars:
+        out["trail_ema"] = strategy.ema([b["c"] for b in bars[-4 * C.TRAIL_EMA:]], C.TRAIL_EMA)
+        out["trail_dist_pct"] = (price - out["trail_ema"]) * sign / price * 100 if price else None
+    if C.TIME_STOP_BARS > 0:
+        if p.get("time_ok"):
+            out["time_check"] = "passed"
+        else:
+            try:
+                first_bar = dt.datetime.fromisoformat(p["checked_upto"]) if p.get("checked_upto") else opened
+                due = first_bar + dt.timedelta(minutes=C.INTERVAL_MIN * (C.TIME_STOP_BARS + 1))
+                out["time_check_at"] = f"{due:%H:%M}"
+                out["time_check"] = "pending"
+            except (TypeError, ValueError):
+                pass
+    return out
+
+
 def at(t: str, day: dt.date):
     return dt.datetime.combine(day, strategy.hm(t), tzinfo=IST)
 
@@ -76,6 +107,7 @@ class Bot:
         self.data_lag_min = None
         self.vix, self.vix_day = None, None
         self.holiday_checked = None
+        self.bars = {}          # symbol -> latest closed 15-min bars (for the dashboard)
 
     # -- helpers
     def note(self, msg, level=logging.INFO):
@@ -143,6 +175,7 @@ class Bot:
             if not closed:
                 continue
             bars_by_sym[sym] = closed
+            self.bars[sym] = closed
             self.prices[sym] = price
             if closed[-1]["t"].date() == today:
                 lags.append((now - closed[-1]["t"]).total_seconds() / 60 - C.INTERVAL_MIN)
@@ -260,7 +293,8 @@ class Bot:
         for sym, p in self.state.positions.items():
             px = self.prices.get(sym, p["entry"])
             positions.append({**p, "symbol": sym, "price": px,
-                              "unrealised": costs.gross_pnl(p["entry"], px, p["qty"], p["direction"])})
+                              "unrealised": costs.gross_pnl(p["entry"], px, p["qty"], p["direction"]),
+                              **position_details(p, px, self.bars.get(sym, []), now)})
         status = {
             "time": now.isoformat(), "mode": self.mode, "live_ready": (not self.live) or self.kite is not None,
             "paused": os.path.exists(C.PAUSE_FILE), "data_lag_min": self.data_lag_min,
