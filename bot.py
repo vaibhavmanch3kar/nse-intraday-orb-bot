@@ -257,7 +257,7 @@ class Bot:
             if paused:
                 row["reason"] += " (paused)"
                 continue
-            ok, why = self.state.can_enter(sym, today)
+            ok, why = self.state.can_enter(sym, today, self.prices)
             if not ok:
                 row["reason"] += f" - skip: {why}"
                 continue

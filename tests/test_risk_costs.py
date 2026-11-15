@@ -72,6 +72,26 @@ def test_daily_loss_limit_and_one_trade_per_symbol(tmp_path):
     assert st.can_enter("SBIN", day) == (False, "already traded today")
 
 
+def test_daily_loss_limit_counts_open_losses(tmp_path):
+    st = risk.State(os.path.join(tmp_path, "s.json"), 100000)
+    day = dt.date(2026, 11, 16)
+    st.new_day_if_needed(day)
+    st.record_entry("SBIN", "LONG", 100, 1000, 970, 1060, "x")   # 2.5% of equity at risk
+    st.record_entry("INFY", "SHORT", 50, 1500, 1530, 1440, "x")
+    # booked P&L is 0; open: SBIN -2,100 (1000 -> 979), INFY +100 (1500 -> 1498) => -2,000 = -2%
+    prices = {"SBIN": 979.0, "INFY": 1498.0}
+    assert st.open_pnl(prices) == -2000.0
+    ok, why = st.can_enter("TCS", day, prices)
+    assert not ok and "daily loss" in why and "open" in why
+    # a small open loss (-0.0%) is fine: 2 positions < 3, 2 trades < 4
+    assert st.can_enter("TCS", day, {"SBIN": 999.0, "INFY": 1498.0}) == (True, "ok")
+    # without prices only booked P&L counts (the old behaviour) - this is what let entries through
+    assert st.can_enter("TCS", day) == (True, "ok")
+    # booked + open together: -1,500 booked and -600 open = -2.1%
+    st.d["day_pnl"] = -1500.0
+    assert not st.can_enter("TCS", day, {"SBIN": 994.0, "INFY": 1500.0})[0]
+
+
 def test_state_persists(tmp_path):
     p = os.path.join(tmp_path, "s.json")
     st = risk.State(p, 50000)

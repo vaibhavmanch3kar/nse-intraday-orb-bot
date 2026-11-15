@@ -93,7 +93,7 @@ def simulate(data, start_cash, verbose=True, index_data=None, vix=None):
             b = bars[i]
             pending.pop(s)
             if b["t"].date() == sig["day"] and s not in st.positions:
-                ok, _ = st.can_enter(s, day)
+                ok, _ = st.can_enter(s, day, last_close)  # open losses count toward the daily limit
                 d, stop = sig["direction"], sig["stop"]
                 beyond = (d == "LONG" and b["o"] <= stop) or (d == "SHORT" and b["o"] >= stop)
                 if ok and not beyond:

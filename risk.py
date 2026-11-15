@@ -79,11 +79,20 @@ class State:
             self.save()
 
     # -- gates
-    def can_enter(self, symbol, today: dt.date):
+    def open_pnl(self, prices=None):
+        """Profit/loss of open positions at `prices` (0 for any position without a price)."""
+        if not prices:
+            return 0.0
+        return self.equity({s: prices[s] for s in self.positions if s in prices}) - self.d["cash"]
+
+    def can_enter(self, symbol, today: dt.date, prices=None):
+        """Entry gates. `prices` (symbol -> latest price) lets the daily loss limit count losses
+        in open positions too, not only booked ones."""
         if self.d["cooldown_until"] and today.isoformat() < self.d["cooldown_until"]:
             return False, f"cooldown until {self.d['cooldown_until']} after {C.LOSS_STREAK_LIMIT} losses"
-        if self.d["day_pnl"] <= -self.d["day_start_equity"] * C.MAX_DAILY_LOSS_PCT / 100:
-            return False, f"daily loss limit {C.MAX_DAILY_LOSS_PCT}% hit"
+        day_loss = self.d["day_pnl"] + self.open_pnl(prices)
+        if day_loss <= -self.d["day_start_equity"] * C.MAX_DAILY_LOSS_PCT / 100:
+            return False, f"daily loss limit {C.MAX_DAILY_LOSS_PCT}% hit (booked + open)"
         if self.d["trades_today"] >= C.MAX_TRADES_PER_DAY:
             return False, f"{C.MAX_TRADES_PER_DAY} trades today"
         if len(self.positions) >= C.MAX_OPEN_POSITIONS:
