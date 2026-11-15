@@ -101,7 +101,7 @@ On the 84 backtest trades it says **No edge** (−0.10R per trade, range −0.21
 
 | File | Purpose |
 |---|---|
-| `1-SETUP.bat` … `5-UNSCHEDULE.bat` | Double-click launchers |
+| `1-SETUP.bat` … `6-CHECK-KITE-DATA.bat` | Double-click launchers |
 | `setup.ps1` | One-time paper-trading setup (Python environment, packages, self-test) |
 | `bot.py` | Main loop: fetch candles every 60 s, manage positions, take signals |
 | `strategy.py` | Opening range, VWAP, volume, signals, exits (shared with the backtest) |
@@ -109,6 +109,8 @@ On the 84 backtest trades it says **No edge** (−0.10R per trade, range −0.21
 | `costs.py` | Zerodha intraday charges |
 | `broker.py` | Paper and live (Kite) order handling |
 | `data_yahoo.py` | Free NSE candles from Yahoo Finance |
+| `data_kite.py` | Real-time prices and long history from Kite Connect (paid Connect plan); `data_kite.py check` |
+| `marketdata.py` | Picks Yahoo or Kite from `DATA_SOURCE`, falling back to Yahoo if Kite isn't usable |
 | `web.py` | Dashboard (Live / Session review / Swing scanner / Trades) + Zerodha login on 127.0.0.1:5000 |
 | `review.py`, `timemachine.py`, `scanner.py` | Session review, Time Machine, swing scanner |
 | `holidays.py`, `nse_holidays.json` | NSE trading calendar |
@@ -117,5 +119,5 @@ On the 84 backtest trades it says **No edge** (−0.10R per trade, range −0.21
 | `run_bot.ps1`, `dashboard.ps1`, `register_task.ps1` | What the `.bat` files run |
 | `edge.py` | The 30-trade edge check shown on the Trades page |
 | `charts.py` | Equity curve, P&L bars and trade-chart drawings (plain SVG, no extra packages) |
-| `tests/` | 82 offline tests (`.venv\Scripts\python.exe -m pytest -q`) |
+| `tests/` | 91 offline tests (`.venv\Scripts\python.exe -m pytest -q`) |
 | `data/` | Created at run time: paper state, trade log, bot log (not in git) |

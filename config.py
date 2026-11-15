@@ -78,6 +78,13 @@ SCAN_LIST = _env("SCAN_LIST", NIFTY50, list)
 FETCH_WORKERS = _env("FETCH_WORKERS", 6, int)       # parallel Yahoo requests
 INTERVAL_MIN = 15                                   # candle size used by the strategy
 
+# ── Price data ─────────────────────────────────────────────────────────────
+# "yahoo": free, no login, can lag a few minutes, ~60 days of history.
+# "kite":  Kite Connect paid plan - real-time, long history; needs the daily Zerodha login.
+#          Check it first: .venv\Scripts\python.exe data_kite.py check
+#          Falls back to Yahoo automatically if Kite isn't usable that moment.
+DATA_SOURCE = _env("DATA_SOURCE", "yahoo")
+
 # ── Session times (IST, HH:MM) ─────────────────────────────────────────────
 MARKET_OPEN = _env("MARKET_OPEN", "09:15")
 OR_MINUTES = _env("OR_MINUTES", 15, int)            # opening range = first N minutes

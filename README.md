@@ -102,9 +102,27 @@ To undo it, double-click `5-UNSCHEDULE.bat`.
 | The black window opens and closes instantly | Open the project folder, click the address bar, type `powershell` and press Enter. In the blue window type `.\1-SETUP.bat` (or the file you tried) and press Enter to read the error |
 | Browser shows **"This site can't be reached"** | The black window was closed. Double-click `3-DASHBOARD.bat` (or `2-START-BOT.bat`) again and keep it open |
 | Live page says **NOT RUNNING** | Normal outside market hours, on weekends and on holidays. On a market day, run `2-START-BOT.bat` |
-| **Data delay** shows 15+ minutes | Yahoo's free data is running late. Paper results will be less accurate that day |
+| **Data delay** shows 15+ minutes | Yahoo's free data is running late. Paper results will be less accurate that day. Kite data fixes this (see above) |
+| Live page says **Kite unavailable** | Log in to Zerodha on the dashboard (needed every day), then run `6-CHECK-KITE-DATA.bat` |
 | Setup says **self-tests failed** | Copy the red text and open an *Issue* on this GitHub page |
 | I want to reset the paper account | Delete the `data` folder inside the project (it holds paper trades, P&L and logs), then start the bot again |
+
+---
+
+## Better price data: Kite Connect (optional, about ₹500/month)
+
+Free Yahoo data can lag a few minutes and only goes back ~60 days. If you upgrade your Kite developer app
+to the paid **Connect** plan, the bot can use Zerodha's own real-time prices and years of history instead.
+
+1. On https://developers.kite.trade/apps, upgrade your app to **Connect** (the live-trading setup in
+   [docs/LIVE-TRADING.md](docs/LIVE-TRADING.md) must be done first, so the bot has your API key).
+2. Double-click **`3-DASHBOARD.bat`** and click **Log in to Zerodha** (Kite data needs a login every day).
+3. Double-click **`6-CHECK-KITE-DATA.bat`**. It should say *Kite data works* and how many days of history you get.
+4. Open `config.py` in Notepad, change `DATA_SOURCE = _env("DATA_SOURCE", "yahoo")` to `"kite"`, save.
+
+The Live page shows **Price data: Kite (real-time)**. If Kite can't be used that moment (you didn't log in
+today, the plan lapsed, network trouble), the bot automatically uses Yahoo and the page says why.
+With Kite you can also backtest further back: `.venv\Scripts\python.exe backtest.py --days 180`.
 
 ---
 
@@ -120,6 +138,7 @@ Common ones:
 | `MAX_OPEN_POSITIONS` | `3` | Most trades open at the same time |
 | `MAX_DAILY_LOSS_PCT` | `2.0` | Stop new trades for the day once booked + open losses reach this % |
 | `WATCHLIST` | 12 stocks | Which stocks the bot trades (NSE symbols) |
+| `DATA_SOURCE` | `yahoo` | `kite` for real-time Zerodha data (paid Connect plan, see above) |
 | `LAST_ENTRY` / `SQUARE_OFF` | `12:00` / `15:10` | No new trades after this time / close everything at this time |
 
 Each December, add next year's NSE holidays to `nse_holidays.json` (the list is on nseindia.com).
@@ -131,7 +150,7 @@ Each December, add next year's NSE holidays to `nse_holidays.json` (the list is 
 - **[How the strategy works, and the test results](docs/STRATEGY.md)**: rules, risk limits, backtest, Time Machine, files
 - **[Real-money trading with Zerodha (advanced)](docs/LIVE-TRADING.md)**: Kite Connect app, static IP, daily login, safety switches
 
-For developers: `.\.venv\Scripts\python.exe -m pytest -q` runs 82 offline tests;
+For developers: `.\.venv\Scripts\python.exe -m pytest -q` runs 91 offline tests;
 `.\.venv\Scripts\python.exe backtest.py` runs the 60-day backtest.
 
 ![Backtest output](docs/screenshots/05-backtest.png)

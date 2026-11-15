@@ -111,6 +111,19 @@ def bot_running(s):
     return (dt.datetime.now(t.tzinfo) - t).total_seconds() < max(180, 3 * C.POLL_SEC)
 
 
+def data_source_kpi(s):
+    """Which price source the bot is really using (and why not Kite, if it fell back)."""
+    ds = s.get("data_source") or {}
+    using = ds.get("using")
+    if not using:
+        return ""
+    label = "Kite (real-time)" if using == "kite" else "Yahoo (free, may lag)"
+    cls = "up" if using == "kite" else ("warn" if ds.get("wanted") == "kite" else "")
+    tip = f" title='{html.escape(ds.get('reason') or '')}'" if ds.get("reason") else ""
+    note = "<br><span class='muted' style='font-size:11px'>Kite unavailable, see tooltip</span>" if ds.get("reason") else ""
+    return f"<div{tip}>Price data<b class='{cls}'>{label}</b>{note}</div>"
+
+
 def market_calendar():
     """One line: is NSE open today, next trading day, upcoming holidays."""
     import datetime as dt
@@ -225,7 +238,7 @@ def render(msg=""):
 <div>Equity<b>₹{_fmt(s.get('equity'))}</b></div><div>Today P&amp;L<b class="{'up' if (s.get('day_pnl') or 0)>=0 else 'dn'}">₹{_fmt(s.get('day_pnl'))}</b></div>
 <div>Total P&amp;L<b>₹{_fmt(s.get('realized_pnl'))}</b></div><div>Charges paid<b>₹{_fmt(s.get('charges_paid'))}</b></div>
 <div>Trades today<b>{_fmt(s.get('trades_today'))}</b></div><div>Loss streak<b>{_fmt(s.get('loss_streak'))}</b></div>
-<div>Data delay<b class="{lag_cls}">{lag_txt}</b></div></div>
+<div>Data delay<b class="{lag_cls}">{lag_txt}</b></div>{data_source_kpi(s)}</div>
 <div class="card"><h2>Open positions</h2><table class="wrap"><tr><th>Stock</th><th>Side · Qty</th><th>Entry → Price</th><th>Open P&amp;L</th>
 <th>Stop</th><th>Trail</th><th>Time stop</th><th>In trade</th></tr>{pos_rows}</table></div>
 <div class="card"><h2>Watchlist (last closed 15-min bar)</h2><table><tr><th>Stock</th><th>Bar</th><th>Opening range</th><th>Close</th><th>VWAP</th><th>Vol ×</th><th>Status</th></tr>{sig_rows}</table></div>
@@ -470,9 +483,10 @@ def day_bars(symbol, day):
     """15-min bars of `symbol` for `day` plus all earlier bars (for the EMA), cached for 10 minutes."""
     import time
     import data_yahoo
+    import marketdata
     hit = _BARS_CACHE.get(symbol)
     if not hit or time.time() - hit[0] > 600:
-        bars, _, _ = data_yahoo.fetch(symbol, C.INTERVAL_MIN, "60d")
+        bars, _, _ = marketdata.fetch(symbol, C.INTERVAL_MIN, "60d")
         import datetime as dt
         bars = data_yahoo.closed_bars(bars, dt.datetime.now(data_yahoo.IST), C.INTERVAL_MIN)
         _BARS_CACHE[symbol] = hit = (time.time(), bars)

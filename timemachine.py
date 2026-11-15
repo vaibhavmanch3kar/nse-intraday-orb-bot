@@ -22,6 +22,7 @@ import numpy as np
 
 import config as C
 import data_yahoo
+import marketdata
 import strategy
 
 STEP_MIN = 5
@@ -177,7 +178,7 @@ def history_text(h):
 def odds_for(symbol, direction, entry, stop, entry_time, n=10000, bars5=None):
     """Convenience: fetch 60 days of 5-min bars and replay from `entry_time` (HH:MM) to SQUARE_OFF."""
     if bars5 is None:
-        bars5, _, _ = data_yahoo.fetch(symbol, STEP_MIN, "60d")
+        bars5, _, _ = marketdata.fetch(symbol, STEP_MIN, "60d")
     moves = slot_moves(bars5)
     return replay(moves, direction, entry, stop, entry_time, C.SQUARE_OFF, n=n)
 
@@ -222,10 +223,10 @@ def main():
     print(f"  The stock's usual move over this window in the last 60 days: {res['drift_pct']:+.2f}% "
           "(the replays inherit it).")
     day = a.date or dt.datetime.now(data_yahoo.IST).date().isoformat()
-    bars15, _, _ = data_yahoo.fetch(a.symbol.upper(), C.INTERVAL_MIN, "60d")
+    bars15, _, _ = marketdata.fetch(a.symbol.upper(), C.INTERVAL_MIN, "60d")
     index_bars = None
     if C.INDEX_FILTER:
-        index_bars, _, _ = data_yahoo.fetch(strategy.index_for(a.symbol.upper()), C.INTERVAL_MIN, "60d")
+        index_bars, _, _ = marketdata.fetch(strategy.index_for(a.symbol.upper()), C.INTERVAL_MIN, "60d")
     print("  " + history_text(history(bars15, day, d, index_bars)))
     print("  " + verdict(res, 1.0))
     print(f"  Seed {res['seed']}: same data and seed give the same numbers. Built from the last 60 days; "

@@ -17,6 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 import config as C
 import costs
 import data_yahoo
+import marketdata
 import strategy
 
 
@@ -29,7 +30,7 @@ def fetch_all(symbols, range_="60d"):  # 60 days: also feeds the Time Machine hi
 
     def one(sym):
         try:
-            bars, _, _ = data_yahoo.fetch(sym, C.INTERVAL_MIN, range_)
+            bars, _, _ = marketdata.fetch(sym, C.INTERVAL_MIN, range_)
             return sym, data_yahoo.closed_bars(bars, now, C.INTERVAL_MIN), None
         except data_yahoo.DataError as e:
             return sym, [], str(e)
@@ -107,7 +108,7 @@ def add_time_machine(rows, n=10000, data=None, index_data=None, day=None):
     sig = {s: r for s, r in rows.items() if r.get("direction") and r.get("entry")}
     if not sig:
         return
-    got = data_yahoo.fetch_many(list(sig), timemachine.STEP_MIN, "60d", C.FETCH_WORKERS)
+    got = marketdata.fetch_many(list(sig), timemachine.STEP_MIN, "60d", C.FETCH_WORKERS)
     for s, r in sig.items():
         g = got.get(s)
         if isinstance(g, Exception) or g is None:

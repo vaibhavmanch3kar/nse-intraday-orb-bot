@@ -20,6 +20,7 @@ import time
 import config as C
 import costs
 import data_yahoo
+import marketdata
 import holidays
 import risk
 import strategy
@@ -164,7 +165,7 @@ class Bot:
 
         bars_by_sym = {}
         lags = []
-        fetched = data_yahoo.fetch_many(C.WATCHLIST, C.INTERVAL_MIN, "10d", C.FETCH_WORKERS)
+        fetched = marketdata.fetch_many(C.WATCHLIST, C.INTERVAL_MIN, "10d", C.FETCH_WORKERS)
         for sym in C.WATCHLIST:
             got = fetched.get(sym)
             if isinstance(got, Exception) or got is None:
@@ -185,13 +186,13 @@ class Bot:
         if C.INDEX_FILTER:
             for ix in {strategy.index_for(s) for s in bars_by_sym}:
                 try:
-                    b, _, _ = data_yahoo.fetch(ix, C.INTERVAL_MIN, "5d")
+                    b, _, _ = marketdata.fetch(ix, C.INTERVAL_MIN, "5d")
                     index_bars[ix] = data_yahoo.closed_bars(b, now, C.INTERVAL_MIN)
                 except data_yahoo.DataError as e:
                     self.note(f"index {ix}: {e} - index filter skipped", logging.WARNING)
         if C.VIX_SIZING and self.vix_day != today:
             try:
-                vix = data_yahoo.vix_by_day("1mo")
+                vix = marketdata.vix_by_day("1mo")
                 earlier = [d for d in vix if d < today]
                 self.vix = vix[max(earlier)] if earlier else None
             except data_yahoo.DataError as e:
@@ -298,6 +299,7 @@ class Bot:
         status = {
             "time": now.isoformat(), "mode": self.mode, "live_ready": (not self.live) or self.kite is not None,
             "paused": os.path.exists(C.PAUSE_FILE), "data_lag_min": self.data_lag_min,
+            "data_source": marketdata.status(),
             "equity": self.state.equity(self.prices), "cash": self.state.d["cash"],
             "day_pnl": self.state.d["day_pnl"], "realized_pnl": self.state.d["realized_pnl"],
             "charges_paid": self.state.d["charges_paid"], "trades_today": self.state.d["trades_today"],
@@ -318,7 +320,7 @@ class Bot:
             return False
         self.holiday_checked = now.date()
         try:
-            bars, _, _ = data_yahoo.fetch("^NSEI", C.INTERVAL_MIN, "5d")
+            bars, _, _ = marketdata.fetch("^NSEI", C.INTERVAL_MIN, "5d")
         except data_yahoo.DataError:
             return False  # can't tell - keep running
         return not any(b["t"].date() == now.date() for b in bars)

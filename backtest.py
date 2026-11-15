@@ -20,6 +20,7 @@ import tempfile
 
 import config as C
 import data_yahoo
+import marketdata
 import risk
 import strategy
 
@@ -29,7 +30,7 @@ def run(days=60, symbols=None, start_cash=None, verbose=True):
     start_cash = start_cash or C.PAPER_START_INR
     data = {}
     now = dt.datetime.now(data_yahoo.IST)
-    for s, got in data_yahoo.fetch_many(symbols, C.INTERVAL_MIN, f"{days}d", C.FETCH_WORKERS).items():
+    for s, got in marketdata.fetch_many(symbols, C.INTERVAL_MIN, f"{days}d", C.FETCH_WORKERS).items():
         if isinstance(got, Exception):
             print(f"[!] {s}: {got}")
             continue
@@ -45,12 +46,12 @@ def load_context(days, symbols):
     index_data = {}
     for ix in {strategy.index_for(s) for s in symbols}:
         try:
-            bars, _, _ = data_yahoo.fetch(ix, C.INTERVAL_MIN, f"{days}d")
+            bars, _, _ = marketdata.fetch(ix, C.INTERVAL_MIN, f"{days}d")
             index_data[ix] = data_yahoo.closed_bars(bars, now, C.INTERVAL_MIN)
         except data_yahoo.DataError as e:
             print(f"[!] index {ix}: {e}")
     try:
-        vix = data_yahoo.vix_by_day("6mo")
+        vix = marketdata.vix_by_day("6mo")
     except data_yahoo.DataError as e:
         print(f"[!] India VIX: {e}")
         vix = {}
@@ -191,12 +192,16 @@ def report(trades, st, start_cash, curve, data, sim_from, verbose):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--days", type=int, default=60, help="Yahoo keeps ~60 days of 15m data")
+    ap.add_argument("--days", type=int, default=60,
+                    help="Yahoo keeps ~60 days of 15m data; with DATA_SOURCE=kite up to 365")
     ap.add_argument("--symbols", default="", help="comma list, default = WATCHLIST")
     ap.add_argument("--cash", type=float, default=None)
     a = ap.parse_args()
     syms = [x.strip().upper() for x in a.symbols.split(",") if x.strip()] or None
-    run(min(a.days, 60), syms, a.cash)
+    limit = marketdata.max_history_days()
+    if a.days > limit:
+        print(f"[i] {marketdata.status()['using'].title()} data goes back about {limit} days - using {limit}")
+    run(min(a.days, limit), syms, a.cash)
 
 
 if __name__ == "__main__":

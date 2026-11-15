@@ -24,6 +24,7 @@ import os
 
 import config as C
 import data_yahoo
+import marketdata
 
 SETUPS = ["20-day high breakout", "Bull flag", "20-day MA reclaim", "Oversold", "Oversold bounce"]
 
@@ -128,7 +129,7 @@ def scan_symbol(bars):
 def scan(symbols=None, refresh=False, now=None):
     symbols = symbols or C.SCAN_LIST
     now = now or dt.datetime.now(data_yahoo.IST)
-    got = data_yahoo.fetch_many(symbols, range_="2y", workers=C.FETCH_WORKERS, interval="1d")
+    got = marketdata.fetch_many(symbols, range_="2y", workers=C.FETCH_WORKERS, interval="1d")
     rows, errors = {}, {}
     for s, g in got.items():
         if isinstance(g, Exception):
