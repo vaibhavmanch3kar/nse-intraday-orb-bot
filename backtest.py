@@ -104,7 +104,7 @@ def simulate(data, start_cash, verbose=True, index_data=None, vix=None):
                     qty, _ = risk.size_position(st.equity(), entry, stop, d, st.open_notional(), mult)
                     if qty > 0:
                         st.record_entry(s, d, qty, entry, stop, strategy.target_for(entry, stop, d), b["t"],
-                                        {"held": 0})
+                                        {"held": 0, **(sig["context"] or {})})
         for s, bars in data.items():
             i = idx[s].get(t)
             if i is None:
@@ -130,7 +130,7 @@ def simulate(data, start_cash, verbose=True, index_data=None, vix=None):
                 ev = strategy.evaluate(bars, i, index_data.get(strategy.index_for(s)))
                 if ev["signal"]:
                     pending[s] = {"direction": ev["signal"], "stop": ev["stop"], "day": day,
-                                  "rank": ev["vol_ratio"] or 0.0}
+                                  "rank": ev["vol_ratio"] or 0.0, "context": ev["context"]}
         # mark open positions to this bar's close, so drawdowns inside open trades are counted
         equity_curve.append((t, st.equity(last_close)))
 
@@ -164,7 +164,7 @@ def report(trades, st, start_cash, curve, data, sim_from, verbose):
     os.makedirs(C.DATA_DIR, exist_ok=True)
     path = os.path.join(C.DATA_DIR, "backtest_trades.csv")
     cols = ["opened", "closed", "symbol", "direction", "qty", "entry", "exit", "stop", "target",
-            "gross", "charges", "net", "r", "reason"]
+            "gross", "charges", "net", "r", "reason"] + strategy.CONTEXT_COLS
     with open(path, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=cols, extrasaction="ignore")
         w.writeheader()

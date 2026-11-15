@@ -48,11 +48,30 @@ def setup_logging():
     logging.getLogger("urllib3").setLevel(logging.WARNING)
 
 
+TRADE_COLS = ["closed", "symbol", "direction", "qty", "entry", "exit", "stop", "target",
+              "gross", "charges", "net", "r", "reason", "opened"] + strategy.CONTEXT_COLS
+
+
+def _upgrade_trade_log(path, cols):
+    """A log written before new columns were added gets the new header; old rows keep their
+    values and leave the new columns empty. Nothing is lost."""
+    with open(path, newline="", encoding="utf-8") as f:
+        r = csv.DictReader(f)
+        if r.fieldnames == cols:
+            return
+        rows = list(r)
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=cols, extrasaction="ignore")
+        w.writeheader()
+        w.writerows(rows)
+
+
 def log_trade(row, mode):
     path = os.path.join(C.DATA_DIR, f"trades_{mode}.csv")
     new = not os.path.exists(path)
-    cols = ["closed", "symbol", "direction", "qty", "entry", "exit", "stop", "target",
-            "gross", "charges", "net", "r", "reason", "opened"]
+    cols = TRADE_COLS
+    if not new:
+        _upgrade_trade_log(path, cols)
     with open(path, "a", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=cols, extrasaction="ignore")
         if new:
@@ -286,7 +305,8 @@ class Bot:
                 continue
             target = strategy.target_for(fill_price, stop, direction)
             self.state.record_entry(sym, direction, filled, fill_price, stop, target, now,
-                                    {**extra, "checked_upto": last["t"].isoformat()})
+                                    {**extra, "checked_upto": last["t"].isoformat(),
+                                     **(ev["context"] or {})})
             self.note(f"{T.ENTER_ICON} ENTER {direction} {sym} x{filled} @ {fill_price:.2f} "
                       f"{T.name('stop')} (stop) {stop:.2f} "
                       + (f"{T.name('target')} (target) {target:.2f}" if target is not None

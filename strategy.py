@@ -81,6 +81,37 @@ def index_agrees(index_bars, bar_time, direction):
     return ok, f"index {chg:+.2f}%"
 
 
+def index_change(index_bars, bar_time):
+    """Index % change from its day open to the close of the bar at bar_time, or None."""
+    if not index_bars:
+        return None
+    day = [b for b in index_bars if b["t"].date() == bar_time.date() and b["t"] <= bar_time]
+    if not day or day[-1]["t"] != bar_time:
+        return None
+    return (day[-1]["c"] / day[0]["o"] - 1) * 100
+
+
+# Conditions at the signal bar, saved with every trade so the weekly report can show which
+# conditions won or lost. Recording only: none of these change whether a trade is taken.
+CONTEXT_COLS = ["signal_bar", "or_width_pct", "vol_ratio", "vwap_dist_pct", "index_chg_pct", "gap_pct"]
+
+
+def entry_context(bar, width_pct, vol_ratio, vw, index_bars, day_bars, prior):
+    """signal_bar: start time of the signal bar (HH:MM); or_width_pct: opening range width;
+    vol_ratio: bar volume / same-slot average; vwap_dist_pct: close vs VWAP (signed);
+    index_chg_pct: the stock's index from its day open (None if no index bar);
+    gap_pct: today's open vs the previous session's last close (None without history)."""
+    prev_close = prior[-1][-1]["c"] if prior and prior[-1] else None
+    return {
+        "signal_bar": f"{bar['t']:%H:%M}",
+        "or_width_pct": width_pct,
+        "vol_ratio": vol_ratio,
+        "vwap_dist_pct": (bar["c"] / vw - 1) * 100 if vw else None,
+        "index_chg_pct": index_change(index_bars, bar["t"]),
+        "gap_pct": (day_bars[0]["o"] / prev_close - 1) * 100 if prev_close else None,
+    }
+
+
 def vix_multiplier(vix):
     """Risk multiplier from India VIX (None -> 1.0)."""
     if vix is None:
@@ -108,7 +139,8 @@ def evaluate(bars, idx=None, index_bars=None):
     if idx is None:
         idx = len(bars) - 1
     out = {"signal": None, "reason": "", "or_high": None, "or_low": None,
-           "close": None, "vwap": None, "vol_ratio": None, "stop": None, "bar_time": None}
+           "close": None, "vwap": None, "vol_ratio": None, "stop": None, "bar_time": None,
+           "context": None}
     if idx < 0:
         out["reason"] = "no data"
         return out
@@ -176,6 +208,7 @@ def evaluate(bars, idx=None, index_bars=None):
     else:
         out["stop"] = orng["low"] if direction == "LONG" else orng["high"]
     out["reason"] = f"{direction} breakout"
+    out["context"] = entry_context(bar, width_pct, out["vol_ratio"], vw, index_bars, day_bars, prior)
     return out
 
 

@@ -6,6 +6,14 @@ Every version is on the [Releases page](https://github.com/vaibhavmanch3kar/nse-
 with a ZIP you can download. To go back to an older version, download that version's ZIP.
 Your settings (Windows user environment variables) and your `data` folder are not part of the ZIP, so keep them.
 
+## Unreleased: learning advisor, Phases 1-3
+
+- **Phase 1:** every trade now saves the conditions at its signal bar: signal time, opening range width,
+  volume ratio, distance from VWAP, index change and opening gap. These are six new columns at the end of
+  `backtest_trades.csv` and `trades_paper.csv` / `trades_live.csv`. An older paper or live log gets the new
+  header automatically, and its old rows are kept. Recording only: the backtest gives exactly the same
+  84 trades and numbers as before. 101 tests pass.
+
 ## v1.2.0 (15 Nov 2026): Ramayana edition
 
 - The bot is now **Ayodhya ORB**, themed on the Ramayana across the dashboard, console windows, log
