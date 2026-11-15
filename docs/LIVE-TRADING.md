@@ -15,6 +15,8 @@ trades pretend money.
    reactivate it from Zerodha first.
 2. **A Kite Connect developer app** at https://developers.kite.trade/apps:
    - **Personal** (free) is enough to place orders. This bot gets its prices from Yahoo, so it doesn't need Kite's paid data.
+   - **Connect** (₹500/month = 500 credits for 30 days) adds real-time prices and history. See
+     [KITE-CONNECT-PLAN.md](KITE-CONNECT-PLAN.md) for adding credits, step by step with screenshots.
    - **Zerodha Client ID**: the account holder's user ID (e.g. `AB1234`).
    - **Redirect URL**: `http://127.0.0.1:5000/kite/callback` (exactly this).
    - **Postback URL**: leave empty.

@@ -111,11 +111,14 @@ To undo it, double-click `5-UNSCHEDULE.bat`.
 
 ## Better price data: Kite Connect (optional, about ₹500/month)
 
-Free Yahoo data can lag a few minutes and only goes back ~60 days. If you upgrade your Kite developer app
-to the paid **Connect** plan, the bot can use Zerodha's own real-time prices and years of history instead.
+Free Yahoo data can lag a few minutes and only goes back ~60 days. With Zerodha's paid **Kite Connect** plan
+(**₹500/month = 500 credits for 30 days**, GST included) the bot can use Zerodha's own real-time prices and years of history.
 
-1. On https://developers.kite.trade/apps, upgrade your app to **Connect** (the live-trading setup in
-   [docs/LIVE-TRADING.md](docs/LIVE-TRADING.md) must be done first, so the bot has your API key).
+**Full step-by-step guide with screenshots (adding credits, creating the app, switching the bot):
+[docs/KITE-CONNECT-PLAN.md](docs/KITE-CONNECT-PLAN.md)**. Short version:
+
+1. On https://developers.kite.trade, add **500 credits** under **Billing** and create a **Connect** app under **My apps**,
+   then save its API key with `setup_kite_proxy.ps1 -ResetSecrets` (see the guide).
 2. Double-click **`3-DASHBOARD.bat`** and click **Log in to Zerodha** (Kite data needs a login every day).
 3. Double-click **`6-CHECK-KITE-DATA.bat`**. It should say *Kite data works* and how many days of history you get.
 4. Open `config.py` in Notepad, change `DATA_SOURCE = _env("DATA_SOURCE", "yahoo")` to `"kite"`, save.
@@ -149,6 +152,7 @@ Each December, add next year's NSE holidays to `nse_holidays.json` (the list is 
 
 - **[How the strategy works, and the test results](docs/STRATEGY.md)**: rules, risk limits, backtest, Time Machine, files
 - **[Real-money trading with Zerodha (advanced)](docs/LIVE-TRADING.md)**: Kite Connect app, static IP, daily login, safety switches
+- **[Paid Kite Connect plan for real-time data](docs/KITE-CONNECT-PLAN.md)**: 500 credits a month, adding credits, creating the app, switching the bot
 
 For developers: `.\.venv\Scripts\python.exe -m pytest -q` runs 91 offline tests;
 `.\.venv\Scripts\python.exe backtest.py` runs the 60-day backtest.
