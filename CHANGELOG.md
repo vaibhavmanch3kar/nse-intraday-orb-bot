@@ -21,6 +21,16 @@ Your settings (Windows user environment variables) and your `data` folder are no
   - Note: from 3 Aug 2026 Kite has no 15:15 candle for the stocks (NSE's closing auction session); the
     indexes still have it. The archive also keeps two Sunday special sessions (1 Feb Budget day and
     8 Nov Diwali Muhurat, 4 candles), which the weekly report will leave out.
+- **Phase 3:** the weekly report, **Guru Vashishtha · Advisor**. `advisor.py report` backtests the current
+  settings on the candle archive and shows the trades by entry time, direction, range width, breakout volume,
+  weekday, stock and exit reason, each with trade count, win rate, average R, net ₹ and a 95% range. A rule
+  check replays the same data with one rule switched off at a time. Paper and live trades are reported
+  separately. It is read-only: it writes only to `data/advisor/` and never touches `backtest_trades.csv` or
+  any setting. A full year takes about 10 minutes (`--no-rules` is faster). `backtest.py` gives the same
+  84 trades as before. 116 tests pass.
+  - First report (17 Nov 2025 to 13 Nov 2026, 331 trades): −16.7%, max drawdown 16.7%, profit factor 0.27,
+    average −0.21R (95% range −0.26R to −0.16R, so clearly losing), and a loss in every one of the 13 months.
+    Each filter reduced the loss; the VWAP filter never changed a trade.
 
 ## v1.2.0 (15 Nov 2026): Ramayana edition
 

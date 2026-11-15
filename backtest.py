@@ -63,7 +63,9 @@ def prev_vix(vix, day):
     return vix[max(earlier)] if earlier else None
 
 
-def simulate(data, start_cash, verbose=True, index_data=None, vix=None):
+def simulate(data, start_cash, verbose=True, index_data=None, vix=None, trades_path=None):
+    """trades_path: where to write the trade list (default data/backtest_trades.csv). The advisor
+    passes its own path so its runs never overwrite your backtest results."""
     index_data, vix = index_data or {}, vix or {}
     tmp = tempfile.mkdtemp()
     st = risk.State(os.path.join(tmp, "bt_state.json"), start_cash)
@@ -134,10 +136,10 @@ def simulate(data, start_cash, verbose=True, index_data=None, vix=None):
         # mark open positions to this bar's close, so drawdowns inside open trades are counted
         equity_curve.append((t, st.equity(last_close)))
 
-    return report(trades, st, start_cash, equity_curve, data, sim_from, verbose)
+    return report(trades, st, start_cash, equity_curve, data, sim_from, verbose, trades_path)
 
 
-def report(trades, st, start_cash, curve, data, sim_from, verbose):
+def report(trades, st, start_cash, curve, data, sim_from, verbose, trades_path=None):
     end_eq = st.equity()
     peak, max_dd = start_cash, 0.0
     for _, e in curve:
@@ -161,8 +163,8 @@ def report(trades, st, start_cash, curve, data, sim_from, verbose):
         "avg_r": sum(t["r"] for t in trades) / len(trades) if trades else 0.0,
         "buy_hold_pct": sum(bh) / len(bh) * 100 if bh else 0.0,
     }
-    os.makedirs(C.DATA_DIR, exist_ok=True)
-    path = os.path.join(C.DATA_DIR, "backtest_trades.csv")
+    path = trades_path or os.path.join(C.DATA_DIR, "backtest_trades.csv")
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     cols = ["opened", "closed", "symbol", "direction", "qty", "entry", "exit", "stop", "target",
             "gross", "charges", "net", "r", "reason"] + strategy.CONTEXT_COLS
     with open(path, "w", newline="", encoding="utf-8") as f:

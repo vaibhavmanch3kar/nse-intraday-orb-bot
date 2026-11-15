@@ -18,6 +18,7 @@ Glossary
     Vishram            pause                             Sandesh           recent events (messages)
     Panchang           NSE calendar                      Utsav             market holiday
     Aadesh             controls                          Jagrat / Nidra    running / not running
+    Guru Vashishtha    learning advisor (counsels; the king decides)
 """
 
 APP = "Ayodhya ORB"
@@ -59,6 +60,7 @@ TERMS = {
     "not_running": ("Nidra", "NOT RUNNING"),
     "watchlist": ("Sena", "Watchlist"),
     "positions": ("Rann", "Open positions"),
+    "advisor": ("Guru Vashishtha", "Advisor"),
 }
 
 # dashboard tabs: path -> TERMS key, icon
