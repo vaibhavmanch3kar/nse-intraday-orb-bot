@@ -103,6 +103,8 @@ footer{text-align:center;color:var(--muted);font-size:11px;margin:20px 0 6px}
 .viewbar.zerodha{background:rgba(220,38,38,.18);color:#fecaca;border:2px solid var(--dn)}
 .card.acct.paper{border:2px solid var(--gold)} .card.acct.zerodha{border:2px solid var(--dn);background:linear-gradient(180deg,rgba(220,38,38,.10),var(--card) 40%)}
 .tag.dn{background:var(--dn);color:#fff}
+.opts{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 8px} .opt{padding:6px 10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);cursor:pointer}
+input[type=number]{background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:4px}
 """).replace("SERIF", SERIF)
 
 
@@ -218,7 +220,7 @@ def paper_card(acct, status=None):
          ("Charges paid", f"<b>{_inr(acct['charges'])}</b>")]
     kpis = "".join(f"<div>{label}{val}</div>" for label, val in k)
     warn = "".join(f"<div class='warn'>⚠ {html.escape(w)}</div>" for w in warnings)
-    return (f"<h2>{title}</h2><div class='kpis'>{kpis}</div>{warn}"
+    return (f"<h2>{title}</h2><div class='kpis'>{kpis}</div>{warn}{capital_lines()}"
             f"<div class='muted' style='margin-top:6px'>Updated {_clock(acct.get('as_of'))} IST (the bot's last round) · "
             f"checked {_clock(acct.get('now'))} · refreshes every {ACCOUNT_REFRESH_SEC} s · "
             f"unrealised P&amp;L is before exit charges · available = equity − invested (no leverage)</div>")
@@ -292,6 +294,62 @@ def zerodha_card(acct):
             f"checked {_clock(acct.get('now'))} · refreshes every {ACCOUNT_REFRESH_SEC} s "
             f"(Zerodha is asked at most every {accounts.ZERODHA_CACHE_SEC} s) · account value = opening balance + "
             f"today's P&amp;L · Zerodha's P&amp;L is before charges · delivery holdings are not included</div>")
+
+
+def capital_lines():
+    """Pending opening-balance change and the last few applied changes (paper account only)."""
+    import capital
+    s = capital.load()
+    out = ""
+    p = s.get("pending")
+    if p:
+        out += (f"<div class='warn'>⏳ Opening balance changes to <b>{_inr(float(p['amount']))}</b> at the bot's next start "
+                f"(requested {html.escape(str(p.get('requested_at', ''))[:16].replace('T', ' '))}).</div>")
+    hist = s.get("history") or []
+    if hist:
+        items = " · ".join(f"{html.escape(str(h.get('applied_at', ''))[:10])}: {_inr(float(h['from']))} → {_inr(float(h['to']))}"
+                           for h in hist[-3:])
+        out += f"<div class='muted'>Opening balance changes: {items}</div>"
+    return out
+
+
+def capital_card():
+    """Form to choose the PAPER opening balance. Kept outside the auto-refreshing account card, so a
+    refresh never wipes what you're typing. The change applies at the bot's next start."""
+    import capital
+    current = capital.current_opening_balance()
+    pending = capital.load().get("pending")
+    chosen = float(pending["amount"]) if pending else current
+    radios = "".join(
+        f"<label class='opt'><input type='radio' name='amount' value='{v}'{' checked' if v == chosen else ''}> {_inr(float(v))[:-3]}</label>"
+        for v in capital.PRESETS)
+    custom_on = chosen not in capital.PRESETS
+    radios += (f"<label class='opt'><input type='radio' name='amount' value='custom'{' checked' if custom_on else ''}> Custom: "
+               f"₹<input type='number' name='custom_amount' min='{capital.MIN_INR}' max='{capital.MAX_INR}' step='1' "
+               f"value='{int(chosen) if custom_on else ''}' placeholder='e.g. 75000' style='width:110px' "
+               f"onfocus=\"this.form.amount.value='custom'\"></label>")
+    cancel = ("<form method='post' action='/paper-capital/cancel' style='display:inline' "
+              "onsubmit=\"if(!confirm('Cancel the pending opening balance change?'))return false;this.confirm.value='yes'\">"
+              "<input type='hidden' name='confirm' value=''><button class='red'>Cancel pending change</button></form>"
+              if pending else "")
+    return f"""<div class="card" id="capital"><h2>Opening Balance · Paper Account <span class='tag'>virtual money</span></h2>
+<form method="post" action="/paper-capital" onsubmit="return confirmCapital(this)" style="display:inline">
+<div class="opts">{radios}</div>
+<input type="hidden" name="confirm" value="">
+<button>Save opening balance</button></form> {cancel}
+<div class="muted" style="margin-top:6px">Now <b>{_inr(current)}</b>. A new amount takes effect when the bot next starts
+(normally 9:00), before any trade; if paper positions are open it waits. Past trades and P&amp;L are kept, and
+position sizes follow the new equity (0.5% risk per trade). Paper only: it never touches your Zerodha account or
+live trading. From {_inr(float(capital.MIN_INR))[:-3]} to {_inr(float(capital.MAX_INR))[:-3]}, whole rupees.</div></div>
+<script>function confirmCapital(f){{
+ var v=f.querySelector('input[name=amount]:checked'); if(!v){{alert('Choose an amount.');return false}}
+ var a=v.value==='custom'?Number(f.custom_amount.value):Number(v.value);
+ if(!a||a<{capital.MIN_INR}||a>{capital.MAX_INR}||a!==Math.floor(a)){{alert('Enter whole rupees from {capital.MIN_INR:,} to {capital.MAX_INR:,}.');return false}}
+ var m='Change the PAPER opening balance from \\u20b9{int(current):,} to \\u20b9'+a.toLocaleString('en-US')+'?\\n\\n'+
+  'It takes effect at the bot\\'s next start (normally 9:00). Past trades and P&L are kept.\\n'+
+  'Your real Zerodha account and live trading are not affected.';
+ if(a<{capital.SMALL_INR})m+='\\n\\nBelow \\u20b9{capital.SMALL_INR:,} trades are small, and stocks priced above 25% of the balance are skipped.';
+ if(!confirm(m))return false; f.confirm.value='yes'; return true}}</script>"""
 
 
 def account_card_html(view, status=None):
@@ -404,6 +462,7 @@ def render(msg="", q=None):
 {view_switch("/", view, s)}
 {view_banner(view)}
 {account_card(view, s)}
+{capital_card() if view == "paper" else ""}
 {banner}
 {calendar}
 {f'<p class="msg">{html.escape(msg)}</p>' if msg else ''}
@@ -641,8 +700,15 @@ def render_trades(q=None):
              view_switch("/trades", view, s), view_banner(view)]
     rows = trade_rows(mode)
     label = f"{T.name(mode)} · {VIEWS[view]}"
+    start, note = C.PAPER_START_INR, ""
+    if mode == "paper":
+        import capital
+        start = capital.current_opening_balance()
+        if capital.load().get("history"):
+            note = (f"<div class='muted'>The equity curve and drawdown use the current opening balance "
+                    f"({_inr(start)}). {capital_lines()}</div>")
     parts.append(f"<div class='card acct {view}' style='padding:4px 16px'>"
-                 + trade_section(rows, mode, label, C.PAPER_START_INR) + "</div>")
+                 + trade_section(rows, mode, label, start) + note + "</div>")
     parts.append(edge_card(rows, f"{mode.title()} trading"))
     if not rows:
         parts.append("<div class='card muted'>No trades yet - the bot records them here once it trades on a market day.</div>"
@@ -830,6 +896,33 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self._send("not found", 404, "text/plain")
 
+    def _paper_capital(self, origin):
+        """Save or cancel a PAPER opening-balance change. Needs the dashboard's own page (Origin/Referer)
+        and the confirmation the page adds after you click OK. Writes only data/paper_capital.json."""
+        from urllib.parse import quote
+        import capital
+        if not origin:
+            self._send("forbidden: open the dashboard page to change the opening balance", 403, "text/plain")
+            return
+        length = int(self.headers.get("Content-Length") or 0)
+        if length > 10_000:
+            self._send("too large", 413, "text/plain")
+            return
+        form = parse_qs(self.rfile.read(length).decode("utf-8", "replace"))
+        if form.get("confirm", [""])[0] != "yes":
+            msg = "Not changed: the change needs your confirmation."
+        elif self.path == "/paper-capital/cancel":
+            msg = capital.cancel()
+        else:
+            amount = form.get("amount", [""])[0]
+            if amount == "custom":
+                amount = form.get("custom_amount", [""])[0]
+            try:
+                msg = capital.request(amount)
+            except ValueError as e:
+                msg = f"Not changed: {e}"
+        self._redirect("/?view=paper&msg=" + quote(msg))
+
     def do_POST(self):
         # Browsers on other sites can't read the response, but they can POST: only accept same-origin.
         origin = self.headers.get("Origin") or self.headers.get("Referer") or ""
@@ -837,6 +930,9 @@ class Handler(BaseHTTPRequestHandler):
             self._send("forbidden", 403, "text/plain")
             return
         os.makedirs(C.DATA_DIR, exist_ok=True)
+        if self.path in ("/paper-capital", "/paper-capital/cancel"):
+            self._paper_capital(origin)
+            return
         if self.path == "/pause":
             open(C.PAUSE_FILE, "w").close()
         elif self.path == "/resume":
