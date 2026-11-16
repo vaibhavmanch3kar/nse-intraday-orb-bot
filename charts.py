@@ -30,6 +30,33 @@ def _svg(w, h, body, label):
             f"aria-label='{html.escape(label)}' style='max-height:{h}px;display:block'>{body}</svg>")
 
 
+def intraday(points, start=None, w=800, h=200, title="Equity during the day"):
+    """Today's equity line from the journal's samples [(HH:MM:SS, equity)]. Colours come from the page's
+    theme (CSS variables), so it reads in both light and dark."""
+    if len(points) < 2:
+        return "<div class='muted'>Not enough data yet.</div>"
+    vals = [v for _, v in points]
+    base = start if start is not None else vals[0]
+    lo, hi = min(vals + [base]), max(vals + [base])
+    pad = (hi - lo) * 0.12 or max(abs(hi) * 0.001, 1)
+    y = _scale(lo - pad, hi + pad, 10, h - 22)
+    left, right = 66, 10
+    x = lambda i: left + i * (w - left - right) / (len(points) - 1)  # noqa: E731
+    col = "var(--up)" if vals[-1] >= base else "var(--dn)"
+    line = " ".join(f"{x(i):.1f},{y(v):.1f}" for i, v in enumerate(vals))
+    area = f"{x(0):.1f},{h - 22} {line} {x(len(vals) - 1):.1f},{h - 22}"
+    parts = [f"<line x1='{left}' x2='{w - right}' y1='{y(base):.1f}' y2='{y(base):.1f}' style='stroke:var(--muted)' stroke-dasharray='4 4'/>",
+             f"<polygon points='{area}' style='fill:{col}' opacity='0.12'/>",
+             f"<polyline points='{line}' fill='none' style='stroke:{col}' stroke-width='2' stroke-linejoin='round'/>"]
+    for v in (max(vals), min(vals)):
+        parts.append(f"<text x='{left - 6}' y='{y(v) + 4:.1f}' font-size='12' text-anchor='end' style='fill:var(--muted)'>{_fmt_inr(v)}</text>")
+    parts.append(f"<text x='{left}' y='{h - 5}' font-size='12' style='fill:var(--muted)'>{html.escape(points[0][0][:5])}</text>"
+                 f"<text x='{w - right}' y='{h - 5}' font-size='12' text-anchor='end' style='fill:var(--muted)'>"
+                 f"{html.escape(points[-1][0][:5])}</text>")
+    return (f"<svg viewBox='0 0 {w} {h}' width='100%' role='img' aria-label='{html.escape(title)}' "
+            f"style='display:block;max-height:{h}px'>{''.join(parts)}</svg>")
+
+
 def equity_curve(values, start, labels=None, w=900, h=220, title="Equity"):
     """Equity after each closed trade, starting at `start`. Shades drawdowns below the running peak.
 

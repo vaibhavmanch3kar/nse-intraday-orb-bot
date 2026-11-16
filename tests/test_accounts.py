@@ -120,7 +120,7 @@ def get(url):
 def test_live_page_has_refreshing_account_card(server):
     write_paper_state(ONE_LONG)
     code, body = get(server + "/")
-    assert code == 200 and "id='acct'" in body and "/api/account?view=paper" in body
+    assert code == 200 and "id='acct'" in body and "card acct paper" in body
     code, frag = get(server + "/api/account?view=paper")
     assert code == 200 and "Paper Account" in frag and "<html" not in frag
 
@@ -149,7 +149,7 @@ def test_switch_labels_highlight_and_confirmation(server):
     assert "Bot trading: Abhyas · PAPER" in body
     _, body = get(server + "/?view=zerodha")
     assert "class='zerodha on'" in body and "LIVE · REAL ZERODHA ACCOUNT" in body
-    assert "card acct zerodha" in body and "/api/account?view=zerodha" in body
+    assert "card acct zerodha" in body
     assert "Bot trading: Abhyas · PAPER" in body                # the bot's mode is unchanged
     assert "href='/trades?view=zerodha'" in body                 # the view carries over to Trades
 

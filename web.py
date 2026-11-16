@@ -115,6 +115,17 @@ def data_source_kpi(s):
     return f"<div{tip}>Price data<b class='{cls}'>{label}</b>{note}</div>"
 
 
+def data_source_text(s):
+    """'Pushpaka · Kite (real-time)' / 'Yahoo (free, may lag)', with Kite's fallback reason if any."""
+    ds = s.get("data_source") or {}
+    using = ds.get("using")
+    if not using:
+        return "-"
+    label = f"{T.name('kite_data')} · Kite (real-time)" if using == "kite" else "Yahoo (free, may lag)"
+    why = f"<br><span class='warn small'>Kite unavailable: {html.escape(ds['reason'])}</span>" if ds.get("reason") else ""
+    return f"<b class='{'up' if using == 'kite' else ''}'>{label}</b>{why}"
+
+
 def market_calendar():
     """One line: is NSE open today, next trading day, upcoming holidays."""
     import datetime as dt
@@ -131,8 +142,10 @@ def market_calendar():
     up = " · ".join(f"{d:%a %d %b} {html.escape(n)}" for d, n in holidays.upcoming(today, 3)) or "none listed"
     warn = ("" if holidays.year_listed(today.year) else
             f" <span class='warn'>nse_holidays.json has no {today.year} list - add it.</span>")
-    return (f"<div class='card'><h2>{T.term('calendar')}</h2>Today: <b>{state}</b> · next trading day "
-            f"<b>{nxt:%a %d %b}</b><br><span class='muted'>Upcoming holidays: {up}</span>{warn}</div>")
+    return (f"<details class='card' id='calendar'><summary><span class='theme'>{T.term('calendar')}</span>"
+            f"<span class='end'><span class='tag'>{state}</span></span></summary>"
+            f"<div class='small'>Today: <b>{state}</b> · next trading day <b>{nxt:%a %d %b}</b><br>"
+            f"<span class='muted'>Upcoming holidays: {up}</span>{warn}</div></details>")
 
 
 def _inr(v, signed=False):
@@ -290,15 +303,19 @@ def capital_card():
               "onsubmit=\"if(!confirm('Cancel the pending opening balance change?'))return false;this.confirm.value='yes'\">"
               "<input type='hidden' name='confirm' value=''><button class='red'>Cancel pending change</button></form>"
               if pending else "")
-    return f"""<div class="card" id="capital"><h2>Opening Balance · Paper Account <span class='tag'>virtual money</span></h2>
+    state = (f"<span class='tag warn'>→ {_inr(float(pending['amount']))[:-3]} at next start</span>" if pending
+             else "<span class='tag warn'>paper only</span>")
+    return f"""<details class="card" id="capital"{' open' if pending else ''}><summary>Opening Balance · Paper Account
+<span class="end"><b class="mono">{_inr(current)[:-3]}</b>{state}</span></summary>
 <form method="post" action="/paper-capital" onsubmit="return confirmCapital(this)" style="display:inline">
 <div class="opts">{radios}</div>
 <input type="hidden" name="confirm" value="">
 <button>Save opening balance</button></form> {cancel}
-<div class="muted" style="margin-top:6px">Now <b>{_inr(current)}</b>. A new amount takes effect when the bot next starts
+{capital_lines()}
+<div class="muted small" style="margin-top:6px">Now <b>{_inr(current)}</b>. A new amount takes effect when the bot next starts
 (normally 9:00), before any trade; if paper positions are open it waits. Past trades and P&amp;L are kept, and
 position sizes follow the new equity (0.5% risk per trade). Paper only: it never touches your Zerodha account or
-live trading. From {_inr(float(capital.MIN_INR))[:-3]} to {_inr(float(capital.MAX_INR))[:-3]}, whole rupees.</div></div>
+live trading. From {_inr(float(capital.MIN_INR))[:-3]} to {_inr(float(capital.MAX_INR))[:-3]}, whole rupees.</div></details>
 <script>function confirmCapital(f){{
  var v=f.querySelector('input[name=amount]:checked'); if(!v){{alert('Choose an amount.');return false}}
  var a=v.value==='custom'?Number(f.custom_amount.value):Number(v.value);
@@ -330,50 +347,330 @@ def account_card(view, status=None):
 
 def _badge(text, cls, tip=""):
     t = f" title='{html.escape(tip)}'" if tip else ""
-    return f"<span class='tag {cls}' style='font-size:11px;margin-left:4px'{t}>{html.escape(text)}</span>"
+    return f"<span class='tag {cls}' style='margin-left:4px'{t}>{html.escape(text)}</span>"
+
+
+def _signed(v, nd=2):
+    """▲ ₹1,234.50 / ▼ ₹1,234.50 / ₹0.00 - the arrow means the sign is never told by colour alone."""
+    if v is None:
+        return "-"
+    arrow = "▲ " if v > 0 else "▼ " if v < 0 else ""
+    return f"{arrow}₹{abs(v):,.{nd}f}"
+
+
+def _cls(v):
+    return "" if not v else ("up" if v > 0 else "dn")
+
+
+def _held(m):
+    return "-" if m is None else (f"{m} min" if m < 60 else f"{m // 60} h {m % 60:02d} min")
 
 
 def position_row(p):
-    """One open position: P&L in ₹ and R, stop distance, EMA trail, time-stop check, time in trade."""
+    """One open position as a card: P&L in ₹ and R, where the price sits between the stop and the
+    target (or +2R when the trade has no fixed target), the EMA trail, the time-stop check, time in trade."""
     long_ = p.get("direction") == "LONG"
     r = p.get("r_unreal")
-    pnl_cls = "up" if (p.get("unrealised") or 0) >= 0 else "dn"
+    entry, price, stop = p.get("entry"), p.get("price"), p.get("stop")
     stop_d = p.get("stop_dist_pct")
-    stop_cell = f"{_fmt(p.get('stop'))}" + (f"<br><span class='muted'>{stop_d:.2f}% away</span>" if stop_d is not None else "")
+    badges = ""
     if stop_d is not None and stop_d < 0.3:
-        stop_cell += _badge("NEAR STOP", "dn")
+        badges += _badge("NEAR STOP", "dn")
+    trail = "-"
     if p.get("trail_ema") is not None:
         td = p.get("trail_dist_pct")
-        trail_cell = (f"EMA {_fmt(p['trail_ema'])}<br><span class='muted'>"
-                      f"{'' if td is None else f'{td:+.2f}% from price'}</span>")
+        trail = f"EMA {_fmt(p['trail_ema'])}" + ("" if td is None else f" <span class='muted'>({td:+.2f}%)</span>")
         if td is not None and td < 0:
-            trail_cell += _badge("PAST TRAIL", "dn", "Price is on the wrong side of the EMA: if the 15-min bar "
-                                 "closes here, the bot exits")
+            badges += _badge("PAST TRAIL", "dn", "Price is on the wrong side of the EMA: if the 15-min bar closes here, the bot exits")
         elif td is not None and td < 0.2:
-            trail_cell += _badge("NEAR TRAIL", "warn", "Within 0.2% of the EMA trail")
+            badges += _badge("NEAR TRAIL", "warn", "Within 0.2% of the EMA trail")
         else:
-            trail_cell += _badge("TRAIL", "warn", "Exit when a 15-min close crosses the EMA")
-    else:
-        trail_cell = f"target {_fmt(p.get('target'))}" if p.get("target") else "-"
+            badges += _badge("TRAIL", "warn", "Exit when a 15-min close crosses the EMA")
     tc = p.get("time_check")
     if tc == "passed":
-        time_cell = _badge("PASSED", "up")
+        time_txt = "check passed" + _badge("PASSED", "up")
     elif tc == "pending":
         need = C.TIME_STOP_MIN_R
         ok_now = r is not None and r >= need
-        time_cell = (f"at {html.escape(str(p.get('time_check_at')))}<br><span class='muted'>needs ≥ {need:+.1f}R</span>"
-                     + _badge("ON TRACK" if ok_now else "AT RISK", "up" if ok_now else "warn",
-                              "Exits at the time-stop check unless the trade is at least this far in profit"))
+        time_txt = (f"check at {html.escape(str(p.get('time_check_at')))} <span class='muted'>· needs ≥ {need:+.1f}R</span>"
+                    + _badge("ON TRACK" if ok_now else "AT RISK", "up" if ok_now else "warn",
+                             "Exits at the time-stop check unless the trade is at least this far in profit"))
     else:
-        time_cell = "-"
-    held = p.get("held_min")
-    held_cell = "-" if held is None else (f"{held} min" if held < 60 else f"{held // 60} h {held % 60:02d} min")
-    return (f"<tr><td><b>{_fmt(p.get('symbol'))}</b></td>"
-            f"<td class='{'up' if long_ else 'dn'}'>{html.escape(str(p.get('direction')))} · {p.get('qty')}</td>"
-            f"<td>{_fmt(p.get('entry'))} → {_fmt(p.get('price'))}</td>"
-            f"<td class='{pnl_cls}'><b>₹{_fmt(p.get('unrealised'))}</b>"
-            f"{'' if r is None else f'<br>{r:+.2f}R'}</td>"
-            f"<td>{stop_cell}</td><td>{trail_cell}</td><td>{time_cell}</td><td>{held_cell}</td></tr>")
+        time_txt = "-"
+    # the rail: stop on the left, target (or +2R) on the right, entry tick and a dot for the price
+    rail = ""
+    try:
+        risk = abs(entry - stop)
+        tgt = p.get("target") or (entry + 2 * risk if long_ else entry - 2 * risk)
+        lo, hi = (stop, tgt) if long_ else (tgt, stop)
+        span = (hi - lo) or 1
+        pos = lambda v: max(0.0, min(100.0, (v - lo) / span * 100))  # noqa: E731
+        left_lbl, right_lbl = (stop, tgt) if long_ else (tgt, stop)
+        tgt_name = f"{T.name('target')} · target" if p.get("target") else "+2R"
+        rail = (f"<div class='rail-t'>{T.term('stop')} → {tgt_name}</div>"
+                f"<div class='rail' role='img' aria-label='price {_fmt(price)} between stop {_fmt(stop)} and {html.escape(tgt_name)} {_fmt(tgt)}'>"
+                f"<span class='entry' style='left:{pos(entry):.1f}%'></span><span class='dot' style='left:{pos(price):.1f}%'></span></div>"
+                f"<div class='rail-l'><span class='{'dn' if long_ else 'up'}'>{_fmt(left_lbl)}</span>"
+                f"<span>entry {_fmt(entry)}</span><span class='{'up' if long_ else 'dn'}'>{_fmt(right_lbl)}</span></div>")
+    except (TypeError, ValueError):
+        pass
+    unreal = p.get("unrealised")
+    return (f"<div class='pos'>"
+            f"<div class='sym'><b>{_fmt(p.get('symbol'))}</b><span class='side {'long' if long_ else 'short'}'>"
+            f"{html.escape(str(p.get('direction')))}</span>{badges}"
+            f"<span class='lbl'>× {p.get('qty')} · in trade {_held(p.get('held_min'))}</span></div>"
+            f"<div><span class='lbl'>Entry → price</span>{_fmt(entry)} → <b>{_fmt(price)}</b></div>"
+            f"<div><span class='lbl'>Open P&amp;L</span><b class='{_cls(unreal)}'>{_signed(unreal)}"
+            f"{'' if r is None else f' · {r:+.2f}R'}</b></div>"
+            f"<div class='railbox'>{rail}</div>"
+            f"<div class='small'><span class='lbl'>{T.term('time_stop')}</span>{time_txt}"
+            f"<span class='lbl' style='margin-top:4px'>{T.term('trail')} · {trail}</span>"
+            f"<span class='lbl'>{T.term('stop')} {_fmt(stop)}"
+            f"{'' if stop_d is None else f' · {stop_d:.2f}% away'}</span></div></div>")
+
+
+LIVE_CSS = """
+.kwrap{background:none;border:0;box-shadow:none;padding:0;overflow:visible;border-radius:var(--radius)}
+.card.acct.kwrap{outline-offset:5px;margin:5px 5px 21px}
+.kwrap .warnline{padding:0 2px}
+.kwrap .kgrid{margin:0}
+.kwrap .warnline{margin-top:8px}
+.pos{display:grid;grid-template-columns:1.1fr 1fr 1fr 1.7fr 1.1fr;gap:12px;align-items:start;padding:12px 16px;border-bottom:1px solid var(--border)}
+.pos:last-child{border-bottom:0}
+.pos .sym b{font-size:15px}
+.side{font-size:11px;font-weight:700;padding:1px 6px;border-radius:5px;margin-left:6px}
+.side.long{background:var(--up-bg);color:var(--up)} .side.short{background:var(--dn-bg);color:var(--dn)}
+.lbl{display:block;font-size:11.5px;color:var(--muted)}
+.rail-t{font-size:11.5px;color:var(--muted)}
+.rail{position:relative;height:8px;border-radius:99px;margin:10px 0 4px;
+ background:linear-gradient(90deg,var(--dn-bg),var(--surface-2) 40%,var(--up-bg))}
+.rail .dot{position:absolute;top:50%;width:14px;height:14px;border-radius:50%;background:var(--text);border:3px solid var(--surface);
+ transform:translate(-50%,-50%);box-shadow:0 0 0 1px var(--border)}
+.rail .entry{position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--muted)}
+.rail-l{display:flex;justify-content:space-between;font-size:11px;color:var(--muted);gap:6px}
+.empty{padding:14px 16px;color:var(--muted)}
+.list{list-style:none;margin:0;padding:0}
+.list li{padding:7px 0;border-bottom:1px dashed var(--border);font-size:13px;display:flex;gap:10px}
+.list li:last-child{border-bottom:0}
+.list time{color:var(--muted);font-size:12px;min-width:60px;flex:none}
+.facts{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:13px} .facts dt{color:var(--muted)} .facts dd{margin:0}
+.spark svg{width:100%;height:auto;display:block}
+@media (max-width:760px){
+  .pos{grid-template-columns:1fr 1fr;row-gap:8px;padding:12px 14px}
+  .pos .railbox{grid-column:1/-1}
+}
+"""
+
+
+def _status_chips(s, running, view, ok_login, lag):
+    """Market, bot, mode, data and Zerodha login at a glance."""
+    import datetime as dt
+    import accounts
+    import holidays
+    now = dt.datetime.now(accounts.IST)
+    if accounts.market_open(now):
+        market = f"<span class='chip ok'><i class='pulse'></i>Market open · {now:%H:%M}</span>"
+    else:
+        today = now.date()
+        why = ("weekend" if today.weekday() >= 5 else holidays.holiday_name(today) or
+               ("closed for the day" if now.time() > dt.time(15, 30) else "opens 9:15"))
+        market = f"<span class='chip'><i></i>Market closed · {html.escape(why)}</span>"
+    paused = s.get("paused")
+    if running and paused:
+        bot_chip = f"<span class='chip amber'><i></i>Bot {T.name('pause')} · PAUSED</span>"
+    elif running:
+        bot_chip = f"<span class='chip ok'><i></i>{T.name('running')} · bot RUNNING</span>"
+    else:
+        bot_chip = f"<span class='chip bad'><i></i>{T.name('not_running')} · bot NOT RUNNING</span>"
+    mode = T.mode_label(s.get("mode") or ("live" if C.is_live() else "paper"))
+    mode_chip = (f"<span class='chip mode{' live' if 'LIVE' in mode else ''}' "
+                 f"title='The mode the bot trades in (set in its own settings)'>Bot trading: {html.escape(mode)}</span>")
+    ds = s.get("data_source") or {}
+    src = "Kite" if ds.get("using") == "kite" else ("Yahoo" if ds.get("using") else None)
+    data_chip = ""
+    if src:
+        late = lag is not None and lag > 20
+        tip = f" title='{html.escape(ds.get('reason') or '')}'" if ds.get("reason") else ""
+        delay = "" if lag is None else f" · {lag:.0f} min behind"
+        data_chip = (f"<span class='chip {'amber' if late or ds.get('reason') else 'ok'}'{tip}><i></i>"
+                     f"{src} data{delay}</span>")
+    login_chip = (f"<span class='chip {'ok' if ok_login else ''}'><i></i>Zerodha: "
+                  f"{'logged in' if ok_login else 'not logged in'}</span>")
+    when = (s.get("time") or "")[11:19]
+    upd = f"<span class='updated' id='updated'>Bot status {html.escape(when) if when else '-'} IST</span>"
+    return f"<div class='chips' id='status'>{market}{bot_chip}{mode_chip}{data_chip}{login_chip}{upd}</div>"
+
+
+def _meter(used_pct):
+    cls = "high" if used_pct >= 75 else "mid" if used_pct >= 40 else ""
+    return (f"<div class='meter {cls}' role='meter' aria-valuemin='0' aria-valuemax='100' aria-valuenow='{used_pct:.0f}'>"
+            f"<span style='width:{max(2.0, min(100.0, used_pct)):.0f}%'></span></div>")
+
+
+def _kpi(label, value, sub="", cls=""):
+    return (f"<div class='kpi'><label>{label}</label><div class='v {cls}'>{value}</div>"
+            + (f"<div class='s'>{sub}</div>" if sub else "") + "</div>")
+
+
+def _limits_kpis(s, equity=None, unreal=0.0):
+    """Trades used today and how much of the daily loss limit is used (the bot's own counters)."""
+    trades, cap = int(s.get("trades_today") or 0), C.MAX_TRADES_PER_DAY
+    out = _kpi("Trades today", f"{trades} <small>of {cap}</small>", _meter(trades / cap * 100) if cap else "")
+    day = float(s.get("day_pnl") or 0.0) + float(unreal or 0.0)
+    eq = equity if equity is not None else s.get("equity")
+    if eq:
+        start = float(eq) - day
+        loss_pct = max(0.0, -day) / start * 100 if start else 0.0
+        out += _kpi(f"{T.name('daily_loss')} · daily loss limit",
+                    f"{loss_pct:.2f}% <small>of {C.MAX_DAILY_LOSS_PCT:g}%</small>",
+                    _meter(loss_pct / C.MAX_DAILY_LOSS_PCT * 100))
+    else:
+        out += _kpi(f"{T.name('daily_loss')} · daily loss limit", f"- <small>of {C.MAX_DAILY_LOSS_PCT:g}%</small>")
+    return out
+
+
+def live_kpis(view, s):
+    """The key figures for the account in view. Paper: from the paper files only. Zerodha: read-only
+    from Kite's balance and positions; a login or error message instead when it can't be read."""
+    import accounts
+    if view == "zerodha":
+        a = accounts.zerodha_account()
+        if a.get("error"):
+            return (f"<section class='card acct zerodha' id='acct'>{zerodha_card(a)}</section>")
+        n_open = sum(1 for r in a["positions"] if r["qty"])
+        cells = (_kpi("Account value", _inr(a["equity"]), f"opening {_inr(a['opening'])}")
+                 + _kpi("Available funds", _inr(a["available"]), f"margin used {_inr(a['margin_used'])}")
+                 + _kpi("Today's P&amp;L", _signed(a["pnl"]), f"booked {_inr(a['realised'], True)} · open {_inr(a['unrealised'], True)}",
+                        _cls(a["pnl"]))
+                 + _kpi("Open P&amp;L", _signed(a["unrealised"]), f"{n_open} open position{'s' if n_open != 1 else ''}",
+                        _cls(a["unrealised"]))
+                 + _kpi("Invested", _inr(a["invested"]), "open positions at average price")
+                 + _kpi("Margin used", _inr(a["margin_used"]), "Zerodha's figure"))
+        warn = "".join(f"<div class='warn small warnline'>⚠ {html.escape(w)}</div>" for w in a.get("warnings", []))
+        note = (f"<div class='muted small warnline'>From Zerodha at {_clock(a.get('fetched_at'))} IST · read-only · "
+                f"Zerodha's P&amp;L is before charges · delivery holdings not included</div>")
+        return f"<section class='card acct zerodha kwrap' id='acct'><div class='kgrid'>{cells}</div>{warn}{note}</section>"
+    a = accounts.paper_account()
+    if a.get("error"):
+        return f"<section class='card acct paper' id='acct'>{paper_card(a, s)}</section>"
+    n = len(a["positions"])
+    today = a["realised_today"] + a["unrealised"]
+    rsum = sum(p.get("r_unreal") or 0 for p in s.get("positions", [])) if s.get("mode") == "paper" else None
+    cells = (_kpi("Total equity", _inr(a["equity"]), f"<span class='{_cls(a['total_pnl'])}'>{_signed(a['total_pnl'])}</span> "
+                  f"since the {_inr(a['start'])} start")
+             + _kpi("Available funds", _inr(a["available"]),
+                    f"{_inr(a['invested'])} in {n} position{'s' if n != 1 else ''}")
+             + _kpi("Today's P&amp;L", _signed(today), f"booked {_inr(a['realised_today'], True)} · open {_inr(a['unrealised'], True)}",
+                    _cls(today))
+             + _kpi("Open P&amp;L", _signed(a["unrealised"]),
+                    (f"{rsum:+.2f}R · " if rsum and n else "") + "before exit charges", _cls(a["unrealised"])))
+    cells += (_limits_kpis(s, a["equity"], a["unrealised"]) if s.get("mode", "paper") == "paper" else
+              _kpi("Realised since start", _signed(a["realised"]), f"charges {_inr(a['charges'])}", _cls(a["realised"]))
+              + _kpi("Charges paid", _inr(a["charges"]), "Zerodha charges, simulated"))
+    warnings = list(a.get("warnings", []))
+    lag = s.get("data_lag_min")
+    if s.get("mode") == "paper" and lag is not None and lag > 20:
+        warnings.append(f"Prices are about {lag:.0f} min behind the market "
+                        f"({'Kite' if (s.get('data_source') or {}).get('using') == 'kite' else 'Yahoo'} data).")
+    warn = "".join(f"<div class='warn small warnline'>⚠ {html.escape(w)}</div>" for w in warnings)
+    note = (f"<div class='muted small warnline'>Paper account (virtual money) · from the bot's last round at "
+            f"{_clock(a.get('as_of'))} IST · realised since start {_inr(a['realised'], True)} · charges {_inr(a['charges'])} · "
+            f"available = equity − invested</div>")
+    return f"<section class='card acct paper kwrap' id='acct'><div class='kgrid'>{cells}</div>{warn}{note}</section>"
+
+
+def today_equity(mode):
+    """Today's equity samples from the daily journal: [(HH:MM:SS, equity)], or []."""
+    import datetime as dt
+    import accounts
+    import journal
+    d = journal.load_detail(mode, dt.datetime.now(accounts.IST).date().isoformat()) or {}
+    return [(e[0], float(e[1])) for e in d.get("equity", []) if len(e) >= 2], d.get("start_equity")
+
+
+def live_equity(view, s=None):
+    mode = "live" if view == "zerodha" else "paper"
+    pts, start = today_equity(mode)
+    if len(pts) < 2 and (s or {}).get("mode", "paper") != mode:
+        return ""   # the bot isn't trading this account: nothing to chart
+    import charts
+    body = (charts.intraday(pts, start) if len(pts) >= 2 else
+            "<div class='empty'>The chart fills in while the bot runs today (from the daily journal).</div>")
+    return (f"<section class='card flush' id='equity'><div class='hd'>Today's equity "
+            f"<span class='tag'>{html.escape(T.mode_label(mode))}</span></div><div class='bd spark'>{body}</div></section>")
+
+
+def live_positions(s, view):
+    mode = s.get("mode", "paper")
+    if view == "zerodha" and mode != "live":
+        return ""   # the bot's positions are paper positions: they belong to the Paper view
+    if view == "paper" and mode == "live":
+        return ""
+    cards = "".join(position_row(p) for p in s.get("positions", [])) or "<div class='empty'>No open positions</div>"
+    return (f"<section class='card flush' id='positions'><div class='hd'><span class='theme'>{T.term('positions')}</span> <span class='end'><span class='tag'>held by the bot · "
+            f"{html.escape(T.mode_label(mode))}</span></span></div>{cards}</section>")
+
+
+def zerodha_positions():
+    import accounts
+    a = accounts.zerodha_account()
+    if a.get("error"):
+        return ""
+    rows = "".join(
+        f"<tr><td class='first' data-label='Position'><b>{_fmt(r['symbol'])}</b> <span class='muted'>{_fmt(r['exchange'])}</span></td>"
+        f"<td data-label='Product'>{_fmt(r['product'])}</td>"
+        f"<td data-label='Qty' class='r {'up' if r['qty'] > 0 else 'dn' if r['qty'] < 0 else 'muted'}'>{r['qty'] if r['qty'] else 'closed'}</td>"
+        f"<td data-label='Avg price' class='r'>{_fmt(r['avg'])}</td><td data-label='Last price' class='r'>{_fmt(r['price'])}</td>"
+        f"<td data-label='Realised' class='r'>{_pl(r['realised'])}</td><td data-label='Unrealised' class='r'>{_pl(r['unrealised'])}</td></tr>"
+        for r in a.get("positions", [])) or "<tr><td colspan=7 class='muted'>No positions today</td></tr>"
+    return (f"<section class='card flush' id='zpositions'><div class='hd'>Zerodha positions today "
+            f"<span class='end'><span class='tag dn'>real money · read-only</span></span></div>"
+            f"<table class='rt'><tr><th>Position</th><th>Product</th><th class='r'>Qty</th><th class='r'>Avg price</th>"
+            f"<th class='r'>Last price</th><th class='r'>Realised</th><th class='r'>Unrealised</th></tr>{rows}</table></section>")
+
+
+def live_watchlist(s):
+    rows = []
+    for sym, r in sorted(s.get("rows", {}).items()):
+        reason = r.get("reason") or ""
+        low = reason.lower()
+        signal = ("long breakout" in low or "short breakout" in low) and "skip" not in low
+        cls = ("sig" if signal else "dn" if low.startswith("data error") or "skip" in low else
+               "in" if "inside" in low else "")
+        rows.append(
+            f"<tr><td class='first' data-label='Stock'><b>{_fmt(sym)}</b></td>"
+            f"<td data-label='Close' class='r'>{_fmt(r.get('close'))}</td>"
+            f"<td data-label='Opening range' class='r hide-s'>{_fmt(r.get('or_low'))} – {_fmt(r.get('or_high'))}</td>"
+            f"<td data-label='VWAP' class='r hide-s'>{_fmt(r.get('vwap'))}</td>"
+            f"<td data-label='Vol ×' class='r hide-s'>{_fmt(r.get('vol_ratio'), 1)}</td>"
+            f"<td data-label='Bar' class='hide-s'>{_fmt(r.get('bar'))}</td>"
+            f"<td data-label='Status' style='white-space:normal'><span class='st {cls}'>{_fmt(T.decorate(reason) or None)}</span></td></tr>")
+    body = "".join(rows) or "<tr><td colspan=7 class='muted'>Waiting for market data</td></tr>"
+    return (f"<section class='card flush' id='watchlist'><div class='hd'><span class='theme'>{T.term('watchlist')}</span> <span class='end'><span class='tag'>last closed 15-min bar</span></span></div>"
+            f"<table><tr><th>Stock</th><th class='r'>Close</th><th class='r hide-s'>Opening range</th><th class='r hide-s'>VWAP</th>"
+            f"<th class='r hide-s'>Vol ×</th><th class='hide-s'>Bar</th><th>Status</th></tr>{body}</table></section>")
+
+
+def live_events(s):
+    items = []
+    for e in s.get("events", []):
+        t, _, msg = e.partition(" ")
+        items.append(f"<li><time>{html.escape(t)}</time><span>{html.escape(msg)}</span></li>")
+    body = "".join(items) or "<li class='muted'>No events yet</li>"
+    return (f"<details class='card' id='events' open><summary><span class='theme'>{T.term('events')}</span>"
+            f"</summary><ul class='list'>{body}</ul></details>")
+
+
+def live_regions(view, s):
+    """The parts of the Live page that change while the bot runs (also sent by /api/live)."""
+    running = bot_running(s)
+    ok, _ = login_status()
+    out = {"status": _status_chips(s, running, view, ok, s.get("data_lag_min")),
+           "acct": live_kpis(view, s), "equity": live_equity(view, s),
+           "positions": live_positions(s, view), "watchlist": live_watchlist(s), "events": live_events(s)}
+    if view == "zerodha":
+        out["zpositions"] = zerodha_positions()
+    return out
 
 
 def render(msg="", q=None):
@@ -382,59 +679,54 @@ def render(msg="", q=None):
     running = bot_running(s)
     ok, login_msg = login_status()
     url = login_url()
-    mode = s.get("mode", "paper" if not C.is_live() else "live").upper()
-    lag = s.get("data_lag_min")
-    lag_txt = "-" if lag is None else f"{lag:.0f} min"
-    lag_cls = "warn" if (lag or 0) > 20 else ""
     paused = s.get("paused")
-
-    pos_rows = "".join(position_row(p) for p in s.get("positions", [])) or \
-        "<tr><td colspan=8 class='muted'>No open positions</td></tr>"
-
-    sig_rows = "".join(
-        f"<tr><td>{_fmt(sym)}</td><td>{_fmt(r.get('bar'))}</td><td>{_fmt(r.get('or_low'))} – {_fmt(r.get('or_high'))}</td>"
-        f"<td>{_fmt(r.get('close'))}</td><td>{_fmt(r.get('vwap'))}</td><td>{_fmt(r.get('vol_ratio'), 1)}</td>"
-        f"<td class='{'sig' if 'breakout' in (r.get('reason') or '') else ''}'>{_fmt(T.decorate(r.get('reason')) or None)}</td></tr>"
-        for sym, r in sorted(s.get("rows", {}).items())) or "<tr><td colspan=7 class='muted'>Waiting for market data</td></tr>"
-
-    events = "".join(f"<li>{html.escape(e)}</li>" for e in s.get("events", [])) or "<li class='muted'>-</li>"
-    login_btn = (f"<a class='btn' href='{html.escape(url)}'>Log in to Zerodha</a>" if url and not ok else "")
+    reg = live_regions(view, s)
     when = (s.get("time") or "")
     banner = "" if running else (
         f"<div class='banner'><b>Bot is not running</b> ({T.name('not_running')}: markets closed, weekend, or stopped). "
         f"Showing the last saved state{' from ' + html.escape(when[:16].replace('T', ' ')) if when else ''}. "
-        f"See <a href='/review' style='color:#fde68a'>{T.term('review')}</a> for how the last trading day played out, "
-        f"or <a href='/trades' style='color:#fde68a'>{T.term('trades')}</a> for history.</div>")
-    calendar = market_calendar()
-    controls = (f"""<div class="card"><h2>{T.term('controls')}</h2>
-<form method="post" action="/{'resume' if paused else 'pause'}" style="display:inline"><button>{'Resume new entries' if paused else T.name('pause') + ' · Pause new entries'}</button></form>
-<form method="post" action="/stop" style="display:inline" onsubmit="return confirm('Stop the bot? In live mode open positions keep their exchange stop-loss.')"><button class="red">Stop bot</button></form></div>"""
+        f"See <a href='/review'>{T.term('review')}</a> for how the last trading day played out, "
+        f"or <a href='/trades'>{T.term('trades')}</a> for history.</div>")
+    login_btn = (f"<a class='btn' href='{html.escape(url)}'>Log in to Zerodha</a>" if url and not ok else "")
+    controls = (f"""<section class="card"><div class="hd"><span class="theme">{T.term('controls')}</span></div>
+<form method="post" action="/{'resume' if paused else 'pause'}" style="display:inline"
+ onsubmit="return confirm('{'Resume new entries?' if paused else 'Pause new entries? Open positions keep being managed.'}')">
+<button class="ghost">{'▶ Resume new entries' if paused else '⏸ ' + T.name('pause') + ' · Pause new entries'}</button></form>
+<form method="post" action="/stop" style="display:inline" onsubmit="return confirm('Stop the bot? In live mode open positions keep their exchange stop-loss.')"><button class="red">■ Stop bot</button></form>
+<div class="muted small">Both ask before acting. Open positions keep their stop.</div></section>"""
                 if running else "")
     cooldown = s.get("cooldown_until")
-    streak_note = (f"<br><span class='warn' style='font-size:11px'>{T.name('cooldown')} until {html.escape(str(cooldown))}</span>"
-                   if cooldown else f"<br><span class='muted' style='font-size:11px'>{T.name('cooldown')} after {C.LOSS_STREAK_LIMIT}</span>")
-    run_tag = T.term("running") if running else T.term("not_running")
-    return page(T.plain("live_page"), "/", f"""
-<h1>{T.BOW} {T.name('live_page')} <span class="tag" title="The mode the bot trades in (set in its own settings)">Bot trading: {html.escape(T.mode_label(mode))}</span> <span class="tag {'up' if running else 'warn'}">{run_tag}</span> {f'<span class="tag warn">{T.name("pause").upper()} · PAUSED</span>' if paused else ''}</h1>
-<div class="muted">{T.plain('live_page')} · bot status updated {_fmt(when[11:19])} IST · page auto-refreshes every 20 s</div>
+    lag = s.get("data_lag_min")
+    lag_txt = "-" if lag is None else f"{lag:.0f} min"
+    limits = (f"<details class='card'><summary>Data &amp; limits</summary><dl class='facts'>"
+              f"<dt>Loss streak</dt><dd>{_fmt(s.get('loss_streak'))} <span class='muted'>· {T.name('cooldown')} after "
+              f"{C.LOSS_STREAK_LIMIT}</span>{f' · <span class=warn>until {html.escape(str(cooldown))}</span>' if cooldown else ''}</dd>"
+              f"<dt>Price data</dt><dd>{data_source_text(s)}</dd>"
+              f"<dt>Data delay</dt><dd>{lag_txt}</dd>"
+              f"<dt>Per trade</dt><dd>{C.RISK_PER_TRADE_PCT:g}% risk · at most {C.MAX_OPEN_POSITIONS} positions, "
+              f"{C.MAX_TRADES_PER_DAY} trades a day</dd>"
+              f"<dt>{T.name('daily_loss')}</dt><dd>stop new trades at −{C.MAX_DAILY_LOSS_PCT:g}% in a day (booked + open)</dd>"
+              f"<dt>Exits</dt><dd>{T.term('stop')} · {T.term('trail')} · {T.term('time_stop')} · "
+              f"{T.term('square_off')} at {C.SQUARE_OFF}</dd>"
+              f"</dl></details>")
+    login = (f"<section class='card'><div class='hd'><span class='theme'>{T.term('login')}</span></div>"
+             f"<div class='{'up' if ok else 'warn'}'>{html.escape(login_msg)}</div>{login_btn}"
+             f"<div class='muted small'>{T.term('paper')} mode doesn't need a login, except for {T.name('kite_data')} (Kite) "
+             f"price data. {T.term('live')} mode needs one every day (tokens expire ~06:00 IST).</div></section>")
+    capital = capital_card() if view == "paper" else ""
+    body = f"""<style>{LIVE_CSS}</style>
+<div class="page-head"><h1>{T.BOW} {T.name('live_page')}</h1><span class="sub">{T.plain('live_page')} · {html.escape(T.mode_label(s.get('mode') or 'paper'))} bot</span></div>
+{reg['status']}
 {view_banner(view)}
-{account_card(view, s)}
-{capital_card() if view == "paper" else ""}
 {banner}
-{calendar}
-{f'<p class="msg">{html.escape(msg)}</p>' if msg else ''}
-<div class="card"><h2>{T.term('login')}</h2>
-<div class="{'up' if ok else 'warn'}">{html.escape(login_msg)}</div>{login_btn}
-<div class="muted">{T.term('paper')} mode doesn't need a login, except for {T.name('kite_data')} (Kite) price data.
-{T.term('live')} mode needs one every day (tokens expire ~06:00 IST).</div></div>
-<div class="card kpis">
-<div>Trades today<b>{_fmt(s.get('trades_today'))}</b></div><div>Loss streak<b>{_fmt(s.get('loss_streak'))}</b>{streak_note}</div>
-<div>Data delay<b class="{lag_cls}">{lag_txt}</b></div>{data_source_kpi(s)}</div>
-<div class="card"><h2>{T.term('positions')} held by the bot <span class="tag">{html.escape(T.mode_label(mode))}</span></h2><table class="wrap"><tr><th>Stock</th><th>Side · Qty</th><th>Entry → Price</th><th>Open P&amp;L</th>
-<th>{T.term('stop')}</th><th>{T.term('trail')}</th><th>{T.term('time_stop')}</th><th>In trade</th></tr>{pos_rows}</table></div>
-<div class="card"><h2>{T.term('watchlist')} (last closed 15-min bar)</h2><table><tr><th>Stock</th><th>Bar</th><th>Opening range</th><th>Close</th><th>VWAP</th><th>Vol ×</th><th>Status</th></tr>{sig_rows}</table></div>
-{controls}
-<div class="card"><h2>{T.term('events')}</h2><ul>{events}</ul></div>""", refresh=20, view=view)
+{f'<div class="banner" style="border-color:var(--up)">{html.escape(msg)}</div>' if msg else ''}
+{reg['acct']}
+<div class="grid" style="margin-top:16px">
+<div>{reg['equity']}{reg.get('zpositions', '')}{reg['positions']}{reg['watchlist']}</div>
+<aside>{controls}{capital}{login if view == 'zerodha' or not ok else ''}{reg['events']}{market_calendar()}{limits}
+{login if view != 'zerodha' and ok else ''}</aside>
+</div>"""
+    return page(T.plain("live_page"), "/", body, refresh=20, view=view)
 
 
 def sparkline(closes, or_hi, or_lo, w=160, h=36):
