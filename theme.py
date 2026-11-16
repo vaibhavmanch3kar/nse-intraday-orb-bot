@@ -152,5 +152,26 @@ COLORS = {
     "banner_fg": "#fde68a",
 }
 
+# Dashboard themes (CSS custom properties). Dark keeps the night-sky palette; light is ivory and saffron.
+# Profit is green and loss red in both, always with ▲▼ / +− as well, so colour is never the only signal.
+PALETTES = {
+    "dark": {
+        "bg": "#130a18", "surface": "#1d1224", "surface-2": "#271a30", "border": "#36263f",
+        "text": "#f5ead9", "muted": "#b3a191", "accent": "#f59e0b", "accent-ink": "#241000",
+        "gold": "#fcd34d", "up": "#34d399", "dn": "#f87171", "warn": "#fbbf24", "info": "#c4b5fd",
+        "trail": "#c084fc", "live": "#ef4444", "up-bg": "rgba(52,211,153,.13)", "dn-bg": "rgba(248,113,113,.13)",
+        "warn-bg": "rgba(251,191,36,.12)", "banner-bg": "#3b1d0a", "banner-fg": "#fde68a",
+        "shadow": "0 1px 0 rgba(255,255,255,.03) inset, 0 8px 24px rgba(0,0,0,.25)",
+    },
+    "light": {
+        "bg": "#f7f2ea", "surface": "#ffffff", "surface-2": "#f8f1e6", "border": "#e6dac8",
+        "text": "#2a1f17", "muted": "#6c5e50", "accent": "#c2410c", "accent-ink": "#ffffff",
+        "gold": "#915a00", "up": "#047857", "dn": "#b91c1c", "warn": "#915a00", "info": "#6d28d9",
+        "trail": "#7c3aed", "live": "#b91c1c", "up-bg": "#e7f6ef", "dn-bg": "#fdecec",
+        "warn-bg": "#fdf3dc", "banner-bg": "#fdf3dc", "banner-fg": "#7c2d12",
+        "shadow": "0 1px 2px rgba(60,40,20,.06), 0 6px 18px rgba(60,40,20,.06)",
+    },
+}
+
 FAVICON = ("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'>"
            "<text y='.9em' font-size='90'>%F0%9F%8F%B9</text></svg>")

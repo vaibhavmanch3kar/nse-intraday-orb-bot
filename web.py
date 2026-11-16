@@ -19,6 +19,7 @@ from urllib.parse import parse_qs, urlparse
 
 import config as C
 import theme as T
+import webui
 
 STATUS_FILE = os.path.join(C.DATA_DIR, "status.json")
 
@@ -64,66 +65,23 @@ def _fmt(v, nd=2):
     return html.escape(str(v))
 
 
-SERIF = "Georgia,'Palatino Linotype','Times New Roman',serif"
-CSS = (":root{" + "".join(f"--{k.replace('_', '-')}:{v};" for k, v in T.COLORS.items()) + "}" + """
-body{margin:0;background:var(--bg);color:var(--fg);font:14px system-ui,Segoe UI,sans-serif;
- background-image:radial-gradient(ellipse at top,#3d2047 0,var(--bg) 55%);background-attachment:fixed}
-main{max-width:1100px;margin:0 auto;padding:16px}
-header.realm{text-align:center;padding:6px 0 12px;margin-bottom:8px;border-bottom:4px solid transparent;
- border-image:repeating-linear-gradient(90deg,var(--acc) 0 14px,#b91c1c 14px 28px,var(--gold) 28px 42px) 1}
-header.realm .dev{color:var(--gold);font-size:14px}
-header.realm .app{font:600 26px SERIF;color:var(--gold);letter-spacing:1px}
-header.realm .line2{color:var(--muted);font-size:12px}
-.card{background:var(--card);border:1px solid var(--line);border-top:2px solid rgba(245,158,11,.5);border-radius:10px;
- padding:14px 16px;margin:12px 0;overflow-x:auto}
-h1{font:600 22px SERIF;color:var(--gold);margin:8px 0 4px} h2{font:600 15px SERIF;margin:0 0 8px;color:var(--acc)}
-.kpis{display:flex;flex-wrap:wrap;gap:18px} .kpis div b{display:block;font-size:18px}
-table{border-collapse:collapse;width:100%} td,th{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
-th{color:var(--gold);font-weight:600}
-.up{color:var(--up)} .dn{color:var(--dn)} .muted{color:var(--muted)} .warn{color:var(--warn)} .sig{color:var(--acc);font-weight:600}
-.btn,button{background:linear-gradient(180deg,var(--gold),var(--acc));color:#2a1204;border:0;border-radius:6px;padding:8px 14px;
- font-weight:600;text-decoration:none;cursor:pointer;display:inline-block;margin:4px 6px 4px 0}
-button.red{background:var(--dn);color:#fff} .tag{padding:2px 8px;border-radius:999px;background:var(--line);font-size:12px}
-ul{margin:0;padding-left:18px} .msg{color:var(--up)}
-nav{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 2px;justify-content:center}
-nav a{color:var(--fg);text-decoration:none;padding:6px 12px;border-radius:6px;background:var(--card);border:1px solid var(--line)}
-nav a small{color:var(--muted)} nav a.on{background:var(--acc);color:#2a1204;font-weight:600;border-color:var(--gold)}
-nav a.on small{color:#4a2508}
-.banner{background:var(--banner-bg);color:var(--banner-fg);border:1px solid #7c3a10;border-radius:8px;padding:10px 14px;margin:10px 0}
-.tm{color:#d8b4fe;font-size:13px}
-table.wrap td{white-space:normal}
-.days a{color:var(--acc);margin-right:10px;text-decoration:none} .days a.on{color:var(--fg);font-weight:700;text-decoration:underline}
-footer{text-align:center;color:var(--muted);font-size:11px;margin:20px 0 6px}
-.switch{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:10px 0}
-.switch a{color:var(--fg);text-decoration:none;padding:7px 14px;border-radius:6px;border:1px solid var(--line);background:var(--card)}
-.switch a.paper.on{background:linear-gradient(180deg,var(--gold),var(--acc));color:#2a1204;font-weight:700;border-color:var(--gold)}
-.switch a.zerodha.on{background:var(--dn);color:#fff;font-weight:700;border-color:#fecaca}
-.viewbar{text-align:center;font-weight:700;letter-spacing:1px;border-radius:6px;padding:6px;margin:8px 0;font-size:13px}
-.viewbar.paper{background:rgba(245,158,11,.15);color:var(--gold);border:1px solid var(--gold)}
-.viewbar.zerodha{background:rgba(220,38,38,.18);color:#fecaca;border:2px solid var(--dn)}
-.card.acct.paper{border:2px solid var(--gold)} .card.acct.zerodha{border:2px solid var(--dn);background:linear-gradient(180deg,rgba(220,38,38,.10),var(--card) 40%)}
-.tag.dn{background:var(--dn);color:#fff}
-.opts{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 8px} .opt{padding:6px 10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);cursor:pointer}
-input[type=number]{background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:4px}
-""").replace("SERIF", SERIF)
-
-
-VIEW_PAGES = ("/", "/trades")  # pages with the Paper Account | Zerodha Account switch
+VIEW_PAGES = webui.VIEW_PAGES  # pages with the Paper Account | Zerodha Account switch
 
 
 def page(title, active, body, refresh=None, view=None):
-    nav = "".join(f"<a href='{u}{'?view=' + view if view and u in VIEW_PAGES else ''}' "
-                  f"class='{'on' if u == active else ''}'>{icon} {T.name(key)} "
-                  f"<small>· {T.plain(key)}</small></a>" for u, key, icon in T.PAGES)
+    """Wrap a page body in the dashboard frame (header, page tabs, account switch, theme switch)."""
+    switch = view_switch(active, view, read_status()) if view and active in VIEW_PAGES else ""
     meta = f'<meta http-equiv="refresh" content="{refresh}">' if refresh else ""
-    head = (f"<header class='realm'><div class='dev'>{T.DEVANAGARI}</div><div class='app'>{T.BOW} {T.APP}</div>"
-            f"<div class='line2'>{html.escape(T.TAGLINE)}</div></header>")
-    foot = (f"<footer>{T.APP} · {T.term('paper')} trading by default · "
-            f"software only, not investment advice</footer>")
-    return (f'<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" '
-            f'content="width=device-width, initial-scale=1">{meta}<title>{html.escape(title)} · {T.APP}</title>'
-            f'<link rel="icon" href="{T.FAVICON}"><style>{CSS}</style></head>'
-            f'<body><main>{head}<nav>{nav}</nav>{body}{foot}</main></body></html>')
+    return webui.shell(title, active, body, view=view, switch=switch, extra_head=meta)
+
+
+def mode_chips(status, extra=""):
+    """The mode the bot trades in (set only in its own settings), next to the account switch."""
+    mode = T.mode_label((status or {}).get("mode") or ("live" if C.is_live() else "paper"))
+    live = " live" if "LIVE" in mode else ""
+    return (f"<div class='chips'><span class='chip mode{live}' title='The mode the bot trades in (set in its own settings)'>"
+            f"Bot trading: {html.escape(mode)}</span>{extra}"
+            f"<span class='muted small'>The Paper | Zerodha switch only changes what you see.</span></div>")
 
 
 def read_status():
@@ -157,6 +115,17 @@ def data_source_kpi(s):
     return f"<div{tip}>Price data<b class='{cls}'>{label}</b>{note}</div>"
 
 
+def data_source_text(s):
+    """'Pushpaka · Kite (real-time)' / 'Yahoo (free, may lag)', with Kite's fallback reason if any."""
+    ds = s.get("data_source") or {}
+    using = ds.get("using")
+    if not using:
+        return "-"
+    label = f"{T.name('kite_data')} · Kite (real-time)" if using == "kite" else "Yahoo (free, may lag)"
+    why = f"<br><span class='warn small'>Kite unavailable: {html.escape(ds['reason'])}</span>" if ds.get("reason") else ""
+    return f"<b class='{'up' if using == 'kite' else ''}'>{label}</b>{why}"
+
+
 def market_calendar():
     """One line: is NSE open today, next trading day, upcoming holidays."""
     import datetime as dt
@@ -173,8 +142,10 @@ def market_calendar():
     up = " · ".join(f"{d:%a %d %b} {html.escape(n)}" for d, n in holidays.upcoming(today, 3)) or "none listed"
     warn = ("" if holidays.year_listed(today.year) else
             f" <span class='warn'>nse_holidays.json has no {today.year} list - add it.</span>")
-    return (f"<div class='card'><h2>{T.term('calendar')}</h2>Today: <b>{state}</b> · next trading day "
-            f"<b>{nxt:%a %d %b}</b><br><span class='muted'>Upcoming holidays: {up}</span>{warn}</div>")
+    return (f"<details class='card' id='calendar'><summary><span class='theme'>{T.term('calendar')}</span>"
+            f"<span class='end'><span class='tag'>{state}</span></span></summary>"
+            f"<div class='small'>Today: <b>{state}</b> · next trading day <b>{nxt:%a %d %b}</b><br>"
+            f"<span class='muted'>Upcoming holidays: {up}</span>{warn}</div></details>")
 
 
 def _inr(v, signed=False):
@@ -247,10 +218,10 @@ def view_switch(path, view, status):
     for v, label in VIEWS.items():
         on = " on" if v == view else ""
         click = f' onclick="{confirm}"' if v == "zerodha" and view != "zerodha" else ""
-        links.append(f"<a class='{v}{on}' href='{path}?view={v}'{click}>{label}</a>")
-    return (f"<div class='switch'><span class='muted'>View:</span> {''.join(links)}"
-            f"<span class='muted' style='font-size:12px'>Only changes what you see. "
-            f"The bot is trading: <b>{html.escape(bot_mode)}</b></span></div>")
+        cur = " aria-current='true'" if v == view else ""
+        links.append(f"<a class='{v}{on}' href='{path}?view={v}'{click}{cur}>{label}</a>")
+    return (f"<div class='seg' role='group' aria-label='Account view (only changes what you see; "
+            f"the bot is trading {html.escape(bot_mode)})'>{''.join(links)}</div>")
 
 
 def view_banner(view):
@@ -332,15 +303,19 @@ def capital_card():
               "onsubmit=\"if(!confirm('Cancel the pending opening balance change?'))return false;this.confirm.value='yes'\">"
               "<input type='hidden' name='confirm' value=''><button class='red'>Cancel pending change</button></form>"
               if pending else "")
-    return f"""<div class="card" id="capital"><h2>Opening Balance · Paper Account <span class='tag'>virtual money</span></h2>
+    state = (f"<span class='tag warn'>→ {_inr(float(pending['amount']))[:-3]} at next start</span>" if pending
+             else "<span class='tag warn'>paper only</span>")
+    return f"""<details class="card" id="capital"{' open' if pending else ''}><summary>Opening Balance · Paper Account
+<span class="end"><b class="mono">{_inr(current)[:-3]}</b>{state}</span></summary>
 <form method="post" action="/paper-capital" onsubmit="return confirmCapital(this)" style="display:inline">
 <div class="opts">{radios}</div>
 <input type="hidden" name="confirm" value="">
 <button>Save opening balance</button></form> {cancel}
-<div class="muted" style="margin-top:6px">Now <b>{_inr(current)}</b>. A new amount takes effect when the bot next starts
+{capital_lines()}
+<div class="muted small" style="margin-top:6px">Now <b>{_inr(current)}</b>. A new amount takes effect when the bot next starts
 (normally 9:00), before any trade; if paper positions are open it waits. Past trades and P&amp;L are kept, and
 position sizes follow the new equity (0.5% risk per trade). Paper only: it never touches your Zerodha account or
-live trading. From {_inr(float(capital.MIN_INR))[:-3]} to {_inr(float(capital.MAX_INR))[:-3]}, whole rupees.</div></div>
+live trading. From {_inr(float(capital.MIN_INR))[:-3]} to {_inr(float(capital.MAX_INR))[:-3]}, whole rupees.</div></details>
 <script>function confirmCapital(f){{
  var v=f.querySelector('input[name=amount]:checked'); if(!v){{alert('Choose an amount.');return false}}
  var a=v.value==='custom'?Number(f.custom_amount.value):Number(v.value);
@@ -372,112 +347,448 @@ def account_card(view, status=None):
 
 def _badge(text, cls, tip=""):
     t = f" title='{html.escape(tip)}'" if tip else ""
-    return f"<span class='tag {cls}' style='font-size:11px;margin-left:4px'{t}>{html.escape(text)}</span>"
+    return f"<span class='tag {cls}' style='margin-left:4px'{t}>{html.escape(text)}</span>"
+
+
+def _signed(v, nd=2):
+    """▲ ₹1,234.50 / ▼ ₹1,234.50 / ₹0.00 - the arrow means the sign is never told by colour alone."""
+    if v is None:
+        return "-"
+    arrow = "▲ " if v > 0 else "▼ " if v < 0 else ""
+    return f"{arrow}₹{abs(v):,.{nd}f}"
+
+
+def _cls(v):
+    return "" if not v else ("up" if v > 0 else "dn")
+
+
+def _held(m):
+    return "-" if m is None else (f"{m} min" if m < 60 else f"{m // 60} h {m % 60:02d} min")
 
 
 def position_row(p):
-    """One open position: P&L in ₹ and R, stop distance, EMA trail, time-stop check, time in trade."""
+    """One open position as a card: P&L in ₹ and R, where the price sits between the stop and the
+    target (or +2R when the trade has no fixed target), the EMA trail, the time-stop check, time in trade."""
     long_ = p.get("direction") == "LONG"
     r = p.get("r_unreal")
-    pnl_cls = "up" if (p.get("unrealised") or 0) >= 0 else "dn"
+    entry, price, stop = p.get("entry"), p.get("price"), p.get("stop")
     stop_d = p.get("stop_dist_pct")
-    stop_cell = f"{_fmt(p.get('stop'))}" + (f"<br><span class='muted'>{stop_d:.2f}% away</span>" if stop_d is not None else "")
+    badges = ""
     if stop_d is not None and stop_d < 0.3:
-        stop_cell += _badge("NEAR STOP", "dn")
+        badges += _badge("NEAR STOP", "dn")
+    trail = "-"
     if p.get("trail_ema") is not None:
         td = p.get("trail_dist_pct")
-        trail_cell = (f"EMA {_fmt(p['trail_ema'])}<br><span class='muted'>"
-                      f"{'' if td is None else f'{td:+.2f}% from price'}</span>")
+        trail = f"EMA {_fmt(p['trail_ema'])}" + ("" if td is None else f" <span class='muted'>({td:+.2f}%)</span>")
         if td is not None and td < 0:
-            trail_cell += _badge("PAST TRAIL", "dn", "Price is on the wrong side of the EMA: if the 15-min bar "
-                                 "closes here, the bot exits")
+            badges += _badge("PAST TRAIL", "dn", "Price is on the wrong side of the EMA: if the 15-min bar closes here, the bot exits")
         elif td is not None and td < 0.2:
-            trail_cell += _badge("NEAR TRAIL", "warn", "Within 0.2% of the EMA trail")
+            badges += _badge("NEAR TRAIL", "warn", "Within 0.2% of the EMA trail")
         else:
-            trail_cell += _badge("TRAIL", "warn", "Exit when a 15-min close crosses the EMA")
-    else:
-        trail_cell = f"target {_fmt(p.get('target'))}" if p.get("target") else "-"
+            badges += _badge("TRAIL", "warn", "Exit when a 15-min close crosses the EMA")
     tc = p.get("time_check")
     if tc == "passed":
-        time_cell = _badge("PASSED", "up")
+        time_txt = "check passed" + _badge("PASSED", "up")
     elif tc == "pending":
         need = C.TIME_STOP_MIN_R
         ok_now = r is not None and r >= need
-        time_cell = (f"at {html.escape(str(p.get('time_check_at')))}<br><span class='muted'>needs ≥ {need:+.1f}R</span>"
-                     + _badge("ON TRACK" if ok_now else "AT RISK", "up" if ok_now else "warn",
-                              "Exits at the time-stop check unless the trade is at least this far in profit"))
+        time_txt = (f"check at {html.escape(str(p.get('time_check_at')))} <span class='muted'>· needs ≥ {need:+.1f}R</span>"
+                    + _badge("ON TRACK" if ok_now else "AT RISK", "up" if ok_now else "warn",
+                             "Exits at the time-stop check unless the trade is at least this far in profit"))
     else:
-        time_cell = "-"
-    held = p.get("held_min")
-    held_cell = "-" if held is None else (f"{held} min" if held < 60 else f"{held // 60} h {held % 60:02d} min")
-    return (f"<tr><td><b>{_fmt(p.get('symbol'))}</b></td>"
-            f"<td class='{'up' if long_ else 'dn'}'>{html.escape(str(p.get('direction')))} · {p.get('qty')}</td>"
-            f"<td>{_fmt(p.get('entry'))} → {_fmt(p.get('price'))}</td>"
-            f"<td class='{pnl_cls}'><b>₹{_fmt(p.get('unrealised'))}</b>"
-            f"{'' if r is None else f'<br>{r:+.2f}R'}</td>"
-            f"<td>{stop_cell}</td><td>{trail_cell}</td><td>{time_cell}</td><td>{held_cell}</td></tr>")
+        time_txt = "-"
+    # the rail: stop on the left, target (or +2R) on the right, entry tick and a dot for the price
+    rail = ""
+    try:
+        risk = abs(entry - stop)
+        tgt = p.get("target") or (entry + 2 * risk if long_ else entry - 2 * risk)
+        lo, hi = (stop, tgt) if long_ else (tgt, stop)
+        span = (hi - lo) or 1
+        pos = lambda v: max(0.0, min(100.0, (v - lo) / span * 100))  # noqa: E731
+        left_lbl, right_lbl = (stop, tgt) if long_ else (tgt, stop)
+        tgt_name = f"{T.name('target')} · target" if p.get("target") else "+2R"
+        rail = (f"<div class='rail-t'>{T.term('stop')} → {tgt_name}</div>"
+                f"<div class='rail' role='img' aria-label='price {_fmt(price)} between stop {_fmt(stop)} and {html.escape(tgt_name)} {_fmt(tgt)}'>"
+                f"<span class='entry' style='left:{pos(entry):.1f}%'></span><span class='dot' style='left:{pos(price):.1f}%'></span></div>"
+                f"<div class='rail-l'><span class='{'dn' if long_ else 'up'}'>{_fmt(left_lbl)}</span>"
+                f"<span>entry {_fmt(entry)}</span><span class='{'up' if long_ else 'dn'}'>{_fmt(right_lbl)}</span></div>")
+    except (TypeError, ValueError):
+        pass
+    unreal = p.get("unrealised")
+    return (f"<div class='pos'>"
+            f"<div class='sym'><b>{_fmt(p.get('symbol'))}</b><span class='side {'long' if long_ else 'short'}'>"
+            f"{html.escape(str(p.get('direction')))}</span>{badges}"
+            f"<span class='lbl'>× {p.get('qty')} · in trade {_held(p.get('held_min'))}</span></div>"
+            f"<div><span class='lbl'>Entry → price</span>{_fmt(entry)} → <b>{_fmt(price)}</b></div>"
+            f"<div><span class='lbl'>Open P&amp;L</span><b class='{_cls(unreal)}'>{_signed(unreal)}"
+            f"{'' if r is None else f' · {r:+.2f}R'}</b></div>"
+            f"<div class='railbox'>{rail}</div>"
+            f"<div class='small'><span class='lbl'>{T.term('time_stop')}</span>{time_txt}"
+            f"<span class='lbl' style='margin-top:4px'>{T.term('trail')} · {trail}</span>"
+            f"<span class='lbl'>{T.term('stop')} {_fmt(stop)}"
+            f"{'' if stop_d is None else f' · {stop_d:.2f}% away'}</span></div></div>")
+
+
+LIVE_CSS = """
+.kwrap{background:none;border:0;box-shadow:none;padding:0;overflow:visible;border-radius:var(--radius)}
+.card.acct.kwrap{outline-offset:5px;margin:5px 5px 21px}
+.kwrap .warnline{padding:0 2px}
+.kwrap .kgrid{margin:0}
+.kwrap .warnline{margin-top:8px}
+.pos{display:grid;grid-template-columns:1.1fr 1fr 1fr 1.7fr 1.1fr;gap:12px;align-items:start;padding:12px 16px;border-bottom:1px solid var(--border)}
+.pos:last-child{border-bottom:0}
+.pos .sym b{font-size:15px}
+.side{font-size:11px;font-weight:700;padding:1px 6px;border-radius:5px;margin-left:6px}
+.side.long{background:var(--up-bg);color:var(--up)} .side.short{background:var(--dn-bg);color:var(--dn)}
+.lbl{display:block;font-size:11.5px;color:var(--muted)}
+.rail-t{font-size:11.5px;color:var(--muted)}
+.rail{position:relative;height:8px;border-radius:99px;margin:10px 0 4px;
+ background:linear-gradient(90deg,var(--dn-bg),var(--surface-2) 40%,var(--up-bg))}
+.rail .dot{position:absolute;top:50%;width:14px;height:14px;border-radius:50%;background:var(--text);border:3px solid var(--surface);
+ transform:translate(-50%,-50%);box-shadow:0 0 0 1px var(--border)}
+.rail .entry{position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--muted)}
+.rail-l{display:flex;justify-content:space-between;font-size:11px;color:var(--muted);gap:6px}
+.empty{padding:14px 16px;color:var(--muted)}
+.list{list-style:none;margin:0;padding:0}
+.list li{padding:7px 0;border-bottom:1px dashed var(--border);font-size:13px;display:flex;gap:10px}
+.list li:last-child{border-bottom:0}
+.list time{color:var(--muted);font-size:12px;min-width:60px;flex:none}
+.facts{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:13px} .facts dt{color:var(--muted)} .facts dd{margin:0}
+.spark svg{width:100%;height:auto;display:block}
+@media (max-width:760px){
+  .pos{grid-template-columns:1fr 1fr;row-gap:8px;padding:12px 14px}
+  .pos .railbox{grid-column:1/-1}
+}
+"""
+
+
+def _status_chips(s, running, view, ok_login, lag):
+    """Market, bot, mode, data and Zerodha login at a glance."""
+    import datetime as dt
+    import accounts
+    import holidays
+    now = dt.datetime.now(accounts.IST)
+    if accounts.market_open(now):
+        market = f"<span class='chip ok'><i class='pulse'></i>Market open · {now:%H:%M}</span>"
+    else:
+        today = now.date()
+        why = ("weekend" if today.weekday() >= 5 else holidays.holiday_name(today) or
+               ("closed for the day" if now.time() > dt.time(15, 30) else "opens 9:15"))
+        market = f"<span class='chip'><i></i>Market closed · {html.escape(why)}</span>"
+    paused = s.get("paused")
+    if running and paused:
+        bot_chip = f"<span class='chip amber'><i></i>Bot {T.name('pause')} · PAUSED</span>"
+    elif running:
+        bot_chip = f"<span class='chip ok'><i></i>{T.name('running')} · bot RUNNING</span>"
+    else:
+        bot_chip = f"<span class='chip bad'><i></i>{T.name('not_running')} · bot NOT RUNNING</span>"
+    mode = T.mode_label(s.get("mode") or ("live" if C.is_live() else "paper"))
+    mode_chip = (f"<span class='chip mode{' live' if 'LIVE' in mode else ''}' "
+                 f"title='The mode the bot trades in (set in its own settings)'>Bot trading: {html.escape(mode)}</span>")
+    ds = s.get("data_source") or {}
+    src = "Kite" if ds.get("using") == "kite" else ("Yahoo" if ds.get("using") else None)
+    data_chip = ""
+    if src:
+        late = lag is not None and lag > 20
+        tip = f" title='{html.escape(ds.get('reason') or '')}'" if ds.get("reason") else ""
+        delay = "" if lag is None else f" · {lag:.0f} min behind"
+        data_chip = (f"<span class='chip {'amber' if late or ds.get('reason') else 'ok'}'{tip}><i></i>"
+                     f"{src} data{delay}</span>")
+    login_chip = (f"<span class='chip {'ok' if ok_login else ''}'><i></i>Zerodha: "
+                  f"{'logged in' if ok_login else 'not logged in'}</span>")
+    when = (s.get("time") or "")[11:19]
+    upd = f"<span class='updated' id='updated'>Bot status {html.escape(when) if when else '-'} IST</span>"
+    return f"<div class='chips' id='status'>{market}{bot_chip}{mode_chip}{data_chip}{login_chip}{upd}</div>"
+
+
+def _meter(used_pct):
+    cls = "high" if used_pct >= 75 else "mid" if used_pct >= 40 else ""
+    return (f"<div class='meter {cls}' role='meter' aria-valuemin='0' aria-valuemax='100' aria-valuenow='{used_pct:.0f}'>"
+            f"<span style='width:{max(2.0, min(100.0, used_pct)):.0f}%'></span></div>")
+
+
+def _kpi(label, value, sub="", cls=""):
+    return (f"<div class='kpi'><label>{label}</label><div class='v {cls}'>{value}</div>"
+            + (f"<div class='s'>{sub}</div>" if sub else "") + "</div>")
+
+
+def _limits_kpis(s, equity=None, unreal=0.0):
+    """Trades used today and how much of the daily loss limit is used (the bot's own counters)."""
+    trades, cap = int(s.get("trades_today") or 0), C.MAX_TRADES_PER_DAY
+    out = _kpi("Trades today", f"{trades} <small>of {cap}</small>", _meter(trades / cap * 100) if cap else "")
+    day = float(s.get("day_pnl") or 0.0) + float(unreal or 0.0)
+    eq = equity if equity is not None else s.get("equity")
+    if eq:
+        start = float(eq) - day
+        loss_pct = max(0.0, -day) / start * 100 if start else 0.0
+        out += _kpi(f"{T.name('daily_loss')} · daily loss limit",
+                    f"{loss_pct:.2f}% <small>of {C.MAX_DAILY_LOSS_PCT:g}%</small>",
+                    _meter(loss_pct / C.MAX_DAILY_LOSS_PCT * 100))
+    else:
+        out += _kpi(f"{T.name('daily_loss')} · daily loss limit", f"- <small>of {C.MAX_DAILY_LOSS_PCT:g}%</small>")
+    return out
+
+
+def live_kpis(view, s):
+    """The key figures for the account in view. Paper: from the paper files only. Zerodha: read-only
+    from Kite's balance and positions; a login or error message instead when it can't be read."""
+    import accounts
+    if view == "zerodha":
+        a = accounts.zerodha_account()
+        if a.get("error"):
+            return (f"<section class='card acct zerodha' id='acct'>{zerodha_card(a)}</section>")
+        n_open = sum(1 for r in a["positions"] if r["qty"])
+        cells = (_kpi("Account value", _inr(a["equity"]), f"opening {_inr(a['opening'])}")
+                 + _kpi("Available funds", _inr(a["available"]), f"margin used {_inr(a['margin_used'])}")
+                 + _kpi("Today's P&amp;L", _signed(a["pnl"]), f"booked {_inr(a['realised'], True)} · open {_inr(a['unrealised'], True)}",
+                        _cls(a["pnl"]))
+                 + _kpi("Open P&amp;L", _signed(a["unrealised"]), f"{n_open} open position{'s' if n_open != 1 else ''}",
+                        _cls(a["unrealised"]))
+                 + _kpi("Invested", _inr(a["invested"]), "open positions at average price")
+                 + _kpi("Margin used", _inr(a["margin_used"]), "Zerodha's figure"))
+        warn = "".join(f"<div class='warn small warnline'>⚠ {html.escape(w)}</div>" for w in a.get("warnings", []))
+        note = (f"<div class='muted small warnline'>From Zerodha at {_clock(a.get('fetched_at'))} IST · read-only · "
+                f"Zerodha's P&amp;L is before charges · delivery holdings not included</div>")
+        return f"<section class='card acct zerodha kwrap' id='acct'><div class='kgrid'>{cells}</div>{warn}{note}</section>"
+    a = accounts.paper_account()
+    if a.get("error"):
+        return f"<section class='card acct paper' id='acct'>{paper_card(a, s)}</section>"
+    n = len(a["positions"])
+    today = a["realised_today"] + a["unrealised"]
+    rsum = sum(p.get("r_unreal") or 0 for p in s.get("positions", [])) if s.get("mode") == "paper" else None
+    cells = (_kpi("Total equity", _inr(a["equity"]), f"<span class='{_cls(a['total_pnl'])}'>{_signed(a['total_pnl'])}</span> "
+                  f"since the {_inr(a['start'])} start")
+             + _kpi("Available funds", _inr(a["available"]),
+                    f"{_inr(a['invested'])} in {n} position{'s' if n != 1 else ''}")
+             + _kpi("Today's P&amp;L", _signed(today), f"booked {_inr(a['realised_today'], True)} · open {_inr(a['unrealised'], True)}",
+                    _cls(today))
+             + _kpi("Open P&amp;L", _signed(a["unrealised"]),
+                    (f"{rsum:+.2f}R · " if rsum and n else "") + "before exit charges", _cls(a["unrealised"])))
+    cells += (_limits_kpis(s, a["equity"], a["unrealised"]) if s.get("mode", "paper") == "paper" else
+              _kpi("Realised since start", _signed(a["realised"]), f"charges {_inr(a['charges'])}", _cls(a["realised"]))
+              + _kpi("Charges paid", _inr(a["charges"]), "Zerodha charges, simulated"))
+    warnings = list(a.get("warnings", []))
+    lag = s.get("data_lag_min")
+    if s.get("mode") == "paper" and lag is not None and lag > 20:
+        warnings.append(f"Prices are about {lag:.0f} min behind the market "
+                        f"({'Kite' if (s.get('data_source') or {}).get('using') == 'kite' else 'Yahoo'} data).")
+    warn = "".join(f"<div class='warn small warnline'>⚠ {html.escape(w)}</div>" for w in warnings)
+    note = (f"<div class='muted small warnline'>Paper account (virtual money) · from the bot's last round at "
+            f"{_clock(a.get('as_of'))} IST · realised since start {_inr(a['realised'], True)} · charges {_inr(a['charges'])} · "
+            f"available = equity − invested</div>")
+    return f"<section class='card acct paper kwrap' id='acct'><div class='kgrid'>{cells}</div>{warn}{note}</section>"
+
+
+def today_equity(mode):
+    """Today's equity samples from the daily journal: [(HH:MM:SS, equity)], or []."""
+    import datetime as dt
+    import accounts
+    import journal
+    d = journal.load_detail(mode, dt.datetime.now(accounts.IST).date().isoformat()) or {}
+    return [(e[0], float(e[1])) for e in d.get("equity", []) if len(e) >= 2], d.get("start_equity")
+
+
+def live_equity(view, s=None):
+    mode = "live" if view == "zerodha" else "paper"
+    pts, start = today_equity(mode)
+    if len(pts) < 2 and (s or {}).get("mode", "paper") != mode:
+        return ""   # the bot isn't trading this account: nothing to chart
+    import charts
+    import chartjs
+    body = (chartjs.container({"type": "line", "pts": [[t[:5], round(v, 2)] for t, v in pts],
+                               "base": start if start is not None else pts[0][1]},
+                              charts.intraday(pts, start), "Equity during the day")
+            if len(pts) >= 2 else
+            "<div class='empty'>The chart fills in while the bot runs today (from the daily journal).</div>")
+    return (f"<section class='card flush' id='equity'><div class='hd'>Today's equity "
+            f"<span class='tag'>{html.escape(T.mode_label(mode))}</span></div><div class='bd spark'>{body}</div></section>")
+
+
+def live_positions(s, view):
+    mode = s.get("mode", "paper")
+    if view == "zerodha" and mode != "live":
+        return ""   # the bot's positions are paper positions: they belong to the Paper view
+    if view == "paper" and mode == "live":
+        return ""
+    cards = "".join(position_row(p) for p in s.get("positions", [])) or "<div class='empty'>No open positions</div>"
+    return (f"<section class='card flush' id='positions'><div class='hd'><span class='theme'>{T.term('positions')}</span> <span class='end'><span class='tag'>held by the bot · "
+            f"{html.escape(T.mode_label(mode))}</span></span></div>{cards}</section>")
+
+
+def zerodha_positions():
+    import accounts
+    a = accounts.zerodha_account()
+    if a.get("error"):
+        return ""
+    rows = "".join(
+        f"<tr><td class='first' data-label='Position'><b>{_fmt(r['symbol'])}</b> <span class='muted'>{_fmt(r['exchange'])}</span></td>"
+        f"<td data-label='Product'>{_fmt(r['product'])}</td>"
+        f"<td data-label='Qty' class='r {'up' if r['qty'] > 0 else 'dn' if r['qty'] < 0 else 'muted'}'>{r['qty'] if r['qty'] else 'closed'}</td>"
+        f"<td data-label='Avg price' class='r'>{_fmt(r['avg'])}</td><td data-label='Last price' class='r'>{_fmt(r['price'])}</td>"
+        f"<td data-label='Realised' class='r'>{_pl(r['realised'])}</td><td data-label='Unrealised' class='r'>{_pl(r['unrealised'])}</td></tr>"
+        for r in a.get("positions", [])) or "<tr><td colspan=7 class='muted'>No positions today</td></tr>"
+    return (f"<section class='card flush' id='zpositions'><div class='hd'>Zerodha positions today "
+            f"<span class='end'><span class='tag dn'>real money · read-only</span></span></div>"
+            f"<table class='rt'><tr><th>Position</th><th>Product</th><th class='r'>Qty</th><th class='r'>Avg price</th>"
+            f"<th class='r'>Last price</th><th class='r'>Realised</th><th class='r'>Unrealised</th></tr>{rows}</table></section>")
+
+
+def live_watchlist(s):
+    rows = []
+    for sym, r in sorted(s.get("rows", {}).items()):
+        reason = r.get("reason") or ""
+        low = reason.lower()
+        signal = ("long breakout" in low or "short breakout" in low) and "skip" not in low
+        cls = ("sig" if signal else "dn" if low.startswith("data error") or "skip" in low else
+               "in" if "inside" in low else "")
+        rows.append(
+            f"<tr><td class='first' data-label='Stock'><b>{_fmt(sym)}</b></td>"
+            f"<td data-label='Close' class='r'>{_fmt(r.get('close'))}</td>"
+            f"<td data-label='Opening range' class='r hide-s'>{_fmt(r.get('or_low'))} – {_fmt(r.get('or_high'))}</td>"
+            f"<td data-label='VWAP' class='r hide-s'>{_fmt(r.get('vwap'))}</td>"
+            f"<td data-label='Vol ×' class='r hide-s'>{_fmt(r.get('vol_ratio'), 1)}</td>"
+            f"<td data-label='Bar' class='hide-s'>{_fmt(r.get('bar'))}</td>"
+            f"<td data-label='Status' style='white-space:normal'><span class='st {cls}'>{_fmt(T.decorate(reason) or None)}</span></td></tr>")
+    body = "".join(rows) or "<tr><td colspan=7 class='muted'>Waiting for market data</td></tr>"
+    return (f"<section class='card flush' id='watchlist'><div class='hd'><span class='theme'>{T.term('watchlist')}</span> <span class='end'><span class='tag'>last closed 15-min bar</span></span></div>"
+            f"<table><tr><th>Stock</th><th class='r'>Close</th><th class='r hide-s'>Opening range</th><th class='r hide-s'>VWAP</th>"
+            f"<th class='r hide-s'>Vol ×</th><th class='hide-s'>Bar</th><th>Status</th></tr>{body}</table></section>")
+
+
+def live_events(s):
+    items = []
+    for e in s.get("events", []):
+        t, _, msg = e.partition(" ")
+        items.append(f"<li><time>{html.escape(t)}</time><span>{html.escape(msg)}</span></li>")
+    body = "".join(items) or "<li class='muted'>No events yet</li>"
+    return (f"<details class='card' id='events' open><summary><span class='theme'>{T.term('events')}</span>"
+            f"</summary><ul class='list'>{body}</ul></details>")
+
+
+def live_notice(s, running):
+    if running:
+        return ""
+    when = (s.get("time") or "")
+    return (f"<div class='banner'><b>Bot is not running</b> ({T.name('not_running')}: markets closed, weekend, or stopped). "
+            f"Showing the last saved state{' from ' + html.escape(when[:16].replace('T', ' ')) if when else ''}. "
+            f"See <a href='/review'>{T.term('review')}</a> for how the last trading day played out, "
+            f"or <a href='/trades'>{T.term('trades')}</a> for history.</div>")
+
+
+def live_controls(s, running):
+    """Pause/Resume and Stop (both ask first). Shown only while the bot runs."""
+    if not running:
+        return ""
+    paused = s.get("paused")
+    ask = "Resume new entries?" if paused else "Pause new entries? Open positions keep being managed."
+    label = "▶ Resume new entries" if paused else f"⏸ {T.name('pause')} · Pause new entries"
+    return (f"<section class='card'><div class='hd'><span class='theme'>{T.term('controls')}</span></div>"
+            f"<form method='post' action='/{'resume' if paused else 'pause'}' style='display:inline' "
+            f"onsubmit=\"return confirm('{ask}')\"><button class='ghost'>{label}</button></form>"
+            f"<form method='post' action='/stop' style='display:inline' "
+            f"onsubmit=\"return confirm('Stop the bot? In live mode open positions keep their exchange stop-loss.')\">"
+            f"<button class='red'>■ Stop bot</button></form>"
+            f"<div class='muted small'>Both ask before acting. Open positions keep their stop.</div></section>")
+
+
+def live_limits(s):
+    cooldown = s.get("cooldown_until")
+    lag = s.get("data_lag_min")
+    lag_txt = "-" if lag is None else f"{lag:.0f} min"
+    until = f" · <span class='warn'>until {html.escape(str(cooldown))}</span>" if cooldown else ""
+    return (f"<details class='card' id='limits'><summary>Data &amp; limits</summary><dl class='facts'>"
+            f"<dt>Loss streak</dt><dd>{_fmt(s.get('loss_streak'))} <span class='muted'>· {T.name('cooldown')} after "
+            f"{C.LOSS_STREAK_LIMIT}</span>{until}</dd>"
+            f"<dt>Price data</dt><dd>{data_source_text(s)}</dd>"
+            f"<dt>Data delay</dt><dd>{lag_txt}</dd>"
+            f"<dt>Per trade</dt><dd>{C.RISK_PER_TRADE_PCT:g}% risk · at most {C.MAX_OPEN_POSITIONS} positions, "
+            f"{C.MAX_TRADES_PER_DAY} trades a day</dd>"
+            f"<dt>{T.name('daily_loss')}</dt><dd>stop new trades at −{C.MAX_DAILY_LOSS_PCT:g}% in a day (booked + open)</dd>"
+            f"<dt>Exits</dt><dd>{T.term('stop')} · {T.term('trail')} · {T.term('time_stop')} · "
+            f"{T.term('square_off')} at {C.SQUARE_OFF}</dd>"
+            f"</dl></details>")
+
+
+def live_login(ok, login_msg):
+    url = login_url()
+    login_btn = (f"<a class='btn' href='{html.escape(url)}'>Log in to Zerodha</a>" if url and not ok else "")
+    return (f"<section class='card'><div class='hd'><span class='theme'>{T.term('login')}</span></div>"
+            f"<div class='{'up' if ok else 'warn'}'>{html.escape(login_msg)}</div>{login_btn}"
+            f"<div class='muted small'>{T.term('paper')} mode doesn't need a login, except for {T.name('kite_data')} (Kite) "
+            f"price data. {T.term('live')} mode needs one every day (tokens expire ~06:00 IST).</div></section>")
+
+
+LIVE_REFRESH_SEC = ACCOUNT_REFRESH_SEC
+
+
+def live_regions(view, s):
+    """The parts of the Live page that change while the bot runs. /api/live sends the same parts and the
+    page swaps them in place every few seconds (no reload; the opening-balance form is never touched)."""
+    running = bot_running(s)
+    ok, login_msg = login_status()
+    return {"status": _status_chips(s, running, view, ok, s.get("data_lag_min")),
+            "notice": live_notice(s, running), "acct": live_kpis(view, s), "equity": live_equity(view, s),
+            "zpositions": zerodha_positions() if view == "zerodha" else "",
+            "positions": live_positions(s, view), "watchlist": live_watchlist(s),
+            "controls": live_controls(s, running), "login": live_login(ok, login_msg),
+            "events": live_events(s), "limits": live_limits(s)}
+
+
+LIVE_JS = """
+(function(){
+  var view=document.body.getAttribute('data-view')||'paper', every=SEC*1000, busy=false, failed=false;
+  var off=document.getElementById('offline');
+  function openState(box){var m={};box.querySelectorAll('details[id]').forEach(function(d){m[d.id]=d.open});return m}
+  function restore(box,m){box.querySelectorAll('details[id]').forEach(function(d){if(d.id in m)d.open=m[d.id]})}
+  function stamp(){var u=document.getElementById('updated'); if(!u)return;
+    u.textContent='Updated '+new Date().toTimeString().slice(0,8)+' · every SEC s'+(failed?' · OFFLINE':'');}
+  function tick(){
+    if(busy||document.hidden)return; busy=true;
+    fetch('/api/live?view='+encodeURIComponent(view),{cache:'no-store'})
+     .then(function(r){if(!r.ok)throw new Error(r.status);return r.json()})
+     .then(function(d){
+        failed=false; if(off)off.hidden=true;
+        Object.keys(d.regions||{}).forEach(function(k){
+          var box=document.querySelector('[data-region="'+k+'"]'); if(!box)return;
+          var h=d.regions[k]; if(box._html===h)return;
+          var m=openState(box); box.innerHTML=h; box._html=h; restore(box,m);
+        });
+        stamp(); document.dispatchEvent(new CustomEvent('regionsupdated'));
+     })
+     .catch(function(){failed=true; if(off)off.hidden=false; stamp();})
+     .then(function(){busy=false});
+  }
+  document.querySelectorAll('[data-region]').forEach(function(b){b._html=b.innerHTML});
+  setInterval(tick,every);
+  document.addEventListener('visibilitychange',function(){if(!document.hidden)tick()});
+  stamp();
+})();
+""".replace("SEC", str(LIVE_REFRESH_SEC))
 
 
 def render(msg="", q=None):
     s = read_status()
     view = current_view(q or {}, s)
-    running = bot_running(s)
-    ok, login_msg = login_status()
-    url = login_url()
-    mode = s.get("mode", "paper" if not C.is_live() else "live").upper()
-    lag = s.get("data_lag_min")
-    lag_txt = "-" if lag is None else f"{lag:.0f} min"
-    lag_cls = "warn" if (lag or 0) > 20 else ""
-    paused = s.get("paused")
+    reg = live_regions(view, s)
+    capital = capital_card() if view == "paper" else ""
 
-    pos_rows = "".join(position_row(p) for p in s.get("positions", [])) or \
-        "<tr><td colspan=8 class='muted'>No open positions</td></tr>"
-
-    sig_rows = "".join(
-        f"<tr><td>{_fmt(sym)}</td><td>{_fmt(r.get('bar'))}</td><td>{_fmt(r.get('or_low'))} – {_fmt(r.get('or_high'))}</td>"
-        f"<td>{_fmt(r.get('close'))}</td><td>{_fmt(r.get('vwap'))}</td><td>{_fmt(r.get('vol_ratio'), 1)}</td>"
-        f"<td class='{'sig' if 'breakout' in (r.get('reason') or '') else ''}'>{_fmt(T.decorate(r.get('reason')) or None)}</td></tr>"
-        for sym, r in sorted(s.get("rows", {}).items())) or "<tr><td colspan=7 class='muted'>Waiting for market data</td></tr>"
-
-    events = "".join(f"<li>{html.escape(e)}</li>" for e in s.get("events", [])) or "<li class='muted'>-</li>"
-    login_btn = (f"<a class='btn' href='{html.escape(url)}'>Log in to Zerodha</a>" if url and not ok else "")
-    when = (s.get("time") or "")
-    banner = "" if running else (
-        f"<div class='banner'><b>Bot is not running</b> ({T.name('not_running')}: markets closed, weekend, or stopped). "
-        f"Showing the last saved state{' from ' + html.escape(when[:16].replace('T', ' ')) if when else ''}. "
-        f"See <a href='/review' style='color:#fde68a'>{T.term('review')}</a> for how the last trading day played out, "
-        f"or <a href='/trades' style='color:#fde68a'>{T.term('trades')}</a> for history.</div>")
-    calendar = market_calendar()
-    controls = (f"""<div class="card"><h2>{T.term('controls')}</h2>
-<form method="post" action="/{'resume' if paused else 'pause'}" style="display:inline"><button>{'Resume new entries' if paused else T.name('pause') + ' · Pause new entries'}</button></form>
-<form method="post" action="/stop" style="display:inline" onsubmit="return confirm('Stop the bot? In live mode open positions keep their exchange stop-loss.')"><button class="red">Stop bot</button></form></div>"""
-                if running else "")
-    cooldown = s.get("cooldown_until")
-    streak_note = (f"<br><span class='warn' style='font-size:11px'>{T.name('cooldown')} until {html.escape(str(cooldown))}</span>"
-                   if cooldown else f"<br><span class='muted' style='font-size:11px'>{T.name('cooldown')} after {C.LOSS_STREAK_LIMIT}</span>")
-    run_tag = T.term("running") if running else T.term("not_running")
-    return page(T.plain("live_page"), "/", f"""
-<h1>{T.BOW} {T.name('live_page')} <span class="tag" title="The mode the bot trades in (set in its own settings)">Bot trading: {html.escape(T.mode_label(mode))}</span> <span class="tag {'up' if running else 'warn'}">{run_tag}</span> {f'<span class="tag warn">{T.name("pause").upper()} · PAUSED</span>' if paused else ''}</h1>
-<div class="muted">{T.plain('live_page')} · bot status updated {_fmt(when[11:19])} IST · page auto-refreshes every 20 s</div>
-{view_switch("/", view, s)}
+    def R(k):
+        return f"<div data-region='{k}'>{reg[k]}</div>"
+    note = (f'<div class="banner" style="border-color:var(--up)" role="status">{html.escape(msg)}</div>' if msg else "")
+    body = f"""<style>{LIVE_CSS}</style>
+<div class="page-head"><h1>{T.BOW} {T.name('live_page')}</h1><span class="sub">{T.plain('live_page')} · updates in place every {LIVE_REFRESH_SEC} s</span></div>
+{R('status')}
 {view_banner(view)}
-{account_card(view, s)}
-{capital_card() if view == "paper" else ""}
-{banner}
-{calendar}
-{f'<p class="msg">{html.escape(msg)}</p>' if msg else ''}
-<div class="card"><h2>{T.term('login')}</h2>
-<div class="{'up' if ok else 'warn'}">{html.escape(login_msg)}</div>{login_btn}
-<div class="muted">{T.term('paper')} mode doesn't need a login, except for {T.name('kite_data')} (Kite) price data.
-{T.term('live')} mode needs one every day (tokens expire ~06:00 IST).</div></div>
-<div class="card kpis">
-<div>Trades today<b>{_fmt(s.get('trades_today'))}</b></div><div>Loss streak<b>{_fmt(s.get('loss_streak'))}</b>{streak_note}</div>
-<div>Data delay<b class="{lag_cls}">{lag_txt}</b></div>{data_source_kpi(s)}</div>
-<div class="card"><h2>{T.term('positions')} held by the bot <span class="tag">{html.escape(T.mode_label(mode))}</span></h2><table class="wrap"><tr><th>Stock</th><th>Side · Qty</th><th>Entry → Price</th><th>Open P&amp;L</th>
-<th>{T.term('stop')}</th><th>{T.term('trail')}</th><th>{T.term('time_stop')}</th><th>In trade</th></tr>{pos_rows}</table></div>
-<div class="card"><h2>{T.term('watchlist')} (last closed 15-min bar)</h2><table><tr><th>Stock</th><th>Bar</th><th>Opening range</th><th>Close</th><th>VWAP</th><th>Vol ×</th><th>Status</th></tr>{sig_rows}</table></div>
-{controls}
-<div class="card"><h2>{T.term('events')}</h2><ul>{events}</ul></div>""", refresh=20, view=view)
+<div class="banner" id="offline" role="status" hidden>⚠ Can't reach the dashboard server: the figures below may be old. It keeps trying.</div>
+{R('notice')}
+{note}
+{R('acct')}
+<div class="grid" style="margin-top:16px">
+<div>{R('equity')}{R('zpositions')}{R('positions')}{R('watchlist')}</div>
+<aside>{R('controls')}{capital}{R('login')}{R('events')}{market_calendar()}{R('limits')}</aside>
+</div>
+<script>{LIVE_JS}</script>"""
+    return page(T.plain("live_page"), "/", body, view=view)
 
 
 def sparkline(closes, or_hi, or_lo, w=160, h=36):
@@ -495,10 +806,11 @@ def sparkline(closes, or_hi, or_lo, w=160, h=36):
     band = ""
     if or_hi and or_lo:
         band = (f"<rect x='0' y='{y(or_hi):.1f}' width='{w}' height='{max(1, y(or_lo) - y(or_hi)):.1f}' "
-                f"fill='{T.COLORS['acc']}' opacity='0.18'/>")
-    col = T.COLORS["up"] if closes[-1] >= closes[0] else T.COLORS["dn"]
-    return (f"<svg width='{w}' height='{h}' viewBox='0 0 {w} {h}' role='img' aria-label='intraday closes'>"
-            f"{band}<polyline points='{pts}' fill='none' stroke='{col}' stroke-width='1.5'/></svg>")
+                f"style='fill:var(--accent)' opacity='0.18'/>")
+    col = "var(--up)" if closes[-1] >= closes[0] else "var(--dn)"
+    return (f"<svg width='{w}' height='{h}' viewBox='0 0 {w} {h}' role='img' aria-label='closes, "
+            f"{'up' if closes[-1] >= closes[0] else 'down'} {abs(closes[-1] / closes[0] - 1) * 100:.1f}%'>"
+            f"{band}<polyline points='{pts}' fill='none' style='stroke:{col}' stroke-width='1.5'/></svg>")
 
 
 def render_review(day=None, refresh=False):
@@ -534,31 +846,39 @@ def render_review(day=None, refresh=False):
         else:
             outcome = f"<span class='muted'>{html.escape(x.get('note') or '-')}</span>"
             r_cell = "-"
-        rows.append(f"<tr><td><b>{html.escape(sym)}</b></td><td>{sparkline(x.get('closes', []), x.get('or_high'), x.get('or_low'))}</td>"
-                    f"<td>{_fmt(x.get('or_low'))} – {_fmt(x.get('or_high'))}</td>"
-                    f"<td class='{'up' if (chg or 0) >= 0 else 'dn'}'>{'-' if chg is None else f'{chg:+.2f}%'}</td>"
-                    f"<td style='white-space:normal'>{outcome}</td><td>{r_cell}</td></tr>")
+        rows.append(f"<tr><td class='first' data-label='Stock'><b>{html.escape(sym)}</b></td>"
+                    f"<td data-label='Day'>{sparkline(x.get('closes', []), x.get('or_high'), x.get('or_low'))}</td>"
+                    f"<td data-label='Opening range' class='r'>{_fmt(x.get('or_low'))} – {_fmt(x.get('or_high'))}</td>"
+                    f"<td data-label='Day %' class='r {'up' if (chg or 0) >= 0 else 'dn'}'>"
+                    f"{'-' if chg is None else ('▲ ' if chg >= 0 else '▼ ') + f'{chg:+.2f}%'}</td>"
+                    f"<td data-label='Signal → outcome' class='block' style='white-space:normal;text-align:left'>{outcome}</td>"
+                    f"<td data-label='Result' class='r'>{r_cell}</td></tr>")
     st = r.get("settings", {})
     settings = " · ".join(f"{k}={v}" for k, v in st.items())
     total = r.get("total_r", 0.0)
+    built = html.escape(str(r.get('built', ''))[:16].replace('T', ' '))
+    at_risk = total * C.PAPER_START_INR * C.RISK_PER_TRADE_PCT / 100
     body = f"""
-<h1>{T.LAMP} {T.term('review')} <span class="tag">{r['day']}</span></h1>
-<div class="muted">At Chitrakoot we look back calmly: the day replayed through the strategy rules, one stock at a time
-(portfolio limits not applied). Built {html.escape(str(r.get('built', ''))[:16].replace('T', ' '))} from 15-min data.</div>
-<div class="card days">Day: {days} <form method="get" action="/review" style="display:inline">
-<input type="hidden" name="day" value="{r['day']}"><input type="hidden" name="refresh" value="1"><button>Refresh</button></form></div>
-<div class="card kpis"><div>Signals<b>{r.get('signals', 0)}</b></div><div>Winners<b>{r.get('wins', 0)}</b></div>
-<div>Total<b class="{'up' if total > 0 else 'dn'}">{total:+.2f}R</b></div>
-<div>At 0.5% risk on ₹1L<b class="{'up' if total > 0 else 'dn'}">≈ ₹{total * C.PAPER_START_INR * C.RISK_PER_TRADE_PCT / 100:+,.0f}</b></div></div>
-<div class="card"><h2>Stocks — chart shows 15-min closes, saffron band = opening range</h2><table>
-<tr><th>Stock</th><th>Day</th><th>Opening range</th><th>Day %</th><th>Signal → outcome</th><th>Result</th></tr>{''.join(rows)}</table></div>
-<div class="card muted">Rules: {html.escape(settings)}. R = profit or loss as a multiple of the risk
-(entry to stop), after 0.05% slippage and Zerodha charges.<br>
+<div class="page-head"><h1>{T.LAMP} {T.term('review')} <span class="tag">{r['day']}</span></h1>
+<span class="sub">The day replayed through the strategy rules, one stock at a time (portfolio limits not applied) ·
+built {built} from 15-min data</span></div>
+<div class="chips"><span class="muted small">Day:</span><span class="days">{days}</span>
+<form method="get" action="/review" style="display:inline;margin:0"><input type="hidden" name="day" value="{r['day']}">
+<input type="hidden" name="refresh" value="1"><button class="ghost small">↻ Refresh</button></form></div>
+<div class="kgrid k4">{_kpi("Signals", f"{r.get('signals', 0)}")}{_kpi("Winners", f"{r.get('wins', 0)}")}
+{_kpi("Total", f"{total:+.2f}R", "after slippage and charges", _cls(total))}
+{_kpi("At 0.5% risk on ₹1L", _signed(at_risk), "about", _cls(at_risk))}</div>
+<section class="card flush"><div class="hd">Stocks <span class="end"><span class="tag">chart = 15-min closes ·
+saffron band = opening range</span></span></div><table class="rt">
+<tr><th>Stock</th><th>Day</th><th class="r">Opening range</th><th class="r">Day %</th><th>Signal → outcome</th>
+<th class="r">Result</th></tr>{''.join(rows)}</table></section>
+<details class="card"><summary>How to read this page</summary><div class="small muted">Rules: {html.escape(settings)}.
+R = profit or loss as a multiple of the risk (entry to stop), after 0.05% slippage and Zerodha charges.<br>
 {T.SEER} {T.term('time_machine')}: the trade replayed 10,000 times using this stock's own 5-minute moves from the same
 time of day (±10 min) over the last 60 days, shuffled. It assumes no edge, so it's a baseline: a good setup
 should beat these odds. The replays also inherit the stock's recent intraday drift.
-The verdict compares target-first vs stop-first at 1R with break-even (50%): within 5 points is a coin flip.
-{T.SCROLL} History is the real record: the bot's same rules (same direction) run on each earlier session.</div>"""
+The verdict compares target-first vs stop-first at 1R with break-even (50%): within 5 points is a coin flip.<br>
+{T.SCROLL} History is the real record: the bot's same rules (same direction) run on each earlier session.</div></details>"""
     return page("Session review", "/review", body)
 
 
@@ -568,7 +888,7 @@ def render_scanner(refresh=False):
         r = scanner.scan() if refresh else scanner.latest()
     except Exception as e:
         return page("Swing scanner", "/scanner", f"<h1>{T.FLAG} {T.term('scanner')}</h1><div class='banner'>Scan failed: {html.escape(str(e))}</div>")
-    counts = "".join(f"<div>{html.escape(k)}<b>{v}</b></div>" for k, v in r.get("counts", {}).items())
+    counts = "".join(_kpi(html.escape(k), f"{v}") for k, v in r.get("counts", {}).items())
     rows = []
     hits = [(s, x) for s, x in r.get("rows", {}).items() if x["setups"]]
     for s, x in sorted(hits, key=lambda kv: (-len(kv[1]["setups"]), kv[0])):
@@ -577,26 +897,34 @@ def render_scanner(refresh=False):
         plan = (f"stop {_fmt(x['stop'])} · target {_fmt(x['target'])} · qty {x['qty']}"
                 if x.get("stop") else "-")
         rows.append(
-            f"<tr><td><b>{html.escape(s)}</b></td><td>{sparkline(x.get('closes', []), None, None)}</td>"
-            f"<td class='sig' style='white-space:normal'>{html.escape(', '.join(x['setups']))}</td>"
-            f"<td>{_fmt(x['close'])}<br><span class='{'up' if x['change_pct'] >= 0 else 'dn'}'>{x['change_pct']:+.2f}%</span></td>"
-            f"<td>{_fmt(x.get('rsi'), 0)}</td><td>{trend}<br><span class='muted'>{x['from_52w_high_pct']:+.1f}% vs 52w high</span></td>"
-            f"<td style='white-space:normal'>{plan}</td></tr>")
+            f"<tr><td class='first' data-label='Stock'><b>{html.escape(s)}</b></td>"
+            f"<td data-label='60 days'>{sparkline(x.get('closes', []), None, None)}</td>"
+            f"<td data-label='Setup' style='white-space:normal'><span class='st sig'>{html.escape(', '.join(x['setups']))}</span></td>"
+            f"<td data-label='Close' class='r'><span>{_fmt(x['close'])} <span class='{'up' if x['change_pct'] >= 0 else 'dn'}'>"
+            f"{'▲' if x['change_pct'] >= 0 else '▼'} {x['change_pct']:+.2f}%</span></span></td>"
+            f"<td data-label='RSI' class='r'>{_fmt(x.get('rsi'), 0)}</td>"
+            f"<td data-label='Trend'><span>{trend} <span class='muted'>· {x['from_52w_high_pct']:+.1f}% vs 52w high</span></span></td>"
+            f"<td data-label='Plan' class='block' style='white-space:normal'>{plan}</td></tr>")
     table = "".join(rows) or "<tr><td colspan=7 class='muted'>No setups on the last session.</td></tr>"
     risk_rs = C.PAPER_START_INR * C.RISK_PER_TRADE_PCT / 100
+    built = html.escape(str(r.get('built', ''))[:16].replace('T', ' '))
+    errors = (' Data errors: ' + html.escape(', '.join(r['errors']))) if r.get('errors') else ''
     body = f"""
-<h1>{T.FLAG} {T.term('scanner')} <span class="tag">{html.escape(str(r.get('day')))}</span></h1>
-<div class="banner">Research only - Hanuman scouts, the bot does not trade these. They are multi-day (CNC) setups on daily candles;
-check the chart yourself before acting. Built {html.escape(str(r.get('built', ''))[:16].replace('T', ' '))}.</div>
-<div class="card kpis">{counts}</div>
-<form method="get" action="/scanner"><input type="hidden" name="refresh" value="1"><button>Re-scan</button></form>
-<div class="card"><h2>Stocks with a setup on the last closed daily candle (60-day chart)</h2><table>
-<tr><th>Stock</th><th>60 days</th><th>Setup</th><th>Close</th><th>RSI</th><th>Trend</th><th>Plan (₹{risk_rs:,.0f} risk)</th></tr>{table}</table></div>
-<div class="card muted">Setups: 20-day high breakout · bull flag (≥8% pole, tight shallow flag) · 20-day MA reclaim ·
+<div class="page-head"><h1>{T.FLAG} {T.term('scanner')} <span class="tag">{html.escape(str(r.get('day')))}</span></h1>
+<span class="sub">Multi-day (CNC) setups on the last closed daily candle · built {built}</span></div>
+<div class="banner"><b>Research only</b> - Hanuman scouts, the bot does not trade these. Check the chart yourself before acting.</div>
+<div class="kgrid k4">{counts}</div>
+<section class="card flush"><div class="hd">Stocks with a setup <span class="end">
+<form method="get" action="/scanner" style="margin:0"><input type="hidden" name="refresh" value="1">
+<button class="ghost small">↻ Re-scan</button></form></span></div>
+<table class="rt"><tr><th>Stock</th><th>60 days</th><th>Setup</th><th class="r">Close</th><th class="r">RSI</th><th>Trend</th>
+<th>Plan (₹{risk_rs:,.0f} risk)</th></tr>{table}</table></section>
+<details class="card"><summary>How the setups and the plan work</summary><div class="small muted">
+Setups: 20-day high breakout · bull flag (≥8% pole, tight shallow flag) · 20-day MA reclaim ·
 oversold (RSI&lt;30) · oversold bounce (RSI&lt;30 in last 3 days, close above yesterday's high).
 Plan: stop = close − 1.5 × ATR(14), target = 2R, qty risks {C.RISK_PER_TRADE_PCT}% of ₹{C.PAPER_START_INR:,.0f}
 (capped at {C.MAX_POSITION_PCT:.0f}% of capital). The TWS interview's rule: prefer stocks in an uptrend (above the 200 DMA,
-near highs).{(' Data errors: ' + html.escape(', '.join(r['errors']))) if r.get('errors') else ''}</div>"""
+near highs).{errors}</div></details>"""
     return page("Swing scanner", "/scanner", body)
 
 
@@ -643,9 +971,17 @@ def breakdown_table(rows, key, title):
             f"<th>Won</th><th>Net</th><th>Avg</th></tr>{''.join(out)}</table></div>")
 
 
-def trade_section(rows, src, label, start_cash, show_log=True):
-    """KPIs, equity curve, P&L bars, breakdowns and the trade log (with chart links) for one trade list."""
-    import charts
+def _day_label(iso_day):
+    """'2026-11-16' -> '16 Nov'"""
+    import datetime as dt
+    try:
+        return dt.date.fromisoformat(iso_day).strftime("%d %b")
+    except ValueError:
+        return iso_day or "-"
+
+
+def trade_stats(rows, start_cash):
+    """Numbers for one trade list: equity after each trade, max drawdown, wins, net, average R, charges."""
     nets = [_num(r.get("net")) for r in rows]
     equity, eq = [], start_cash
     for v in nets:
@@ -655,40 +991,151 @@ def trade_section(rows, src, label, start_cash, show_log=True):
     for v in equity:
         peak = max(peak, v)
         max_dd = max(max_dd, (peak - v) / peak * 100 if peak else 0)
-    net, wins = sum(nets), sum(1 for v in nets if v > 0)
+    n = len(rows)
+    return {"n": n, "nets": nets, "equity": equity, "max_dd": max_dd, "net": sum(nets),
+            "wins": sum(1 for v in nets if v > 0), "avg_r": sum(_num(r.get("r")) for r in rows) / n if n else None,
+            "charges": sum(_num(r.get("charges")) for r in rows)}
+
+
+def trade_kpis(st, label, frame=""):
+    n, net = st["n"], st["net"]
+    cells = (_kpi(f"{html.escape(label)} trades", f"{n}")
+             + _kpi("Win rate", f"{(st['wins'] / n * 100 if n else 0):.0f}%", f"{st['wins']} won · {n - st['wins']} lost")
+             + _kpi("Net P&amp;L", _signed(net), "after charges", _cls(net))
+             + _kpi("Max drawdown", f"{st['max_dd']:.2f}%", "from the highest equity", "dn" if st["max_dd"] else "")
+             + _kpi("Average", "-" if st["avg_r"] is None else f"{st['avg_r']:+.2f}R", "per trade",
+                    _cls(st["avg_r"] or 0))
+             + _kpi("Charges", _inr(st["charges"]), "Zerodha charges"))
+    cls = f"card acct {frame} kwrap" if frame else "kwrap card"
+    return f"<section class='{cls}'><div class='kgrid'>{cells}</div></section>"
+
+
+def trade_charts(rows, st, label, start_cash):
+    import charts
+    import chartjs
     tips = [f"{r.get('symbol', '')} {r.get('direction', '')} {r.get('closed', '')[:10]} ({_num(r.get('r')):+.2f}R)"
             for r in rows]
-    kpis = (f"<div class='card kpis'><div>{html.escape(label)} trades<b>{len(rows)}</b></div>"
-            f"<div>Win rate<b>{(wins / len(rows) * 100 if rows else 0):.0f}%</b></div>"
-            f"<div>Net P&amp;L<b class='{'up' if net >= 0 else 'dn'}'>₹{net:,.2f}</b></div>"
-            f"<div>Max drawdown<b class='{'dn' if max_dd else ''}'>{max_dd:.2f}%</b></div></div>")
+    days = [(r.get("closed") or "")[:10] for r in rows]
+    eq_pts = [[_day_label(d), round(v, 2), d, t] for d, v, t in zip(days, st["equity"], tips)]
+    bar_pts = [[f"#{i + 1} {_day_label(d)}", round(v, 2), t] for i, (d, v, t) in enumerate(zip(days, st["nets"], tips))]
+    eq_chart = chartjs.container({"type": "line", "pts": eq_pts, "base": start_cash, "from0": True, "dd": True,
+                                  "ranges": True, "firstLabel": "start"},
+                                 charts.equity_curve(st["equity"], start_cash, tips),
+                                 f"{label}: equity after each closed trade")
+    bar_chart = chartjs.container({"type": "bars", "pts": bar_pts, "h": 170},
+                                  charts.pnl_bars(st["nets"], tips), f"{label}: profit or loss per trade")
+    return (f"<section class='card'><h2>{html.escape(label)}: equity after each closed trade "
+            f"<span class='muted small'>(red area = drawdown from the peak)</span></h2>{eq_chart}"
+            f"<h2 style='margin-top:14px'>Profit or loss per trade <span class='muted small'>"
+            f"(hover, tap or use the arrow keys for details)</span></h2>{bar_chart}</section>")
+
+
+def trade_breakdowns(rows):
+    return (f"<section class='card'><div class='cols'>{breakdown_table(rows, 'reason', 'By exit reason')}"
+            f"{breakdown_table(rows, 'direction', 'Long vs short')}"
+            f"{breakdown_table(rows, 'symbol', 'By stock')}</div></section>")
+
+
+def trade_log(rows, src, label, limit=200):
+    """Every trade, newest first, with filters (stock, side, result) and a chart link. On a phone each row
+    becomes a small card."""
+    idx_rows = list(enumerate(rows))[-limit:][::-1]
+    body = []
+    for i, r in idx_rows:
+        net = _num(r.get("net"))
+        side = r.get("direction", "")
+        body.append(
+            f"<tr data-sym='{html.escape(r.get('symbol', ''))}' data-side='{html.escape(side)}' "
+            f"data-res='{'won' if net > 0 else 'lost'}'>"
+            f"<td class='first' data-label='Trade'><b>{html.escape(r.get('symbol', ''))}</b> "
+            f"<span class='side {'long' if side == 'LONG' else 'short'}'>{html.escape(side)}</span>"
+            f"<span class='lbl'>{html.escape(r.get('closed', '')[:16])}</span></td>"
+            f"<td data-label='Qty' class='r'>{html.escape(r.get('qty', ''))}</td>"
+            f"<td data-label='Entry → exit' class='r'>{html.escape(r.get('entry', ''))} → {html.escape(r.get('exit', ''))}</td>"
+            f"<td data-label='Exit reason'>{html.escape(T.reason_label(r.get('reason', '')))}</td>"
+            f"<td data-label='Charges' class='r'>₹{_num(r.get('charges')):,.2f}</td>"
+            f"<td data-label='Net' class='r'><b class='{_cls(net)}'>{_signed(net)}</b></td>"
+            f"<td data-label='R' class='r'>{_num(r.get('r')):+.2f}R</td>"
+            f"<td data-label='Chart'><a class='sig' href='/journey?src={src}&amp;i={i}' "
+            f"title='{T.name('journey')}: the trade on its chart'>{T.PATH} chart</a></td></tr>")
+    syms = sorted({r.get("symbol", "") for _, r in idx_rows if r.get("symbol")})
+    opts = "".join(f"<option value='{html.escape(x)}'>{html.escape(x)}</option>" for x in syms)
+    more = f" (newest {limit} of {len(rows)})" if len(rows) > limit else ""
+    filters = (f"<div class='filters' role='search' aria-label='Filter trades'>"
+               f"<label>Stock <select data-f='sym'><option value=''>All</option>{opts}</select></label>"
+               f"<label>Side <select data-f='side'><option value=''>All</option><option>LONG</option><option>SHORT</option></select></label>"
+               f"<label>Result <select data-f='res'><option value=''>All</option><option value='won'>Won</option>"
+               f"<option value='lost'>Lost</option></select></label>"
+               f"<span class='muted small' data-count>{len(idx_rows)} trades{more}</span></div>")
+    return (f"<section class='card tlog'><h2>{html.escape(label)} trade log <span class='muted small'>newest first</span></h2>"
+            f"{filters}<table class='rt'><tr><th>Trade</th><th class='r'>Qty</th><th class='r'>Entry → exit</th>"
+            f"<th>Exit reason</th><th class='r'>Charges</th><th class='r'>Net</th><th class='r'>R</th><th></th></tr>"
+            f"{''.join(body)}</table></section>")
+
+
+def trade_section(rows, src, label, start_cash, show_log=True):
+    """Key figures, charts, breakdowns and the trade log for one trade list (used for the backtest)."""
+    st = trade_stats(rows, start_cash)
+    out = trade_kpis(st, label)
     if not rows:
-        return kpis
-    charts_html = (f"<div class='card'><h2>{html.escape(label)}: equity after each closed trade "
-                   f"(red area = drawdown from the peak)</h2>{charts.equity_curve(equity, start_cash, tips)}"
-                   f"<h2 style='margin-top:12px'>Profit or loss per trade (hover a bar for details)</h2>"
-                   f"{charts.pnl_bars(nets, tips)}</div>"
-                   f"<div class='card' style='display:flex;flex-wrap:wrap;gap:18px'>"
-                   f"{breakdown_table(rows, 'reason', 'By exit reason')}"
-                   f"{breakdown_table(rows, 'direction', 'Long vs short')}"
-                   f"{breakdown_table(rows, 'symbol', 'By stock')}</div>")
-    log = ""
-    if show_log:
-        idx_rows = list(enumerate(rows))[-200:][::-1]
-        body = "".join(
-            f"<tr><td>{html.escape(r.get('closed', '')[:16])}</td><td>{html.escape(r.get('symbol', ''))}</td>"
-            f"<td class='{'up' if r.get('direction') == 'LONG' else 'dn'}'>{html.escape(r.get('direction', ''))}</td>"
-            f"<td>{html.escape(r.get('qty', ''))}</td><td>{html.escape(r.get('entry', ''))}</td><td>{html.escape(r.get('exit', ''))}</td>"
-            f"<td>{html.escape(T.reason_label(r.get('reason', '')))}</td><td>{html.escape(r.get('charges', ''))}</td>"
-            f"<td class='{'up' if _num(r.get('net')) > 0 else 'dn'}'>{_num(r.get('net')):,.2f}</td><td>{_num(r.get('r')):+.2f}</td>"
-            f"<td><a class='sig' href='/journey?src={src}&amp;i={i}' title='{T.name('journey')}: the trade on its chart'>{T.PATH} chart</a></td></tr>"
-            for i, r in idx_rows)
-        table = (f"<table><tr><th>Closed</th><th>Stock</th><th>Side</th><th>Qty</th><th>Entry</th><th>Exit</th>"
-                 f"<th>Reason</th><th>Charges ₹</th><th>Net ₹</th><th>R</th><th></th></tr>{body}</table>")
-        log = (f"<div class='card'><h2>{html.escape(label)} trade log (newest first)</h2>{table}</div>" if src != "backtest" else
-               f"<div class='card'><details><summary class='sig' style='cursor:pointer'>Show all {len(rows)} backtest trades "
-               f"(with charts)</summary>{table}</details></div>")
-    return kpis + charts_html + log
+        return out
+    out += trade_charts(rows, st, label, start_cash) + trade_breakdowns(rows)
+    return out + (trade_log(rows, src, label, limit=500) if show_log else "")
+
+
+def daily_pnl_card(mode):
+    """Net P&L per trading day from the daily journal, as bars."""
+    import chartjs
+    import charts
+    import journal
+    days = journal.days(mode)
+    if not days:
+        return ""
+    pts = [[_day_label(r["date"]), round(journal._f(r.get("net_pnl")), 2),
+            f"{int(journal._f(r.get('trades')))} trade(s) · {r.get('status') or ''}"] for r in days]
+    chart = chartjs.container({"type": "bars", "pts": pts, "h": 160}, charts.pnl_bars([p[1] for p in pts]),
+                              "Net profit or loss per trading day")
+    return (f"<section class='card'><h2>Net P&amp;L per trading day <span class='muted small'>from the daily journal"
+            f"</span></h2>{chart}</section>")
+
+
+TRADES_CSS = """
+.filters{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;margin:0 0 10px}
+.filters label{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted)}
+.tlog tr[hidden]{display:none!important}
+.panel[hidden]{display:none}
+.side{font-size:11px;font-weight:700;padding:1px 6px;border-radius:5px;margin-left:4px}
+.side.long{background:var(--up-bg);color:var(--up)} .side.short{background:var(--dn-bg);color:var(--dn)}
+.lbl{display:block;font-size:11.5px;color:var(--muted)}
+.kwrap{background:none;border:0;box-shadow:none;padding:0;overflow:visible;border-radius:var(--radius)}
+.card.acct.kwrap{outline-offset:5px;margin:5px 5px 21px} .kwrap .kgrid{margin:0}
+"""
+
+TRADES_JS = """
+(function(){
+  // tabs: Overview | Journal | Trade log | Backtest (all panels stay visible without the script)
+  var tabs=[].slice.call(document.querySelectorAll('.ptabs [data-tab]'));
+  function pick(id,push){var ok=tabs.some(function(t){return t.getAttribute('data-tab')===id}); if(!ok)id=tabs[0]&&tabs[0].getAttribute('data-tab');
+    tabs.forEach(function(t){var on=t.getAttribute('data-tab')===id;t.classList.toggle('on',on);t.setAttribute('aria-selected',on)});
+    document.querySelectorAll('.panel').forEach(function(p){p.hidden=p.id!==id});
+    if(push)try{history.replaceState(null,'','#'+id)}catch(e){}
+    document.dispatchEvent(new CustomEvent('regionsupdated'));}
+  tabs.forEach(function(t){t.addEventListener('click',function(ev){ev.preventDefault();pick(t.getAttribute('data-tab'),true)})});
+  var asked=(location.hash||'').slice(1); try{asked=asked||new URLSearchParams(location.search).get('tab')||''}catch(e){}
+  if(tabs.length){pick(asked||tabs[0].getAttribute('data-tab'),false);
+    // a link like /trades#journal opens that tab with the page at the top (the tabs stay in view)
+    if(location.hash)setTimeout(function(){window.scrollTo(0,0)},0);}
+  // trade log filters
+  document.querySelectorAll('.tlog').forEach(function(card){
+    var sels=[].slice.call(card.querySelectorAll('select[data-f]')), count=card.querySelector('[data-count]');
+    function apply(){var n=0, rows=card.querySelectorAll('tr[data-sym]');
+      rows.forEach(function(tr){var show=sels.every(function(s){return !s.value||tr.getAttribute('data-'+s.getAttribute('data-f'))===s.value});
+        tr.hidden=!show; if(show)n++});
+      if(count)count.textContent=n+' of '+rows.length+' trades';}
+    sels.forEach(function(s){s.addEventListener('change',apply)});
+  });
+})();
+"""
 
 
 def _money(v):
@@ -710,7 +1157,7 @@ def journal_card(mode, view, period):
                     for p, name in journal.PERIODS.items())
     dl = (f"<a class='sig' href='/journal.csv?view={view}&amp;period={period}' download>⬇ Download CSV</a>"
           if rows else "")
-    head = (f"<div class='card' id='journal'><h2>{T.SCROLL} Daily journal · {html.escape(T.name(mode))}</h2>"
+    head = (f"<div class='card' id='jcard'><h2>{T.SCROLL} Daily journal · {html.escape(T.name(mode))}</h2>"
             f"<div class='days'>{tabs} {dl}</div>")
     if not rows:
         return (head + "<div class='muted'>No days yet. The bot writes one row per trading day to "
@@ -781,9 +1228,6 @@ def render_trades(q=None):
     s = read_status()
     view = current_view(q or {}, s)
     mode = "live" if view == "zerodha" else "paper"   # each view reads only its own trade file
-    parts = [f"<h1>{T.SCROLL} {T.term('trades')}</h1>"
-             f"<div class='muted'>The royal treasury's ledger: every closed trade, after Zerodha charges.</div>",
-             view_switch("/trades", view, s), view_banner(view)]
     rows = trade_rows(mode)
     label = f"{T.name(mode)} · {VIEWS[view]}"
     start, note = C.PAPER_START_INR, ""
@@ -791,26 +1235,39 @@ def render_trades(q=None):
         import capital
         start = capital.current_opening_balance()
         if capital.load().get("history"):
-            note = (f"<div class='muted'>The equity curve and drawdown use the current opening balance "
-                    f"({_inr(start)}). {capital_lines()}</div>")
-    parts.append(f"<div class='card acct {view}' style='padding:4px 16px'>"
-                 + trade_section(rows, mode, label, start) + note + "</div>")
-    parts.append(journal_card(mode, view, (q or {}).get("period", ["day"])[0]))
-    parts.append(edge_card(rows, f"{mode.title()} trading"))
-    if not rows:
-        parts.append("<div class='card muted'>No trades yet - the bot records them here once it trades on a market day.</div>"
-                     if mode == "paper" else
-                     "<div class='card muted'>No real-money trades: the bot has only traded on paper. This list shows "
-                     "trades the bot places in live mode (data\\trades_live.csv), not your whole Zerodha tradebook.</div>")
+            note = (f"<div class='muted small' style='margin:-8px 0 14px'>The equity curve and drawdown use the current "
+                    f"opening balance ({_inr(start)}). {capital_lines()}</div>")
+    st = trade_stats(rows, start)
+    empty = ("" if rows else
+             "<section class='card muted'>No trades yet - the bot records them here once it trades on a market day.</section>"
+             if mode == "paper" else
+             "<section class='card muted'>No real-money trades: the bot has only traded on paper. This list shows "
+             "trades the bot places in live mode (data\\trades_live.csv), not your whole Zerodha tradebook.</section>")
+    overview = (empty + (trade_charts(rows, st, label, start) if rows else "") + daily_pnl_card(mode)
+                + (trade_breakdowns(rows) if rows else "") + edge_card(rows, f"{mode.title()} trading"))
+    panels = [("overview", "Overview", overview),
+              ("journal", "Journal", journal_card(mode, view, (q or {}).get("period", ["day"])[0])),
+              ("log", "Trade log", trade_log(rows, mode, label) if rows else empty)]
     bt = trade_rows("backtest")
     if bt:
         first, last = bt[0].get("opened", "")[:10], max(r.get("closed", "")[:10] for r in bt)
-        parts.append(f"<h1 style='margin-top:26px'>{T.FIRE} {T.name('backtest')} · Last backtest <span class='tag'>{html.escape(first)} → {html.escape(last)}</span></h1>"
-                     f"<div class='muted'>Run <code>.venv\\Scripts\\python.exe backtest.py</code> to update. "
-                     f"Full list: data\\backtest_trades.csv</div>")
-        parts.append(trade_section(bt, "backtest", "Backtest", C.PAPER_START_INR))
-        parts.append(edge_card(bt, "Backtest", compact=True))
-    return page("Trades", "/trades", "".join(parts), view=view)
+        panels.append(("backtest", "Backtest",
+                       f"<div class='page-head'><h1>{T.FIRE} {T.name('backtest')} · Last backtest "
+                       f"<span class='tag'>{html.escape(first)} → {html.escape(last)}</span></h1>"
+                       f"<span class='sub'>Run <code>.venv\\Scripts\\python.exe backtest.py</code> to update. "
+                       f"Full list: data\\backtest_trades.csv</span></div>"
+                       + trade_section(bt, "backtest", "Backtest", C.PAPER_START_INR)
+                       + edge_card(bt, "Backtest", compact=True)))
+    tabs = "".join(f"<a href='#{pid}' data-tab='{pid}' role='tab'>{name}</a>" for pid, name, _ in panels)
+    body = (f"<style>{TRADES_CSS}</style>"
+            f"<div class='page-head'><h1>{T.SCROLL} {T.term('trades')}</h1>"
+            f"<span class='sub'>The royal treasury's ledger: every closed trade, after Zerodha charges.</span></div>"
+            + mode_chips(s) + view_banner(view) + trade_kpis(st, label, view) + note
+            + f"<nav class='ptabs' role='tablist' aria-label='Trades sections'>{tabs}</nav>"
+            + "".join(f"<section class='panel' id='{pid}' role='tabpanel' aria-label='{name}'>{html_}</section>"
+                      for pid, name, html_ in panels)
+            + f"<script>{TRADES_JS}</script>")
+    return page("Trades", "/trades", body, view=view)
 
 
 _BARS_CACHE = {}
@@ -872,22 +1329,30 @@ def render_journey(src, i):
         trade = {"direction": r.get("direction"), "entry": _num(r.get("entry")), "exit": _num(r.get("exit")),
                  "stop": _num(r.get("stop")), "target": _num(r.get("target")) or None,
                  "opened": opened, "closed": closed}
-        chart = charts.journey(today, trade, ema, (orng["low"], orng["high"]) if orng else None)
+        import chartjs
+        band = (orng["low"], orng["high"]) if orng else None
+        chart = chartjs.container(charts.journey_data(today, trade, ema, band),
+                                  charts.journey(today, trade, ema, band), f"{sym} 15-minute candles with the trade")
     net, rr = _num(r.get("net")), _num(r.get("r"))
     held = f"{int((closed - opened).total_seconds() // 60)} min" if closed else "-"
+    side = r.get('direction', '')
+    back = f"/trades?view={'zerodha' if src == 'live' else 'paper'}#{'backtest' if src == 'backtest' else 'log'}"
+    trail = f'EMA{C.TRAIL_EMA} trail' if C.TRAIL_EMA > 0 else 'no trail'
     body = f"""
-<h1>{T.PATH} {T.name('journey')}: {html.escape(sym)} <span class="tag {'up' if r.get('direction') == 'LONG' else 'dn'}">{html.escape(r.get('direction', ''))}</span>
+<div class="page-head"><h1>{T.PATH} {T.name('journey')}: {html.escape(sym)}
+<span class="tag {'up' if side == 'LONG' else 'dn'}">{html.escape(side)}</span>
 <span class="tag">{opened:%a %d %b %Y}</span> <span class="tag">{html.escape(src)}</span></h1>
-<div class="muted"><a class="sig" href="/trades">← back to {T.term('trades')}</a></div>
-<div class="card kpis"><div>Result<b class="{'up' if net > 0 else 'dn'}">₹{net:,.2f} ({rr:+.2f}R)</b></div>
-<div>Entry<b>{_fmt(_num(r.get('entry')))} at {opened:%H:%M}</b></div>
-<div>Exit<b>{_fmt(_num(r.get('exit')))} at {closed.strftime('%H:%M') if closed else '-'}</b></div>
-<div>Exit reason<b>{html.escape(T.reason_label(r.get('reason', '-')))}</b></div><div>Held<b>{held}</b></div>
-<div>Qty<b>{html.escape(r.get('qty', '-'))}</b></div><div>Charges<b>₹{_num(r.get('charges')):,.2f}</b></div></div>
-<div class="card"><h2>15-minute candles · saffron band = opening range · red dashed = {T.term('stop')} · grey dotted = entry ·
-violet = {f'EMA{C.TRAIL_EMA} trail' if C.TRAIL_EMA > 0 else 'no trail'} · ▲▼ = entry and exit</h2>{chart}</div>
-<div class="card muted">Hover a candle for its prices. The chart uses today's price data, so it can differ slightly
-from what the bot saw live if a bar has since been corrected.</div>"""
+<span class="sub"><a href="{back}">← back to {T.term('trades')}</a></span></div>
+<div class="kgrid">{_kpi("Result", f"{_signed(net)}", f"{rr:+.2f}R", _cls(net))}
+{_kpi("Entry", _fmt(_num(r.get('entry'))), f"at {opened:%H:%M}")}
+{_kpi("Exit", _fmt(_num(r.get('exit'))), f"at {closed.strftime('%H:%M') if closed else '-'}")}
+{_kpi("Exit reason", html.escape(T.reason_label(r.get('reason', '-'))))}
+{_kpi("Held", held, f"qty {html.escape(r.get('qty', '-'))}")}
+{_kpi("Charges", f"₹{_num(r.get('charges')):,.2f}")}</div>
+<section class="card"><h2>15-minute candles <span class="muted small">saffron band = opening range · red dashed =
+{T.term('stop')} · grey dotted = entry · violet = {trail} · ▲▼ = entry and exit</span></h2>{chart}</section>
+<div class="muted small">Hover or tap a candle (or use the arrow keys) for its prices. The chart uses today's price
+data, so it can differ slightly from what the bot saw live if a bar has since been corrected.</div>"""
     return page(f"{sym} trade", "/trades", body)
 
 
@@ -986,6 +1451,12 @@ class Handler(BaseHTTPRequestHandler):
             self._send(render_journey(q.get("src", ["paper"])[0], idx))
         elif u.path == "/scanner":
             self._send(render_scanner(refresh=q.get("refresh", ["0"])[0] == "1"))
+        elif u.path == "/api/live":
+            # read-only: the Live page's changing parts as JSON, for in-place updates
+            s = read_status()
+            view = current_view(q, s)
+            body = json.dumps({"view": view, "regions": live_regions(view, s)}, ensure_ascii=False)
+            self._send(body, ctype="application/json; charset=utf-8")
         elif u.path == "/api/account":
             # read-only: renders the account card; never changes the bot's mode or settings
             self._send(account_card_html(q.get("view", ["paper"])[0], read_status()))

@@ -30,6 +30,33 @@ def _svg(w, h, body, label):
             f"aria-label='{html.escape(label)}' style='max-height:{h}px;display:block'>{body}</svg>")
 
 
+def intraday(points, start=None, w=800, h=200, title="Equity during the day"):
+    """Today's equity line from the journal's samples [(HH:MM:SS, equity)]. Colours come from the page's
+    theme (CSS variables), so it reads in both light and dark."""
+    if len(points) < 2:
+        return "<div class='muted'>Not enough data yet.</div>"
+    vals = [v for _, v in points]
+    base = start if start is not None else vals[0]
+    lo, hi = min(vals + [base]), max(vals + [base])
+    pad = (hi - lo) * 0.12 or max(abs(hi) * 0.001, 1)
+    y = _scale(lo - pad, hi + pad, 10, h - 22)
+    left, right = 66, 10
+    x = lambda i: left + i * (w - left - right) / (len(points) - 1)  # noqa: E731
+    col = "var(--up)" if vals[-1] >= base else "var(--dn)"
+    line = " ".join(f"{x(i):.1f},{y(v):.1f}" for i, v in enumerate(vals))
+    area = f"{x(0):.1f},{h - 22} {line} {x(len(vals) - 1):.1f},{h - 22}"
+    parts = [f"<line x1='{left}' x2='{w - right}' y1='{y(base):.1f}' y2='{y(base):.1f}' style='stroke:var(--muted)' stroke-dasharray='4 4'/>",
+             f"<polygon points='{area}' style='fill:{col}' opacity='0.12'/>",
+             f"<polyline points='{line}' fill='none' style='stroke:{col}' stroke-width='2' stroke-linejoin='round'/>"]
+    for v in (max(vals), min(vals)):
+        parts.append(f"<text x='{left - 6}' y='{y(v) + 4:.1f}' font-size='12' text-anchor='end' style='fill:var(--muted)'>{_fmt_inr(v)}</text>")
+    parts.append(f"<text x='{left}' y='{h - 5}' font-size='12' style='fill:var(--muted)'>{html.escape(points[0][0][:5])}</text>"
+                 f"<text x='{w - right}' y='{h - 5}' font-size='12' text-anchor='end' style='fill:var(--muted)'>"
+                 f"{html.escape(points[-1][0][:5])}</text>")
+    return (f"<svg viewBox='0 0 {w} {h}' width='100%' role='img' aria-label='{html.escape(title)}' "
+            f"style='display:block;max-height:{h}px'>{''.join(parts)}</svg>")
+
+
 def equity_curve(values, start, labels=None, w=900, h=220, title="Equity"):
     """Equity after each closed trade, starting at `start`. Shades drawdowns below the running peak.
 
@@ -93,6 +120,41 @@ def pnl_bars(values, labels=None, w=900, h=180, title="P&L per trade"):
         parts.append(f"<rect x='{x0:.1f}' y='{y0:.1f}' width='{bw:.1f}' height='{max(1.0, y1 - y0):.1f}' "
                      f"fill='{UP if v > 0 else DN}'><title>{html.escape(tip)}</title></rect>")
     return _svg(w, h, "".join(parts), title)
+
+
+def _bar_index(bars, when):
+    """The candle containing `when` (a close time on a bar boundary belongs to the bar before)."""
+    if when is None:
+        return None
+    import datetime as _dt
+    probe = when - _dt.timedelta(seconds=1)
+    idx = 0
+    for i, b in enumerate(bars):
+        if b["t"] <= probe:
+            idx = i
+    return idx
+
+
+def journey_data(bars, trade, ema=None, or_range=None):
+    """The same trade picture as numbers, for the interactive candle chart (chartjs 'candles')."""
+    lines = []
+    if trade.get("stop"):
+        lines.append({"n": "stop", "v": round(trade["stop"], 2), "c": "dn"})
+    if trade.get("target"):
+        lines.append({"n": "target", "v": round(trade["target"], 2), "c": "up"})
+    if trade.get("entry"):
+        lines.append({"n": "entry", "v": round(trade["entry"], 2), "c": "mu", "dash": "2 3"})
+    up = trade.get("direction") == "LONG"
+    marks = []
+    for key, price_key, kind in (("opened", "entry", "entry"), ("closed", "exit", "exit")):
+        i, px = _bar_index(bars, trade.get(key)), trade.get(price_key)
+        if i is not None and px:
+            marks.append({"i": i, "p": round(px, 2), "k": kind, "upward": (key == "opened") == up})
+    return {"type": "candles", "h": 340,
+            "bars": [[f"{b['t']:%H:%M}", b["o"], b["h"], b["l"], b["c"]] for b in bars],
+            "ema": [None if e is None else round(e, 2) for e in ema] if ema else None,
+            "band": [or_range[0], or_range[1]] if or_range and all(or_range) else None,
+            "lines": lines, "marks": marks}
 
 
 def journey(bars, trade, ema=None, or_range=None, w=900, h=320, title="Trade journey"):
