@@ -403,6 +403,7 @@ def render(msg="", q=None):
 <div class="muted">{T.plain('live_page')} · bot status updated {_fmt(when[11:19])} IST · page auto-refreshes every 20 s</div>
 {view_switch("/", view, s)}
 {view_banner(view)}
+{account_card(view, s)}
 {banner}
 {calendar}
 {f'<p class="msg">{html.escape(msg)}</p>' if msg else ''}
@@ -410,7 +411,6 @@ def render(msg="", q=None):
 <div class="{'up' if ok else 'warn'}">{html.escape(login_msg)}</div>{login_btn}
 <div class="muted">{T.term('paper')} mode doesn't need a login, except for {T.name('kite_data')} (Kite) price data.
 {T.term('live')} mode needs one every day (tokens expire ~06:00 IST).</div></div>
-{account_card(view, s)}
 <div class="card kpis">
 <div>Trades today<b>{_fmt(s.get('trades_today'))}</b></div><div>Loss streak<b>{_fmt(s.get('loss_streak'))}</b>{streak_note}</div>
 <div>Data delay<b class="{lag_cls}">{lag_txt}</b></div>{data_source_kpi(s)}</div>
