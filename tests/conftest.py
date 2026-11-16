@@ -41,6 +41,7 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(C, "DATA_DIR", str(tmp_path))
     monkeypatch.setattr(C, "PAUSE_FILE", str(tmp_path / "PAUSE"))
     monkeypatch.setattr(C, "STOP_FILE", str(tmp_path / "STOP"))
+    monkeypatch.setattr(C, "BACKUP_DIR", str(tmp_path / "_backups"))   # never the real backups folder
     for k, v in {"ALLOW_SHORT": True, "MIN_OR_PCT": 0.25, "MAX_OR_PCT": 1.5, "VOLUME_MULT": 1.2,
                  "USE_VWAP_FILTER": True, "TARGET_R": 2.0, "LAST_ENTRY": "12:00",
                  "SQUARE_OFF": "15:10", "SLIPPAGE_PCT": 0.05, "RISK_PER_TRADE_PCT": 0.5,

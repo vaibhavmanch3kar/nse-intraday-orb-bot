@@ -18,6 +18,7 @@ import threading
 import time
 
 import archive
+import backup
 import capital
 import config as C
 import costs
@@ -529,6 +530,16 @@ class Bot:
         except Exception as e:
             self.note(f"{T.WARN_ICON} candle archive failed: {e!r}", logging.WARNING)
         self.save_reports(now)
+        self.backup_data(now)
+
+    def backup_data(self, now):
+        """Last thing after the close: zip the data folder (journal, reports, logs, trades, state)."""
+        try:
+            r = backup.backup(now.date())
+            self.note(f"data backup: {os.path.basename(r['path'])} ({r['files']} files, {r['bytes'] / 1e6:.1f} MB) in "
+                      f"{os.path.dirname(r['path'])}" + (f"; removed {len(r['removed'])} old" if r["removed"] else ""))
+        except Exception as e:  # noqa: BLE001 - a backup problem never stops the bot
+            self.note(f"{T.WARN_ICON} data backup failed ({e!r})", logging.WARNING)
 
     def save_reports(self, now):
         """After the close on the last trading day of a week or month: the saved weekly/monthly report."""

@@ -154,6 +154,10 @@ TICK = 0.05                                                   # valid for every 
 POLL_SEC = _env("POLL_SEC", 60, int)
 DATA_DIR = _env("DATA_DIR", "data")
 STOP_FILE = _env("STOP_FILE", "STOP")
+# Daily backup of the data folder after the close. Empty = KiteConnect\backups\data (next to the project)
+# (same disk: point BACKUP_DIR at OneDrive / a USB drive for protection against a disk failure).
+BACKUP_DIR = _env("BACKUP_DIR", "")
+BACKUP_KEEP = _env("BACKUP_KEEP", 30, int)                    # newest daily backups kept
 PAUSE_FILE = os.path.join(DATA_DIR, "PAUSE")
 WEB_HOST = "127.0.0.1"                                        # local only, never expose
 WEB_PORT = _env("WEB_PORT", 5000, int)                        # must match the Kite redirect URL

@@ -88,13 +88,13 @@ def test_bot_end_of_day_saves_and_never_raises(monkeypatch):
     notes = []
     monkeypatch.setattr(b, "note", lambda msg, level=None: notes.append(msg))
     b.end_of_day(at(D3, 15, 36))
-    assert archive.days() == [D3] and "saved 1 day" in notes[-1]
+    assert archive.days() == [D3] and any("Candle archive: saved 1 day" in n for n in notes)   # then report/backup notes
 
     def boom(*a, **k):
         raise RuntimeError("network down")
     monkeypatch.setattr(marketdata, "fetch_many", boom)
     b.end_of_day(at(D3, 15, 40))                       # must not raise
-    assert "candle archive failed" in notes[-1]
+    assert any("candle archive failed" in n for n in notes)
 
 
 def test_archive_bars_feed_the_strategy_unchanged():
