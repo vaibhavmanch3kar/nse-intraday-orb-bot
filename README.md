@@ -82,10 +82,27 @@ To undo it, double-click `5-UNSCHEDULE.bat`.
 
 | Page | What you see |
 |---|---|
-| 🏹 **Ayodhya Darbar · Live** | Is the bot running? Paper equity, today's P&L, open positions (profit in ₹ and R, how far the stop is, where the EMA trail is, when the 1-hour time stop is checked, time in trade), every stock's opening range and why it is or isn't a trade, recent events, NSE holiday calendar, Pause/Stop buttons |
+| 🏹 **Ayodhya Darbar · Live** | Is the bot running? The **account card** (see below), open positions (profit in ₹ and R, how far the stop is, where the EMA trail is, when the 1-hour time stop is checked, time in trade), every stock's opening range and why it is or isn't a trade, recent events, NSE holiday calendar, Pause/Stop buttons |
 | 🪔 **Chitrakoot · Session review** | Pick any recent trading day. For each stock: a mini chart, whether the rules fired, and how the trade would have ended. Each trade also shows the **Time Machine**: the odds from 10,000 replays of that stock's own moves, a plain verdict ("coin flip", "leans toward the stop"…) and the rule's real track record over 60 days |
 | 🚩 **Hanuman's Watch · Swing scanner** | Nifty 50 stocks with a multi-day setup on the last daily candle (20-day breakout, bull flag, 20-day average reclaim, oversold, oversold bounce), with a suggested stop, target and quantity. **Research only: the bot doesn't trade these** |
 | 📜 **Rajkosh · Trades** | An **equity curve** (with drawdowns shaded), a **profit/loss bar per trade**, breakdowns **by exit reason, long vs short and stock**, every trade with a **chart** link (the day's candles with entry, exit, stop and trail drawn on), the last backtest shown the same way, and the **30-trade edge check**: after 30 trades it tells you whether the average result per trade is positive, and to stop if it isn't |
+
+### Paper Account | Zerodha Account
+
+The Live and Trades pages have a **View: Paper Account | Zerodha Account** switch. It only changes what you
+see: the bot keeps trading in its own mode (the header always says "Bot trading: Abhyas · PAPER"), and
+switching never changes a setting or places an order.
+
+- **Paper Account** (gold frame, "virtual money"): starting balance, total equity, available funds,
+  invested amount, realised P&L (since the start and today), unrealised P&L, total P&L and charges, from
+  `data\state_paper.json` only. The Trades page shows only paper trades.
+- **Zerodha Account** (red frame, "real money · read-only"): your real opening balance, account value,
+  available funds, margin used, invested amount, today's realised/unrealised/total P&L and each position.
+  It needs the day's Zerodha login and reads only Kite's balance and positions; it can't place, change or
+  cancel an order. Balances are kept in memory for 15 seconds and never saved. The Trades page shows only
+  the trades the bot placed in live mode.
+- The card refreshes every 10 seconds, shows when it was last updated, and warns about stale data, slow
+  prices, login problems and failed refreshes (it keeps the last good values and says when they're from).
 
 | Trades: equity curve and P&L bars | Trade chart |
 |---|---|

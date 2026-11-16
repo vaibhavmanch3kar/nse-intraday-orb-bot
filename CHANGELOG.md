@@ -6,6 +6,28 @@ Every version is on the [Releases page](https://github.com/vaibhavmanch3kar/nse-
 with a ZIP you can download. To go back to an older version, download that version's ZIP.
 Your settings (Windows user environment variables) and your `data` folder are not part of the ZIP, so keep them.
 
+## v1.4.0 (16 Nov 2026): Paper Account | Zerodha Account dashboard views
+
+A **View: Paper Account | Zerodha Account** switch on the Live and Trades pages. It only changes what the
+dashboard shows: the bot's trading mode is still set only by its own settings, live trading is still off,
+and switching never places an order. See the README section "Paper Account | Zerodha Account".
+
+- **Paper Account card:** starting balance, total equity, available funds, invested amount, realised P&L
+  (since the start and today), unrealised P&L, total P&L and charges, from the paper files only.
+- **Zerodha Account card (read-only):** opening balance, account value, available funds, margin used,
+  invested amount, today's realised/unrealised/total P&L and each position, from Kite's balance and
+  positions calls only. A wrapper blocks every other Kite call, so the view can't trade. Real balances are
+  kept in memory for 15 seconds and never written to a file or a log. Needs the day's Zerodha login.
+- **Clear marking:** gold "PAPER ACCOUNT · virtual money" or red "LIVE · REAL ZERODHA ACCOUNT" bar and
+  frame; the header always shows the mode the bot trades in; opening the Zerodha view asks for confirmation.
+- **Kept separate:** each view reads only its own account's data, and the Trades page shows only that
+  account's trades.
+- **Refresh and warnings:** the card updates in place every 10 seconds and shows when it was last updated.
+  It warns about stale data, prices more than 20 minutes behind, login problems (with the login button),
+  network or Kite errors, and failed refreshes, which keep the last good values with their time.
+- Strategy, risk limits and backtest are unchanged (same 82 trades on the same data). 142 tests pass
+  (19 new), including checks that viewing either account changes no file, setting or environment variable.
+
 ## v1.3.1 (16 Nov 2026): internet drops and faster start-up
 
 Fixes after the first scheduled paper-trading day, when the PC's Wi-Fi dropped several times between
