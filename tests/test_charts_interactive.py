@@ -72,7 +72,8 @@ def test_candle_chart_marks_entry_and_exit():
 
 @pytest.mark.skipif(not shutil.which("node"), reason="Node.js not installed")
 def test_scripts_are_valid_javascript(tmp_path):
-    for name, code in (("charts", chartjs.JS), ("theme", webui.THEME_JS + webui.HEAD_JS), ("live", web.LIVE_JS)):
+    for name, code in (("charts", chartjs.JS), ("theme", webui.THEME_JS + webui.HEAD_JS), ("live", web.LIVE_JS),
+                       ("trades", web.TRADES_JS)):
         p = tmp_path / f"{name}.js"
         p.write_text(code, encoding="utf-8")
         r = subprocess.run(["node", "--check", str(p)], capture_output=True, text=True)

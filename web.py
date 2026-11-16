@@ -963,9 +963,8 @@ def _day_label(iso_day):
         return iso_day or "-"
 
 
-def trade_section(rows, src, label, start_cash, show_log=True):
-    """KPIs, equity curve, P&L bars, breakdowns and the trade log (with chart links) for one trade list."""
-    import charts
+def trade_stats(rows, start_cash):
+    """Numbers for one trade list: equity after each trade, max drawdown, wins, net, average R, charges."""
     nets = [_num(r.get("net")) for r in rows]
     equity, eq = [], start_cash
     for v in nets:
@@ -975,49 +974,148 @@ def trade_section(rows, src, label, start_cash, show_log=True):
     for v in equity:
         peak = max(peak, v)
         max_dd = max(max_dd, (peak - v) / peak * 100 if peak else 0)
-    net, wins = sum(nets), sum(1 for v in nets if v > 0)
+    n = len(rows)
+    return {"n": n, "nets": nets, "equity": equity, "max_dd": max_dd, "net": sum(nets),
+            "wins": sum(1 for v in nets if v > 0), "avg_r": sum(_num(r.get("r")) for r in rows) / n if n else None,
+            "charges": sum(_num(r.get("charges")) for r in rows)}
+
+
+def trade_kpis(st, label, frame=""):
+    n, net = st["n"], st["net"]
+    cells = (_kpi(f"{html.escape(label)} trades", f"{n}")
+             + _kpi("Win rate", f"{(st['wins'] / n * 100 if n else 0):.0f}%", f"{st['wins']} won · {n - st['wins']} lost")
+             + _kpi("Net P&amp;L", _signed(net), "after charges", _cls(net))
+             + _kpi("Max drawdown", f"{st['max_dd']:.2f}%", "from the highest equity", "dn" if st["max_dd"] else "")
+             + _kpi("Average", "-" if st["avg_r"] is None else f"{st['avg_r']:+.2f}R", "per trade",
+                    _cls(st["avg_r"] or 0))
+             + _kpi("Charges", _inr(st["charges"]), "Zerodha charges"))
+    cls = f"card acct {frame} kwrap" if frame else "kwrap card"
+    return f"<section class='{cls}'><div class='kgrid'>{cells}</div></section>"
+
+
+def trade_charts(rows, st, label, start_cash):
+    import charts
+    import chartjs
     tips = [f"{r.get('symbol', '')} {r.get('direction', '')} {r.get('closed', '')[:10]} ({_num(r.get('r')):+.2f}R)"
             for r in rows]
-    kpis = (f"<div class='card kpis'><div>{html.escape(label)} trades<b>{len(rows)}</b></div>"
-            f"<div>Win rate<b>{(wins / len(rows) * 100 if rows else 0):.0f}%</b></div>"
-            f"<div>Net P&amp;L<b class='{'up' if net >= 0 else 'dn'}'>₹{net:,.2f}</b></div>"
-            f"<div>Max drawdown<b class='{'dn' if max_dd else ''}'>{max_dd:.2f}%</b></div></div>")
-    if not rows:
-        return kpis
-    import chartjs
     days = [(r.get("closed") or "")[:10] for r in rows]
-    eq_pts = [[_day_label(d), round(v, 2), d, t] for d, v, t in zip(days, equity, tips)]
-    bar_pts = [[f"#{i + 1} {_day_label(d)}", round(v, 2), t] for i, (d, v, t) in enumerate(zip(days, nets, tips))]
+    eq_pts = [[_day_label(d), round(v, 2), d, t] for d, v, t in zip(days, st["equity"], tips)]
+    bar_pts = [[f"#{i + 1} {_day_label(d)}", round(v, 2), t] for i, (d, v, t) in enumerate(zip(days, st["nets"], tips))]
     eq_chart = chartjs.container({"type": "line", "pts": eq_pts, "base": start_cash, "from0": True, "dd": True,
                                   "ranges": True, "firstLabel": "start"},
-                                 charts.equity_curve(equity, start_cash, tips), f"{label}: equity after each closed trade")
+                                 charts.equity_curve(st["equity"], start_cash, tips),
+                                 f"{label}: equity after each closed trade")
     bar_chart = chartjs.container({"type": "bars", "pts": bar_pts, "h": 170},
-                                  charts.pnl_bars(nets, tips), f"{label}: profit or loss per trade")
-    charts_html = (f"<div class='card'><h2>{html.escape(label)}: equity after each closed trade "
-                   f"<span class='muted small'>(red area = drawdown from the peak)</span></h2>{eq_chart}"
-                   f"<h2 style='margin-top:14px'>Profit or loss per trade <span class='muted small'>"
-                   f"(hover, tap or use the arrow keys for details)</span></h2>{bar_chart}</div>"
-                   f"<div class='card' style='display:flex;flex-wrap:wrap;gap:18px'>"
-                   f"{breakdown_table(rows, 'reason', 'By exit reason')}"
-                   f"{breakdown_table(rows, 'direction', 'Long vs short')}"
-                   f"{breakdown_table(rows, 'symbol', 'By stock')}</div>")
-    log = ""
-    if show_log:
-        idx_rows = list(enumerate(rows))[-200:][::-1]
-        body = "".join(
-            f"<tr><td>{html.escape(r.get('closed', '')[:16])}</td><td>{html.escape(r.get('symbol', ''))}</td>"
-            f"<td class='{'up' if r.get('direction') == 'LONG' else 'dn'}'>{html.escape(r.get('direction', ''))}</td>"
-            f"<td>{html.escape(r.get('qty', ''))}</td><td>{html.escape(r.get('entry', ''))}</td><td>{html.escape(r.get('exit', ''))}</td>"
-            f"<td>{html.escape(T.reason_label(r.get('reason', '')))}</td><td>{html.escape(r.get('charges', ''))}</td>"
-            f"<td class='{'up' if _num(r.get('net')) > 0 else 'dn'}'>{_num(r.get('net')):,.2f}</td><td>{_num(r.get('r')):+.2f}</td>"
-            f"<td><a class='sig' href='/journey?src={src}&amp;i={i}' title='{T.name('journey')}: the trade on its chart'>{T.PATH} chart</a></td></tr>"
-            for i, r in idx_rows)
-        table = (f"<table><tr><th>Closed</th><th>Stock</th><th>Side</th><th>Qty</th><th>Entry</th><th>Exit</th>"
-                 f"<th>Reason</th><th>Charges ₹</th><th>Net ₹</th><th>R</th><th></th></tr>{body}</table>")
-        log = (f"<div class='card'><h2>{html.escape(label)} trade log (newest first)</h2>{table}</div>" if src != "backtest" else
-               f"<div class='card'><details><summary class='sig' style='cursor:pointer'>Show all {len(rows)} backtest trades "
-               f"(with charts)</summary>{table}</details></div>")
-    return kpis + charts_html + log
+                                  charts.pnl_bars(st["nets"], tips), f"{label}: profit or loss per trade")
+    return (f"<section class='card'><h2>{html.escape(label)}: equity after each closed trade "
+            f"<span class='muted small'>(red area = drawdown from the peak)</span></h2>{eq_chart}"
+            f"<h2 style='margin-top:14px'>Profit or loss per trade <span class='muted small'>"
+            f"(hover, tap or use the arrow keys for details)</span></h2>{bar_chart}</section>")
+
+
+def trade_breakdowns(rows):
+    return (f"<section class='card'><div class='cols'>{breakdown_table(rows, 'reason', 'By exit reason')}"
+            f"{breakdown_table(rows, 'direction', 'Long vs short')}"
+            f"{breakdown_table(rows, 'symbol', 'By stock')}</div></section>")
+
+
+def trade_log(rows, src, label, limit=200):
+    """Every trade, newest first, with filters (stock, side, result) and a chart link. On a phone each row
+    becomes a small card."""
+    idx_rows = list(enumerate(rows))[-limit:][::-1]
+    body = []
+    for i, r in idx_rows:
+        net = _num(r.get("net"))
+        side = r.get("direction", "")
+        body.append(
+            f"<tr data-sym='{html.escape(r.get('symbol', ''))}' data-side='{html.escape(side)}' "
+            f"data-res='{'won' if net > 0 else 'lost'}'>"
+            f"<td class='first' data-label='Trade'><b>{html.escape(r.get('symbol', ''))}</b> "
+            f"<span class='side {'long' if side == 'LONG' else 'short'}'>{html.escape(side)}</span>"
+            f"<span class='lbl'>{html.escape(r.get('closed', '')[:16])}</span></td>"
+            f"<td data-label='Qty' class='r'>{html.escape(r.get('qty', ''))}</td>"
+            f"<td data-label='Entry → exit' class='r'>{html.escape(r.get('entry', ''))} → {html.escape(r.get('exit', ''))}</td>"
+            f"<td data-label='Exit reason'>{html.escape(T.reason_label(r.get('reason', '')))}</td>"
+            f"<td data-label='Charges' class='r'>₹{_num(r.get('charges')):,.2f}</td>"
+            f"<td data-label='Net' class='r'><b class='{_cls(net)}'>{_signed(net)}</b></td>"
+            f"<td data-label='R' class='r'>{_num(r.get('r')):+.2f}R</td>"
+            f"<td data-label='Chart'><a class='sig' href='/journey?src={src}&amp;i={i}' "
+            f"title='{T.name('journey')}: the trade on its chart'>{T.PATH} chart</a></td></tr>")
+    syms = sorted({r.get("symbol", "") for _, r in idx_rows if r.get("symbol")})
+    opts = "".join(f"<option value='{html.escape(x)}'>{html.escape(x)}</option>" for x in syms)
+    more = f" (newest {limit} of {len(rows)})" if len(rows) > limit else ""
+    filters = (f"<div class='filters' role='search' aria-label='Filter trades'>"
+               f"<label>Stock <select data-f='sym'><option value=''>All</option>{opts}</select></label>"
+               f"<label>Side <select data-f='side'><option value=''>All</option><option>LONG</option><option>SHORT</option></select></label>"
+               f"<label>Result <select data-f='res'><option value=''>All</option><option value='won'>Won</option>"
+               f"<option value='lost'>Lost</option></select></label>"
+               f"<span class='muted small' data-count>{len(idx_rows)} trades{more}</span></div>")
+    return (f"<section class='card tlog'><h2>{html.escape(label)} trade log <span class='muted small'>newest first</span></h2>"
+            f"{filters}<table class='rt'><tr><th>Trade</th><th class='r'>Qty</th><th class='r'>Entry → exit</th>"
+            f"<th>Exit reason</th><th class='r'>Charges</th><th class='r'>Net</th><th class='r'>R</th><th></th></tr>"
+            f"{''.join(body)}</table></section>")
+
+
+def trade_section(rows, src, label, start_cash, show_log=True):
+    """Key figures, charts, breakdowns and the trade log for one trade list (used for the backtest)."""
+    st = trade_stats(rows, start_cash)
+    out = trade_kpis(st, label)
+    if not rows:
+        return out
+    out += trade_charts(rows, st, label, start_cash) + trade_breakdowns(rows)
+    return out + (trade_log(rows, src, label, limit=500) if show_log else "")
+
+
+def daily_pnl_card(mode):
+    """Net P&L per trading day from the daily journal, as bars."""
+    import chartjs
+    import charts
+    import journal
+    days = journal.days(mode)
+    if not days:
+        return ""
+    pts = [[_day_label(r["date"]), round(journal._f(r.get("net_pnl")), 2),
+            f"{int(journal._f(r.get('trades')))} trade(s) · {r.get('status') or ''}"] for r in days]
+    chart = chartjs.container({"type": "bars", "pts": pts, "h": 160}, charts.pnl_bars([p[1] for p in pts]),
+                              "Net profit or loss per trading day")
+    return (f"<section class='card'><h2>Net P&amp;L per trading day <span class='muted small'>from the daily journal"
+            f"</span></h2>{chart}</section>")
+
+
+TRADES_CSS = """
+.filters{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;margin:0 0 10px}
+.filters label{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted)}
+.tlog tr[hidden]{display:none!important}
+.panel[hidden]{display:none}
+.side{font-size:11px;font-weight:700;padding:1px 6px;border-radius:5px;margin-left:4px}
+.side.long{background:var(--up-bg);color:var(--up)} .side.short{background:var(--dn-bg);color:var(--dn)}
+.lbl{display:block;font-size:11.5px;color:var(--muted)}
+.kwrap{background:none;border:0;box-shadow:none;padding:0;overflow:visible;border-radius:var(--radius)}
+.card.acct.kwrap{outline-offset:5px;margin:5px 5px 21px} .kwrap .kgrid{margin:0}
+"""
+
+TRADES_JS = """
+(function(){
+  // tabs: Overview | Journal | Trade log | Backtest (all panels stay visible without the script)
+  var tabs=[].slice.call(document.querySelectorAll('.ptabs [data-tab]'));
+  function pick(id,push){var ok=tabs.some(function(t){return t.getAttribute('data-tab')===id}); if(!ok)id=tabs[0]&&tabs[0].getAttribute('data-tab');
+    tabs.forEach(function(t){var on=t.getAttribute('data-tab')===id;t.classList.toggle('on',on);t.setAttribute('aria-selected',on)});
+    document.querySelectorAll('.panel').forEach(function(p){p.hidden=p.id!==id});
+    if(push)try{history.replaceState(null,'','#'+id)}catch(e){}
+    document.dispatchEvent(new CustomEvent('regionsupdated'));}
+  tabs.forEach(function(t){t.addEventListener('click',function(ev){ev.preventDefault();pick(t.getAttribute('data-tab'),true)})});
+  if(tabs.length)pick((location.hash||'').slice(1)||tabs[0].getAttribute('data-tab'),false);
+  // trade log filters
+  document.querySelectorAll('.tlog').forEach(function(card){
+    var sels=[].slice.call(card.querySelectorAll('select[data-f]')), count=card.querySelector('[data-count]');
+    function apply(){var n=0, rows=card.querySelectorAll('tr[data-sym]');
+      rows.forEach(function(tr){var show=sels.every(function(s){return !s.value||tr.getAttribute('data-'+s.getAttribute('data-f'))===s.value});
+        tr.hidden=!show; if(show)n++});
+      if(count)count.textContent=n+' of '+rows.length+' trades';}
+    sels.forEach(function(s){s.addEventListener('change',apply)});
+  });
+})();
+"""
 
 
 def _money(v):
@@ -1039,7 +1137,7 @@ def journal_card(mode, view, period):
                     for p, name in journal.PERIODS.items())
     dl = (f"<a class='sig' href='/journal.csv?view={view}&amp;period={period}' download>⬇ Download CSV</a>"
           if rows else "")
-    head = (f"<div class='card' id='journal'><h2>{T.SCROLL} Daily journal · {html.escape(T.name(mode))}</h2>"
+    head = (f"<div class='card' id='jcard'><h2>{T.SCROLL} Daily journal · {html.escape(T.name(mode))}</h2>"
             f"<div class='days'>{tabs} {dl}</div>")
     if not rows:
         return (head + "<div class='muted'>No days yet. The bot writes one row per trading day to "
@@ -1110,9 +1208,6 @@ def render_trades(q=None):
     s = read_status()
     view = current_view(q or {}, s)
     mode = "live" if view == "zerodha" else "paper"   # each view reads only its own trade file
-    parts = [f"<h1>{T.SCROLL} {T.term('trades')}</h1>"
-             f"<div class='muted'>The royal treasury's ledger: every closed trade, after Zerodha charges.</div>",
-             mode_chips(s), view_banner(view)]
     rows = trade_rows(mode)
     label = f"{T.name(mode)} · {VIEWS[view]}"
     start, note = C.PAPER_START_INR, ""
@@ -1120,26 +1215,39 @@ def render_trades(q=None):
         import capital
         start = capital.current_opening_balance()
         if capital.load().get("history"):
-            note = (f"<div class='muted'>The equity curve and drawdown use the current opening balance "
-                    f"({_inr(start)}). {capital_lines()}</div>")
-    parts.append(f"<div class='card acct {view}' style='padding:4px 16px'>"
-                 + trade_section(rows, mode, label, start) + note + "</div>")
-    parts.append(journal_card(mode, view, (q or {}).get("period", ["day"])[0]))
-    parts.append(edge_card(rows, f"{mode.title()} trading"))
-    if not rows:
-        parts.append("<div class='card muted'>No trades yet - the bot records them here once it trades on a market day.</div>"
-                     if mode == "paper" else
-                     "<div class='card muted'>No real-money trades: the bot has only traded on paper. This list shows "
-                     "trades the bot places in live mode (data\\trades_live.csv), not your whole Zerodha tradebook.</div>")
+            note = (f"<div class='muted small' style='margin:-8px 0 14px'>The equity curve and drawdown use the current "
+                    f"opening balance ({_inr(start)}). {capital_lines()}</div>")
+    st = trade_stats(rows, start)
+    empty = ("" if rows else
+             "<section class='card muted'>No trades yet - the bot records them here once it trades on a market day.</section>"
+             if mode == "paper" else
+             "<section class='card muted'>No real-money trades: the bot has only traded on paper. This list shows "
+             "trades the bot places in live mode (data\\trades_live.csv), not your whole Zerodha tradebook.</section>")
+    overview = (empty + (trade_charts(rows, st, label, start) if rows else "") + daily_pnl_card(mode)
+                + (trade_breakdowns(rows) if rows else "") + edge_card(rows, f"{mode.title()} trading"))
+    panels = [("overview", "Overview", overview),
+              ("journal", "Journal", journal_card(mode, view, (q or {}).get("period", ["day"])[0])),
+              ("log", "Trade log", trade_log(rows, mode, label) if rows else empty)]
     bt = trade_rows("backtest")
     if bt:
         first, last = bt[0].get("opened", "")[:10], max(r.get("closed", "")[:10] for r in bt)
-        parts.append(f"<h1 style='margin-top:26px'>{T.FIRE} {T.name('backtest')} · Last backtest <span class='tag'>{html.escape(first)} → {html.escape(last)}</span></h1>"
-                     f"<div class='muted'>Run <code>.venv\\Scripts\\python.exe backtest.py</code> to update. "
-                     f"Full list: data\\backtest_trades.csv</div>")
-        parts.append(trade_section(bt, "backtest", "Backtest", C.PAPER_START_INR))
-        parts.append(edge_card(bt, "Backtest", compact=True))
-    return page("Trades", "/trades", "".join(parts), view=view)
+        panels.append(("backtest", "Backtest",
+                       f"<div class='page-head'><h1>{T.FIRE} {T.name('backtest')} · Last backtest "
+                       f"<span class='tag'>{html.escape(first)} → {html.escape(last)}</span></h1>"
+                       f"<span class='sub'>Run <code>.venv\\Scripts\\python.exe backtest.py</code> to update. "
+                       f"Full list: data\\backtest_trades.csv</span></div>"
+                       + trade_section(bt, "backtest", "Backtest", C.PAPER_START_INR)
+                       + edge_card(bt, "Backtest", compact=True)))
+    tabs = "".join(f"<a href='#{pid}' data-tab='{pid}' role='tab'>{name}</a>" for pid, name, _ in panels)
+    body = (f"<style>{TRADES_CSS}</style>"
+            f"<div class='page-head'><h1>{T.SCROLL} {T.term('trades')}</h1>"
+            f"<span class='sub'>The royal treasury's ledger: every closed trade, after Zerodha charges.</span></div>"
+            + mode_chips(s) + view_banner(view) + trade_kpis(st, label, view) + note
+            + f"<nav class='ptabs' role='tablist' aria-label='Trades sections'>{tabs}</nav>"
+            + "".join(f"<section class='panel' id='{pid}' role='tabpanel' aria-label='{name}'>{html_}</section>"
+                      for pid, name, html_ in panels)
+            + f"<script>{TRADES_JS}</script>")
+    return page("Trades", "/trades", body, view=view)
 
 
 _BARS_CACHE = {}
