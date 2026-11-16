@@ -6,6 +6,47 @@ Every version is on the [Releases page](https://github.com/vaibhavmanch3kar/nse-
 with a ZIP you can download. To go back to an older version, download that version's ZIP.
 Your settings (Windows user environment variables) and your `data` folder are not part of the ZIP, so keep them.
 
+## v1.7.0 (16 Nov 2026): redesigned dashboard: light and dark, desktop and phone
+
+A display-only redesign. The strategy, risk limits, bot logic, balances and live-trading safety are
+unchanged, and the backtest gives the same trades. See the README section "Look and feel".
+
+- **Themes and frame:**
+  - **Themes:** dark (night sky, saffron and gold) and light (ivory and saffron). The dashboard follows
+    your PC's or phone's setting; the ☀/☾ button switches, and the browser remembers.
+  - **Header:** compact, with the bow logo, ॥ अयोध्या ॥ and the ribbon, plus page tabs and the
+    Paper Account | Zerodha Account switch.
+  - **Phone:** a bottom bar with Live, Trades, Review and Scanner.
+- **Live page:**
+  - A **status bar**: market, bot, the mode it trades in, data delay, Zerodha login.
+  - **Key figures**: equity, available funds, today's P&L, open P&L, trades used of 4, daily loss limit used.
+  - **Today's equity** chart.
+  - **Position cards**, showing where the price sits between the stop and the target.
+  - The watchlist, and a side column with controls, opening balance, login, events, calendar and limits.
+  - **Pause now asks before acting**, like Stop.
+- **No more page reloads.** The Live page updates its figures in place every 10 seconds from a new
+  read-only address (`/api/live`). It pauses while the tab is hidden and warns when it is offline. The
+  opening-balance form is never wiped.
+- **Interactive charts** (no outside libraries). They draw at the screen's real size, and hover, tap or
+  the arrow keys show exact values. Equity curves have 1W/1M/3M/All buttons. The candle chart of each
+  trade works the same way.
+- **Trades page:**
+  - Key figures at the top.
+  - Tabs: Overview, Journal (Daily/Weekly/Monthly), Trade log and Backtest.
+  - The trade log can be filtered by stock, side and result.
+  - Net P&L per trading day, from the journal.
+  - On a phone, each trade is a card.
+- **Review, Scanner and trade chart pages** use the new look, with phone cards and the explanations
+  folded away.
+- **Accessibility and speed:**
+  - Every text colour meets WCAG AA in both themes.
+  - Skip link, keyboard focus, readable charts and "reduce motion".
+  - Profit and loss always carry ▲▼ or +/−, not only colour.
+  - Pages are small (Live about 50 KB).
+- **Safety, tested:** looking at any page or data address writes no file and changes no setting, and the
+  new address can't change anything.
+- New README screenshots (sample figures), including phone and light theme. 204 tests pass (20 new).
+
 ## v1.6.0 (16 Nov 2026): daily journal, weekly and monthly reports, daily logs and backups
 
 Recording only: the strategy and risk rules never read any of this, and a problem writing it is a warning in
