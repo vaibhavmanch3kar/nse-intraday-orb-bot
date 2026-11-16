@@ -112,6 +112,7 @@ On the 84 backtest trades it says **No edge** (−0.10R per trade, range −0.21
 | `data_kite.py` | Real-time prices and long history from Kite Connect (paid Connect plan); `data_kite.py check` |
 | `marketdata.py` | Picks Yahoo or Kite from `DATA_SOURCE`, falling back to Yahoo if Kite isn't usable |
 | `web.py` | Dashboard (Live / Session review / Swing scanner / Trades) + Zerodha login on 127.0.0.1:5000 |
+| `webui.py`, `chartjs.py` | Dashboard look (light/dark themes, page frame, phone navigation) and the interactive charts (display only) |
 | `review.py`, `timemachine.py`, `scanner.py` | Session review, Time Machine, swing scanner |
 | `holidays.py`, `nse_holidays.json` | NSE trading calendar |
 | `backtest.py` | Portfolio backtest |

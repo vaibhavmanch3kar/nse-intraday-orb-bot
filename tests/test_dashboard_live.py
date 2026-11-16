@@ -18,6 +18,11 @@ IST = dt.timezone(dt.timedelta(hours=5, minutes=30))
 
 @pytest.fixture
 def server(monkeypatch):
+    import review
+    import scanner
+    from test_dashboard_a11y import REVIEW, SCAN
+    monkeypatch.setattr(review, "latest", lambda *a, **k: REVIEW)        # no price fetching in tests
+    monkeypatch.setattr(scanner, "latest", lambda *a, **k: SCAN)
     monkeypatch.setattr(web, "STATUS_FILE", C.DATA_DIR + "/status.json")
     monkeypatch.setattr(web, "login_status", lambda: (False, "Not logged in today"))
     monkeypatch.setattr(web, "login_url", lambda: "https://kite.zerodha.com/connect/login?api_key=x&v=3")

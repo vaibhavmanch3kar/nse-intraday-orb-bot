@@ -65,7 +65,7 @@ On a weekday (not an NSE holiday), **before 9:15 AM IST**:
 
 1. **Double-click `2-START-BOT.bat`.** The dashboard opens and the bot starts in **PAPER** mode.
 2. Leave the black window open and the PC awake. Look at the dashboard whenever you like:
-   it refreshes every 20 seconds.
+   its figures update by themselves every 10 seconds, without reloading the page.
 3. The bot takes trades from about 9:45 AM, closes everything by **3:10 PM**, and **stops by itself at 3:35 PM**.
 
 To stop early, click **Stop bot** on the dashboard, or just close the black window.
@@ -82,10 +82,31 @@ To undo it, double-click `5-UNSCHEDULE.bat`.
 
 | Page | What you see |
 |---|---|
-| 🏹 **Ayodhya Darbar · Live** | Is the bot running? The **account card** (see below), open positions (profit in ₹ and R, how far the stop is, where the EMA trail is, when the 1-hour time stop is checked, time in trade), every stock's opening range and why it is or isn't a trade, recent events, NSE holiday calendar, Pause/Stop buttons |
+| 🏹 **Ayodhya Darbar · Live** | A **status bar** (market open, bot running, the mode it trades in, price data and delay, Zerodha login), the account's **key figures** (equity, available funds, today's P&L, open P&L, trades used of 4, daily loss limit used), **today's equity chart**, open positions as cards (profit in ₹ and R, where the price sits between the stop and the target, the EMA trail, the 1-hour time-stop check, time in trade), every stock's opening range and status, Pause/Stop (both ask first), the opening balance, Zerodha login, recent events, NSE calendar and limits |
 | 🪔 **Chitrakoot · Session review** | Pick any recent trading day. For each stock: a mini chart, whether the rules fired, and how the trade would have ended. Each trade also shows the **Time Machine**: the odds from 10,000 replays of that stock's own moves, a plain verdict ("coin flip", "leans toward the stop"…) and the rule's real track record over 60 days |
 | 🚩 **Hanuman's Watch · Swing scanner** | Nifty 50 stocks with a multi-day setup on the last daily candle (20-day breakout, bull flag, 20-day average reclaim, oversold, oversold bounce), with a suggested stop, target and quantity. **Research only: the bot doesn't trade these** |
-| 📜 **Rajkosh · Trades** | An **equity curve** (with drawdowns shaded), a **profit/loss bar per trade**, breakdowns **by exit reason, long vs short and stock**, every trade with a **chart** link (the day's candles with entry, exit, stop and trail drawn on), the last backtest shown the same way, and the **30-trade edge check**: after 30 trades it tells you whether the average result per trade is positive, and to stop if it isn't |
+| 📜 **Rajkosh · Trades** | Key figures, then tabs: **Overview** (equity curve with drawdowns shaded and 1W/1M/3M/All ranges, profit/loss per trade and per day, breakdowns by exit reason, side and stock, and the **30-trade edge check**), **Journal** (Daily / Weekly / Monthly), **Trade log** (filter by stock, side and result; each trade links to its **chart** with entry, exit, stop and trail drawn on) and **Backtest** |
+
+### Look and feel: light and dark, desktop and phone
+
+- **Themes:** dark (night sky, saffron and gold) and light (ivory and saffron). The dashboard follows your PC's or
+  phone's setting; the ☀/☾ button in the header switches, and your browser remembers the choice.
+- **Desktop:** page tabs and the Paper | Zerodha switch in the header; a wide two-column layout.
+- **Phone:** a bottom bar (Live, Trades, Review, Scanner), the account switch across the top, figures in a
+  2-column grid, and tables that turn into one card per row.
+- **Charts:** hover, tap or use the arrow keys to read exact values. They draw at your screen's real size,
+  so labels stay readable on a phone.
+- **Live updates:** the Live page updates its figures in place every 10 seconds (it pauses while the tab is
+  hidden) and shows an offline warning if it can't reach the bot. Nothing reloads, so what you're typing
+  in the opening-balance form is never lost.
+- Everything is built in: no web fonts, no internet libraries. Profit and loss always carry ▲▼ or +/−, not
+  only colour. Pages are keyboard-friendly and respect "reduce motion".
+
+| Phone (dark) | Light theme |
+|---|---|
+| ![Live page on a phone](docs/screenshots/08-phone-live.jpg) | ![Live page, light theme](docs/screenshots/09-live-light.png) |
+
+The screenshots use sample figures.
 
 ### Paper opening balance
 
@@ -116,8 +137,10 @@ switching never changes a setting or places an order.
   It needs the day's Zerodha login and reads only Kite's balance and positions; it can't place, change or
   cancel an order. Balances are kept in memory for 15 seconds and never saved. The Trades page shows only
   the trades the bot placed in live mode.
-- The card refreshes every 10 seconds, shows when it was last updated, and warns about stale data, slow
-  prices, login problems and failed refreshes (it keeps the last good values and says when they're from).
+- The figures refresh every 10 seconds, show when they were last updated, and warn about stale data, slow
+  prices, login problems and failed refreshes (they keep the last good values and say when they're from).
+
+![Zerodha Account view (not logged in)](docs/screenshots/07-zerodha-account.png)
 
 ### Daily journal, weekly and monthly reports
 

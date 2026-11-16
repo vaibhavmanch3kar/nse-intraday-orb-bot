@@ -166,7 +166,7 @@ PALETTES = {
     "light": {
         "bg": "#f7f2ea", "surface": "#ffffff", "surface-2": "#f8f1e6", "border": "#e6dac8",
         "text": "#2a1f17", "muted": "#6c5e50", "accent": "#c2410c", "accent-ink": "#ffffff",
-        "gold": "#a16207", "up": "#047857", "dn": "#b91c1c", "warn": "#a16207", "info": "#6d28d9",
+        "gold": "#915a00", "up": "#047857", "dn": "#b91c1c", "warn": "#915a00", "info": "#6d28d9",
         "trail": "#7c3aed", "live": "#b91c1c", "up-bg": "#e7f6ef", "dn-bg": "#fdecec",
         "warn-bg": "#fdf3dc", "banner-bg": "#fdf3dc", "banner-fg": "#7c2d12",
         "shadow": "0 1px 2px rgba(60,40,20,.06), 0 6px 18px rgba(60,40,20,.06)",

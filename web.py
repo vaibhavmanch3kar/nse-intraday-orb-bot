@@ -1121,7 +1121,10 @@ TRADES_JS = """
     if(push)try{history.replaceState(null,'','#'+id)}catch(e){}
     document.dispatchEvent(new CustomEvent('regionsupdated'));}
   tabs.forEach(function(t){t.addEventListener('click',function(ev){ev.preventDefault();pick(t.getAttribute('data-tab'),true)})});
-  if(tabs.length)pick((location.hash||'').slice(1)||tabs[0].getAttribute('data-tab'),false);
+  var asked=(location.hash||'').slice(1); try{asked=asked||new URLSearchParams(location.search).get('tab')||''}catch(e){}
+  if(tabs.length){pick(asked||tabs[0].getAttribute('data-tab'),false);
+    // a link like /trades#journal opens that tab with the page at the top (the tabs stay in view)
+    if(location.hash)setTimeout(function(){window.scrollTo(0,0)},0);}
   // trade log filters
   document.querySelectorAll('.tlog').forEach(function(card){
     var sels=[].slice.call(card.querySelectorAll('select[data-f]')), count=card.querySelector('[data-count]');
