@@ -104,6 +104,10 @@ switching never changes a setting or places an order.
 - The card refreshes every 10 seconds, shows when it was last updated, and warns about stale data, slow
   prices, login problems and failed refreshes (it keeps the last good values and says when they're from).
 
+![Zerodha Account view (example figures, not a real account)](docs/screenshots/07-zerodha-account.png)
+
+*The Zerodha Account view, with example figures (not a real account).*
+
 | Trades: equity curve and P&L bars | Trade chart |
 |---|---|
 | ![Trades](docs/screenshots/04-trades.png) | ![Trade chart](docs/screenshots/06-trade-chart.png) |
