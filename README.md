@@ -87,6 +87,21 @@ To undo it, double-click `5-UNSCHEDULE.bat`.
 | 🚩 **Hanuman's Watch · Swing scanner** | Nifty 50 stocks with a multi-day setup on the last daily candle (20-day breakout, bull flag, 20-day average reclaim, oversold, oversold bounce), with a suggested stop, target and quantity. **Research only: the bot doesn't trade these** |
 | 📜 **Rajkosh · Trades** | An **equity curve** (with drawdowns shaded), a **profit/loss bar per trade**, breakdowns **by exit reason, long vs short and stock**, every trade with a **chart** link (the day's candles with entry, exit, stop and trail drawn on), the last backtest shown the same way, and the **30-trade edge check**: after 30 trades it tells you whether the average result per trade is positive, and to stop if it isn't |
 
+### Paper opening balance
+
+The paper account starts at ₹1,00,000 unless you choose another amount. On the Live page (Paper Account
+view), the **Opening Balance · Paper Account** card offers ₹10,000, ₹25,000, ₹50,000, ₹1,00,000, ₹5,00,000 or
+a custom amount (whole rupees, ₹10,000 to ₹1 crore). After you confirm:
+
+- The choice is saved as **pending** in `data\paper_capital.json`. The bot applies it at its **next start**
+  (normally 9:00), before any trade, and waits if paper positions are still open. You can cancel it until then.
+- Cash moves by the difference, so equity = new opening balance + realised P&L + open P&L. Past trades,
+  realised P&L and charges stay exactly as recorded, and each change is listed on the account card.
+- Trade sizes follow the new equity (0.5% risk per trade). Below ₹50,000, trades are small and stocks priced
+  above 25% of the balance are skipped.
+- **Paper only:** live trading and your Zerodha account never read this setting. The backtest and the
+  advisor report stay at ₹1,00,000 so their results remain comparable.
+
 ### Paper Account | Zerodha Account
 
 The Live and Trades pages have a **View: Paper Account | Zerodha Account** switch. It only changes what you
@@ -107,6 +122,35 @@ switching never changes a setting or places an order.
 ![Zerodha Account view (example figures, not a real account)](docs/screenshots/07-zerodha-account.png)
 
 *The Zerodha Account view, with example figures (not a real account).*
+
+### Daily journal, weekly and monthly reports
+
+Everything is saved as plain files in the project's `data` folder, separately for paper and live trading:
+
+| File | What's in it |
+|---|---|
+| `data\trades_paper.csv` | Every closed trade (the record of truth) |
+| `data\journal\journal_paper.csv` | **One row per trading day**: starting and ending equity, net P&L and %, charges, trades, wins, total R, best/worst trade, the day's **worst drawdown** (checked every round), signals taken and skipped with the reasons, data outages, when the bot ran, and whether the day is **complete** |
+| `data\journal\paper\2026-11-16.json` | That day in detail: every signal and what happened to it, each outage, every bot start, equity every minute |
+| `data\reports\paper_week_2026-W47.html`, `paper_month_2026-11.html` | Saved **weekly and monthly reports**: summary, equity at each close, day-by-day table, trades, skip reasons. Open in a browser, print or save as PDF |
+| `data\logs\bot_2026-11-16.log` | **One log file per day** |
+
+- The bot updates the day's journal **every round**, so a crash keeps everything up to that moment. After the
+  close the day is marked **complete**; a STOP file marks it **stopped HH:MM**; a day the bot didn't finish
+  shows as **incomplete**. Days with trades but no journal are **rebuilt** from the trade log (signals and
+  drawdown are then unknown, shown as –).
+- The **Trades page** has a **Daily | Weekly | Monthly** card with a **Download CSV** button and links to
+  the saved reports. It follows the Paper Account | Zerodha Account view.
+- Weekly and monthly reports are written after the close on the last trading day of the week or month (or at
+  the next start if the bot missed the close). Any time: `.venv\Scripts\python.exe reports.py --week 2026-W47`
+  or `--month 2026-11`.
+- **Daily backup:** after the close the whole `data` folder is zipped to
+  `KiteConnect\backups\data\data_2026-11-16.zip`, keeping the newest 30. That folder is on the same disk; to
+  survive a disk failure point it at OneDrive or a USB drive:
+  `[Environment]::SetEnvironmentVariable("BACKUP_DIR", "D:\OneDrive\kite-backups", "User")`.
+  Back up by hand with `.venv\Scripts\python.exe backup.py`.
+- The journal, reports and backups only **record**: the strategy and risk rules never read them, and a problem
+  writing them is a warning in the log, never a reason to stop trading.
 
 | Trades: equity curve and P&L bars | Trade chart |
 |---|---|
@@ -190,7 +234,9 @@ writes files to `data\advisor\`. Run these in PowerShell inside the project fold
 | **Data delay** shows 15+ minutes | Yahoo's free data is running late. Paper results will be less accurate that day. Kite data fixes this (see above) |
 | Live page says **Kite unavailable** | Log in to Zerodha on the dashboard (needed every day), then run `6-CHECK-KITE-DATA.bat` |
 | Setup says **self-tests failed** | Copy the red text and open an *Issue* on this GitHub page |
-| I want to reset the paper account | Delete the `data` folder inside the project (it holds paper trades, P&L and logs), then start the bot again |
+| I want to reset the paper account | Delete the `data` folder inside the project (it holds paper trades, P&L, journal, reports and logs), then start the bot again. The daily backups in `KiteConnect\backups\data` stay |
+| Log says **journal CSV is open in another program** | Close `journal_paper.csv` in Excel. The day is still saved in `data\journal\paper\<date>.json` and the CSV catches up at the next round |
+| I need data back from a backup | Stop the bot, rename the `data` folder, unzip the backup (it contains a `data` folder) into the project folder |
 
 ---
 

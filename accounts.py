@@ -61,6 +61,8 @@ def paper_account(now=None, state_path=None):
         out.update(error=f"Can't read the paper account file ({e}).")
         return out
 
+    start = float(d.get("opening_balance", start))   # chosen on the dashboard, applied by the bot
+    out["start"] = start
     cash = float(d.get("cash", start))
     invested = unreal = 0.0
     for sym, p in sorted((d.get("positions") or {}).items()):

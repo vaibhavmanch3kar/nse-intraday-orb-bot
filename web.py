@@ -103,6 +103,8 @@ footer{text-align:center;color:var(--muted);font-size:11px;margin:20px 0 6px}
 .viewbar.zerodha{background:rgba(220,38,38,.18);color:#fecaca;border:2px solid var(--dn)}
 .card.acct.paper{border:2px solid var(--gold)} .card.acct.zerodha{border:2px solid var(--dn);background:linear-gradient(180deg,rgba(220,38,38,.10),var(--card) 40%)}
 .tag.dn{background:var(--dn);color:#fff}
+.opts{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 8px} .opt{padding:6px 10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);cursor:pointer}
+input[type=number]{background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:4px}
 """).replace("SERIF", SERIF)
 
 
@@ -218,7 +220,7 @@ def paper_card(acct, status=None):
          ("Charges paid", f"<b>{_inr(acct['charges'])}</b>")]
     kpis = "".join(f"<div>{label}{val}</div>" for label, val in k)
     warn = "".join(f"<div class='warn'>⚠ {html.escape(w)}</div>" for w in warnings)
-    return (f"<h2>{title}</h2><div class='kpis'>{kpis}</div>{warn}"
+    return (f"<h2>{title}</h2><div class='kpis'>{kpis}</div>{warn}{capital_lines()}"
             f"<div class='muted' style='margin-top:6px'>Updated {_clock(acct.get('as_of'))} IST (the bot's last round) · "
             f"checked {_clock(acct.get('now'))} · refreshes every {ACCOUNT_REFRESH_SEC} s · "
             f"unrealised P&amp;L is before exit charges · available = equity − invested (no leverage)</div>")
@@ -292,6 +294,62 @@ def zerodha_card(acct):
             f"checked {_clock(acct.get('now'))} · refreshes every {ACCOUNT_REFRESH_SEC} s "
             f"(Zerodha is asked at most every {accounts.ZERODHA_CACHE_SEC} s) · account value = opening balance + "
             f"today's P&amp;L · Zerodha's P&amp;L is before charges · delivery holdings are not included</div>")
+
+
+def capital_lines():
+    """Pending opening-balance change and the last few applied changes (paper account only)."""
+    import capital
+    s = capital.load()
+    out = ""
+    p = s.get("pending")
+    if p:
+        out += (f"<div class='warn'>⏳ Opening balance changes to <b>{_inr(float(p['amount']))}</b> at the bot's next start "
+                f"(requested {html.escape(str(p.get('requested_at', ''))[:16].replace('T', ' '))}).</div>")
+    hist = s.get("history") or []
+    if hist:
+        items = " · ".join(f"{html.escape(str(h.get('applied_at', ''))[:10])}: {_inr(float(h['from']))} → {_inr(float(h['to']))}"
+                           for h in hist[-3:])
+        out += f"<div class='muted'>Opening balance changes: {items}</div>"
+    return out
+
+
+def capital_card():
+    """Form to choose the PAPER opening balance. Kept outside the auto-refreshing account card, so a
+    refresh never wipes what you're typing. The change applies at the bot's next start."""
+    import capital
+    current = capital.current_opening_balance()
+    pending = capital.load().get("pending")
+    chosen = float(pending["amount"]) if pending else current
+    radios = "".join(
+        f"<label class='opt'><input type='radio' name='amount' value='{v}'{' checked' if v == chosen else ''}> {_inr(float(v))[:-3]}</label>"
+        for v in capital.PRESETS)
+    custom_on = chosen not in capital.PRESETS
+    radios += (f"<label class='opt'><input type='radio' name='amount' value='custom'{' checked' if custom_on else ''}> Custom: "
+               f"₹<input type='number' name='custom_amount' min='{capital.MIN_INR}' max='{capital.MAX_INR}' step='1' "
+               f"value='{int(chosen) if custom_on else ''}' placeholder='e.g. 75000' style='width:110px' "
+               f"onfocus=\"this.form.amount.value='custom'\"></label>")
+    cancel = ("<form method='post' action='/paper-capital/cancel' style='display:inline' "
+              "onsubmit=\"if(!confirm('Cancel the pending opening balance change?'))return false;this.confirm.value='yes'\">"
+              "<input type='hidden' name='confirm' value=''><button class='red'>Cancel pending change</button></form>"
+              if pending else "")
+    return f"""<div class="card" id="capital"><h2>Opening Balance · Paper Account <span class='tag'>virtual money</span></h2>
+<form method="post" action="/paper-capital" onsubmit="return confirmCapital(this)" style="display:inline">
+<div class="opts">{radios}</div>
+<input type="hidden" name="confirm" value="">
+<button>Save opening balance</button></form> {cancel}
+<div class="muted" style="margin-top:6px">Now <b>{_inr(current)}</b>. A new amount takes effect when the bot next starts
+(normally 9:00), before any trade; if paper positions are open it waits. Past trades and P&amp;L are kept, and
+position sizes follow the new equity (0.5% risk per trade). Paper only: it never touches your Zerodha account or
+live trading. From {_inr(float(capital.MIN_INR))[:-3]} to {_inr(float(capital.MAX_INR))[:-3]}, whole rupees.</div></div>
+<script>function confirmCapital(f){{
+ var v=f.querySelector('input[name=amount]:checked'); if(!v){{alert('Choose an amount.');return false}}
+ var a=v.value==='custom'?Number(f.custom_amount.value):Number(v.value);
+ if(!a||a<{capital.MIN_INR}||a>{capital.MAX_INR}||a!==Math.floor(a)){{alert('Enter whole rupees from {capital.MIN_INR:,} to {capital.MAX_INR:,}.');return false}}
+ var m='Change the PAPER opening balance from \\u20b9{int(current):,} to \\u20b9'+a.toLocaleString('en-US')+'?\\n\\n'+
+  'It takes effect at the bot\\'s next start (normally 9:00). Past trades and P&L are kept.\\n'+
+  'Your real Zerodha account and live trading are not affected.';
+ if(a<{capital.SMALL_INR})m+='\\n\\nBelow \\u20b9{capital.SMALL_INR:,} trades are small, and stocks priced above 25% of the balance are skipped.';
+ if(!confirm(m))return false; f.confirm.value='yes'; return true}}</script>"""
 
 
 def account_card_html(view, status=None):
@@ -404,6 +462,7 @@ def render(msg="", q=None):
 {view_switch("/", view, s)}
 {view_banner(view)}
 {account_card(view, s)}
+{capital_card() if view == "paper" else ""}
 {banner}
 {calendar}
 {f'<p class="msg">{html.escape(msg)}</p>' if msg else ''}
@@ -632,6 +691,92 @@ def trade_section(rows, src, label, start_cash, show_log=True):
     return kpis + charts_html + log
 
 
+def _money(v):
+    if v is None:
+        return "–"
+    return f"<span class='{'up' if v > 0 else 'dn' if v < 0 else ''}'>{'-' if v < 0 else ''}₹{abs(v):,.0f}</span>"
+
+
+def _maybe(v, fmt):
+    return "–" if v is None else fmt.format(v)
+
+
+def journal_card(mode, view, period):
+    """Daily | Weekly | Monthly results from the daily journal (data/journal/journal_<mode>.csv)."""
+    import journal
+    period = period if period in journal.PERIODS else "day"
+    rows = journal.days(mode)
+    tabs = " ".join(f"<a class='{'on' if p == period else ''}' href='/trades?view={view}&amp;period={p}#journal'>{name}</a>"
+                    for p, name in journal.PERIODS.items())
+    dl = (f"<a class='sig' href='/journal.csv?view={view}&amp;period={period}' download>⬇ Download CSV</a>"
+          if rows else "")
+    head = (f"<div class='card' id='journal'><h2>{T.SCROLL} Daily journal · {html.escape(T.name(mode))}</h2>"
+            f"<div class='days'>{tabs} {dl}</div>")
+    if not rows:
+        return (head + "<div class='muted'>No days yet. The bot writes one row per trading day to "
+                f"data\\journal\\journal_{mode}.csv from its next start.</div></div>")
+    status_cls = {"complete": "up", "rebuilt": "muted", "running": "warn"}
+    if period == "day":
+        body = []
+        for r in reversed(rows):
+            st = r.get("status") or ""
+            sig = journal._opt(r.get("signals"))
+            sig_txt = ("–" if sig is None else
+                       f"{int(sig)} <span class='muted'>({int(journal._f(r.get('taken')))} taken, "
+                       f"{int(journal._f(r.get('skipped')))} skipped)</span>")
+            tip = html.escape(r.get("skip_reasons") or "")
+            trades = int(journal._f(r.get("trades")))
+            body.append(
+                f"<tr><td>{html.escape(journal.period_label(r['date'], 'day'))}</td>"
+                f"<td class='{status_cls.get(st, 'dn')}'>{html.escape(st)}</td>"
+                f"<td>{trades}</td><td>{int(journal._f(r.get('wins')))}</td>"
+                f"<td>{_money(journal._opt(r.get('net_pnl')))}</td>"
+                f"<td>{_maybe(journal._opt(r.get('return_pct')), '{:+.2f}%')}</td>"
+                f"<td>₹{journal._f(r.get('charges')):,.0f}</td>"
+                f"<td>{_maybe(journal._f(r.get('total_r')) / trades if trades else None, '{:+.2f}R')}</td>"
+                f"<td>{_maybe(journal._opt(r.get('max_drawdown_pct')), '{:.2f}%')}</td>"
+                f"<td title='{tip}'>{sig_txt}</td>"
+                f"<td>{_maybe(journal._opt(r.get('outage_min')), '{:.0f} min')}</td>"
+                f"<td>{html.escape(r.get('bot_start') or '?')}–{html.escape(r.get('bot_stop') or '?')}</td>"
+                f"<td class='muted' style='white-space:normal;min-width:150px'>{html.escape(r.get('note') or '')}</td></tr>")
+        table = ("<table><tr><th>Day</th><th>Status</th><th>Trades</th><th>Won</th><th>Net</th><th>Return</th>"
+                 "<th>Charges</th><th>Avg R</th><th>Worst drawdown</th><th>Signals</th><th>Data outages</th>"
+                 f"<th>Bot ran</th><th>Note</th></tr>{''.join(body)}</table>")
+    else:
+        body = []
+        for s in reversed(journal.summarise(rows, period)):
+            odd = [st for st in s["statuses"] if st != "complete"]
+            days_txt = f"{s['days']}" + (f" <span class='muted'>({s['full_days']} full)</span>" if odd else "")
+            body.append(
+                f"<tr><td>{html.escape(s['label'])}</td><td>{days_txt}</td><td>{s['trades']}</td>"
+                f"<td>{_maybe(s['win_rate'], '{:.0f}%')}</td><td>{_money(s['net'])}</td>"
+                f"<td>{s['return_pct']:+.2f}%</td><td>₹{s['charges']:,.0f}</td>"
+                f"<td>{_maybe(s['avg_r'], '{:+.2f}R')}</td>"
+                f"<td>{_money(s['best_day'])} / {_money(s['worst_day'])}</td>"
+                f"<td>{journal.drawdown_text(s)}</td>"
+                f"<td title='{html.escape(s['skip_reasons'])}'>{_maybe(s['skipped'], '{:.0f}')}</td>"
+                f"<td>{_maybe(s['outage_min'], '{:.0f} min')}</td></tr>")
+        table = ("<table><tr><th>" + ("Week" if period == "week" else "Month") + "</th><th>Days</th><th>Trades</th>"
+                 "<th>Won</th><th>Net</th><th>Return</th><th>Charges</th><th>Avg R</th><th>Best / worst day</th>"
+                 f"<th>Worst drawdown</th><th>Skipped signals</th><th>Data outages</th></tr>{''.join(body)}</table>")
+    notes = ("<div class='muted' style='margin-top:6px'>Newest first. <b>complete</b> = the bot ran to the close; "
+             "<b>stopped HH:MM</b> = stopped by the STOP file; <b>incomplete</b> = the bot stopped without saying "
+             "goodbye (crash, PC off); <b>rebuilt</b> = from the trade log only, so signals, drawdown and outages "
+             "are unknown (–). Worst drawdown = the biggest fall from a high, inside a day (checked every round) or "
+             "from one day's close to a later one; * = some days unknown. Hover a signal count for the skip "
+             f"reasons. Saved in data\\journal\\journal_{mode}.csv.</div>")
+    import reports
+    files = reports.saved(mode)
+    saved = ""
+    if files:
+        links = " · ".join(f"<a class='sig' href='/reports/{html.escape(n)}' target='_blank'>"
+                           f"{html.escape(n.split('_', 1)[1].replace('_', ' ').replace('.html', ''))}</a>"
+                           for n in files[:12])
+        saved = (f"<div style='margin-top:8px'>{T.SCROLL} Saved reports (data\\reports, open and print or save as PDF): "
+                 f"{links}{' · …' if len(files) > 12 else ''}</div>")
+    return head + table + notes + saved + "</div>"
+
+
 def render_trades(q=None):
     s = read_status()
     view = current_view(q or {}, s)
@@ -641,8 +786,16 @@ def render_trades(q=None):
              view_switch("/trades", view, s), view_banner(view)]
     rows = trade_rows(mode)
     label = f"{T.name(mode)} · {VIEWS[view]}"
+    start, note = C.PAPER_START_INR, ""
+    if mode == "paper":
+        import capital
+        start = capital.current_opening_balance()
+        if capital.load().get("history"):
+            note = (f"<div class='muted'>The equity curve and drawdown use the current opening balance "
+                    f"({_inr(start)}). {capital_lines()}</div>")
     parts.append(f"<div class='card acct {view}' style='padding:4px 16px'>"
-                 + trade_section(rows, mode, label, C.PAPER_START_INR) + "</div>")
+                 + trade_section(rows, mode, label, start) + note + "</div>")
+    parts.append(journal_card(mode, view, (q or {}).get("period", ["day"])[0]))
     parts.append(edge_card(rows, f"{mode.title()} trading"))
     if not rows:
         parts.append("<div class='card muted'>No trades yet - the bot records them here once it trades on a market day.</div>"
@@ -801,6 +954,30 @@ class Handler(BaseHTTPRequestHandler):
             self._send(render_review(day, refresh=q.get("refresh", ["0"])[0] == "1"))
         elif u.path == "/trades":
             self._send(render_trades(q))
+        elif u.path == "/journal.csv":
+            # read-only download of the journal table; each view reads only its own account's journal
+            import journal
+            view = q.get("view", ["paper"])[0]
+            mode = "live" if view == "zerodha" else "paper"
+            period = q.get("period", ["day"])[0]
+            period = period if period in journal.PERIODS else "day"
+            data = journal.summary_csv(mode, period).encode("utf-8-sig")   # BOM: Excel shows ₹ correctly
+            self.send_response(200)
+            self.send_header("Content-Type", "text/csv; charset=utf-8")
+            self.send_header("Content-Disposition", f'attachment; filename="journal_{mode}_{period}.csv"')
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(data)
+        elif u.path.startswith("/reports/"):
+            import reports
+            name = u.path[len("/reports/"):]
+            path = os.path.join(reports.reports_dir(), name)
+            if not reports.NAME_RE.match(name) or not os.path.isfile(path):
+                self._send("not found", 404, "text/plain")
+                return
+            with open(path, encoding="utf-8") as f:
+                self._send(f.read())
         elif u.path == "/journey":
             try:
                 idx = int(q.get("i", [""])[0])
@@ -830,6 +1007,33 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self._send("not found", 404, "text/plain")
 
+    def _paper_capital(self, origin):
+        """Save or cancel a PAPER opening-balance change. Needs the dashboard's own page (Origin/Referer)
+        and the confirmation the page adds after you click OK. Writes only data/paper_capital.json."""
+        from urllib.parse import quote
+        import capital
+        if not origin:
+            self._send("forbidden: open the dashboard page to change the opening balance", 403, "text/plain")
+            return
+        length = int(self.headers.get("Content-Length") or 0)
+        if length > 10_000:
+            self._send("too large", 413, "text/plain")
+            return
+        form = parse_qs(self.rfile.read(length).decode("utf-8", "replace"))
+        if form.get("confirm", [""])[0] != "yes":
+            msg = "Not changed: the change needs your confirmation."
+        elif self.path == "/paper-capital/cancel":
+            msg = capital.cancel()
+        else:
+            amount = form.get("amount", [""])[0]
+            if amount == "custom":
+                amount = form.get("custom_amount", [""])[0]
+            try:
+                msg = capital.request(amount)
+            except ValueError as e:
+                msg = f"Not changed: {e}"
+        self._redirect("/?view=paper&msg=" + quote(msg))
+
     def do_POST(self):
         # Browsers on other sites can't read the response, but they can POST: only accept same-origin.
         origin = self.headers.get("Origin") or self.headers.get("Referer") or ""
@@ -837,6 +1041,9 @@ class Handler(BaseHTTPRequestHandler):
             self._send("forbidden", 403, "text/plain")
             return
         os.makedirs(C.DATA_DIR, exist_ok=True)
+        if self.path in ("/paper-capital", "/paper-capital/cancel"):
+            self._paper_capital(origin)
+            return
         if self.path == "/pause":
             open(C.PAUSE_FILE, "w").close()
         elif self.path == "/resume":

@@ -18,11 +18,15 @@ import threading
 import time
 
 import archive
+import backup
+import capital
 import config as C
 import costs
 import data_yahoo
 import marketdata
 import holidays
+import journal
+import reports
 import risk
 import strategy
 import theme as T
@@ -36,17 +40,84 @@ def now_ist():
     return dt.datetime.now(IST)
 
 
+class DailyFileHandler(logging.Handler):
+    """One log file per day: data/logs/bot_YYYY-MM-DD.log (India date), switching at midnight."""
+
+    def __init__(self, folder):
+        super().__init__()
+        self.folder, self.day, self.stream = folder, None, None
+
+    def emit(self, record):
+        try:
+            day = dt.datetime.fromtimestamp(record.created, IST).date().isoformat()
+            if day != self.day:
+                self.close_stream()
+                os.makedirs(self.folder, exist_ok=True)
+                self.stream = open(os.path.join(self.folder, f"bot_{day}.log"), "a", encoding="utf-8")
+                self.day = day
+            self.stream.write(self.format(record) + "\n")
+            self.stream.flush()
+        except Exception:  # noqa: BLE001
+            self.handleError(record)
+
+    def close_stream(self):
+        if self.stream:
+            self.stream.close()
+        self.stream, self.day = None, None
+
+    def close(self):
+        self.close_stream()
+        super().close()
+
+
+def split_old_log(data_dir):
+    """Once: split the old single data/bot.log into data/logs/bot_<date>.log files by the date on each
+    line (lines without a date, like error tracebacks, stay with the line before). The original is
+    kept as data/logs/bot_until_<last date>.log. Returns the dates written ([] if nothing to do)."""
+    old = os.path.join(data_dir, "bot.log")
+    if not os.path.exists(old):
+        return []
+    folder = os.path.join(data_dir, "logs")
+    os.makedirs(folder, exist_ok=True)
+    by_day, day = {}, None
+    with open(old, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            if len(line) > 10 and line[4] == "-" and line[7] == "-" and line[:4].isdigit():
+                day = line[:10]
+            if day:
+                by_day.setdefault(day, []).append(line)
+    # move the original first: if that fails nothing has changed, and a later start can't split twice
+    keep = os.path.join(folder, f"bot_until_{max(by_day) if by_day else 'start'}.log")
+    os.replace(old, keep)
+    for d, lines in by_day.items():
+        path = os.path.join(folder, f"bot_{d}.log")
+        existing = open(path, encoding="utf-8").read() if os.path.exists(path) else ""
+        with open(path + ".tmp", "w", encoding="utf-8") as f:
+            f.write("".join(lines) + existing)
+        os.replace(path + ".tmp", path)
+    return sorted(by_day)
+
+
 def setup_logging():
     os.makedirs(C.DATA_DIR, exist_ok=True)
     fmt = logging.Formatter("%(asctime)s %(levelname)-7s %(name)s: %(message)s", "%Y-%m-%d %H:%M:%S")
     root = logging.getLogger()
     root.setLevel(logging.INFO)
-    fh = logging.FileHandler(os.path.join(C.DATA_DIR, "bot.log"), encoding="utf-8")
+    try:
+        split = split_old_log(C.DATA_DIR)
+    except OSError as e:   # e.g. the old log is open in an editor: try again at the next start
+        split = f"not yet ({e})"
+    fh = DailyFileHandler(os.path.join(C.DATA_DIR, "logs"))
     fh.setFormatter(fmt)
     sh = logging.StreamHandler(sys.stdout)
     sh.setFormatter(fmt)
     root.handlers[:] = [fh, sh]
     logging.getLogger("urllib3").setLevel(logging.WARNING)
+    if isinstance(split, str):
+        log.warning(f"the old data\\bot.log was not split into data\\logs {split}")
+    elif split:
+        log.info(f"the old data\\bot.log is now one file per day in data\\logs ({len(split)} days, "
+                 f"{split[0]} to {split[-1]}); the original is kept there as bot_until_{split[-1]}.log")
 
 
 TRADE_COLS = ["closed", "symbol", "direction", "qty", "entry", "exit", "stop", "target",
@@ -146,6 +217,9 @@ class Bot:
         self.bars = {}          # symbol -> latest closed 15-min bars (for the dashboard)
         self.good_rows = {}     # symbol -> last evaluation row, shown again once data is back
         self.data_down_since = None  # time the current price-data problem started (None = data OK)
+        self.started_at = now_ist()
+        self.journal = None     # today's journal.DayJournal (recording only - never read by trading code)
+        self.journal_warned = set()
 
     # -- helpers
     def note(self, msg, level=logging.INFO):
@@ -166,6 +240,19 @@ class Bot:
         self.reconcile()
         return True
 
+    def apply_paper_capital(self):
+        """At start-up, before any trade: apply an opening-balance change chosen on the dashboard.
+        PAPER mode only - live trading never reads the paper capital setting."""
+        if self.live:
+            return
+        try:
+            msg = capital.apply_pending(self.state, now_ist())
+        except Exception as e:  # a bad settings file must never stop the bot
+            self.note(f"paper opening balance change not applied ({e!r})", logging.WARNING)
+            return
+        if msg:
+            self.note(msg)
+
     def log_data_health(self, fetched, now):
         """One log line when price data starts failing and one when it is back (not one per round)."""
         failed = [s for s in C.WATCHLIST if isinstance(fetched.get(s), Exception) or fetched.get(s) is None]
@@ -178,6 +265,50 @@ class Bot:
             self.note(f"price data back: all {len(C.WATCHLIST)} stocks OK "
                       f"(problem from {self.data_down_since:%H:%M}, about {mins:.0f} min)")
             self.data_down_since = None
+
+    # -- daily journal (recording only: a journal problem is a warning, never a reason to stop)
+    def journal_warn(self, text):
+        if text and text not in self.journal_warned:
+            self.journal_warned.add(text)
+            self.note(f"{T.WARN_ICON} journal: {text}", logging.WARNING)
+
+    def journal_round(self, now, candidates=(), square_off_time=None):
+        try:
+            if self.journal is None or self.journal.day != now.date().isoformat():
+                rebuilt = journal.backfill(self.mode, now.date())
+                if rebuilt:
+                    self.note(f"journal: saved {len(rebuilt)} earlier day(s) ({', '.join(rebuilt)})")
+                self.journal = journal.DayJournal(self.mode, now.date(), self.started_at, self.state)
+                for path in reports.catch_up(self.mode, now.date()):
+                    self.note(f"{T.SCROLL} report saved (missed after the last close): "
+                              f"{os.path.join('data', 'reports', os.path.basename(path))}")
+            j = self.journal
+            for sym, _closed, ev, row in candidates:
+                pos = self.state.positions.get(sym)
+                taken = bool(pos) and pos.get("opened") == str(now)
+                reason = row.get("reason", "")
+                if " - skip: " in reason:
+                    why = reason.split(" - skip: ", 1)[1]
+                elif "(paused)" in reason:
+                    why = "paused"
+                elif square_off_time is not None and now >= square_off_time:
+                    why = "after square-off time"
+                else:
+                    why = "entry not filled"
+                j.signal(now, sym, row.get("bar", ""), ev.get("signal"), taken, why)
+            j.round(now, self.state.equity(self.prices), len(self.state.positions), self.data_down_since)
+            self.journal_warn(j.save())
+        except Exception as e:  # noqa: BLE001
+            self.journal_warn(f"could not update today's journal ({e!r})")
+
+    def journal_finish(self, now, how):
+        if self.journal is None or self.journal.day != now.date().isoformat():
+            return
+        try:
+            self.journal.finish(now, self.state.equity(self.prices), how)
+            self.journal_warn(self.journal.save())
+        except Exception as e:  # noqa: BLE001
+            self.journal_warn(f"could not close today's journal ({e!r})")
 
     def reconcile(self):
         held = self.broker.open_mis_quantities()
@@ -346,6 +477,7 @@ class Bot:
                       f"{T.name('stop')} (stop) {stop:.2f} "
                       + (f"{T.name('target')} (target) {target:.2f}" if target is not None
                          else "no fixed target (trailing)"))
+        self.journal_round(now, candidates, square_off_time)
         self.write_status(now)
 
     def write_status(self, now):
@@ -397,6 +529,28 @@ class Bot:
             self.note(msg)
         except Exception as e:
             self.note(f"{T.WARN_ICON} candle archive failed: {e!r}", logging.WARNING)
+        self.save_reports(now)
+        self.backup_data(now)
+
+    def backup_data(self, now):
+        """Last thing after the close: zip the data folder (journal, reports, logs, trades, state)."""
+        try:
+            r = backup.backup(now.date())
+            self.note(f"data backup: {os.path.basename(r['path'])} ({r['files']} files, {r['bytes'] / 1e6:.1f} MB) in "
+                      f"{os.path.dirname(r['path'])}" + (f"; removed {len(r['removed'])} old" if r["removed"] else ""))
+        except Exception as e:  # noqa: BLE001 - a backup problem never stops the bot
+            self.note(f"{T.WARN_ICON} data backup failed ({e!r})", logging.WARNING)
+
+    def save_reports(self, now):
+        """After the close on the last trading day of a week or month: the saved weekly/monthly report."""
+        try:
+            for period, key in reports.due(now.date()):
+                path = reports.write(self.mode, period, key)
+                if path:
+                    self.note(f"{T.SCROLL} {period}ly report saved: "
+                              f"{os.path.join('data', 'reports', os.path.basename(path))}")
+        except Exception as e:  # noqa: BLE001 - a report problem never stops the bot
+            self.note(f"{T.WARN_ICON} weekly/monthly report not saved ({e!r})", logging.WARNING)
 
     def run(self):
         if not holidays.year_listed(now_ist().year):
@@ -406,10 +560,12 @@ class Bot:
         self.note(f"{T.BOW} {T.APP} started in {T.mode_label(self.mode)} mode, watching {len(C.WATCHLIST)} stocks")
         if C.DRY_RUN is False and not self.live:
             self.note("DRY_RUN=false but CONFIRM_LIVE is not YES - staying in PAPER mode", logging.WARNING)
+        self.apply_paper_capital()
         waiting_login_logged = False
         while True:
             if os.path.exists(C.STOP_FILE):
                 self.note("STOP file found - Ayodhya ORB shutting down (open positions stay protected by exchange stops in live mode)")
+                self.journal_finish(now_ist(), "stopped")
                 os.remove(C.STOP_FILE)
                 break
             now = now_ist()
@@ -432,6 +588,7 @@ class Bot:
             if now >= at(C.MARKET_CLOSE, today) + dt.timedelta(minutes=5):
                 self.note(f"{T.name('square_off')}: market closed. Day P&L ₹{self.state.d['day_pnl']:.2f}, "
                           f"equity ₹{self.state.equity():.2f}")
+                self.journal_finish(now, "complete")
                 self.end_of_day(now)
                 self.write_status(now)
                 break

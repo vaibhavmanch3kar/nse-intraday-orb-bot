@@ -6,6 +6,57 @@ Every version is on the [Releases page](https://github.com/vaibhavmanch3kar/nse-
 with a ZIP you can download. To go back to an older version, download that version's ZIP.
 Your settings (Windows user environment variables) and your `data` folder are not part of the ZIP, so keep them.
 
+## v1.6.0 (16 Nov 2026): daily journal, weekly and monthly reports, daily logs and backups
+
+Recording only: the strategy and risk rules never read any of this, and a problem writing it is a warning in
+the log, never a reason to stop trading. Paper and live are kept separate. See the README section
+"Daily journal, weekly and monthly reports".
+
+- **Daily journal.** `data\journal\journal_paper.csv` has one row per trading day:
+  - equity at the start and end, net P&L and %, charges;
+  - trades, wins, total R, best and worst trade;
+  - the day's worst drawdown;
+  - signals taken and skipped, with the reasons;
+  - data outages and when the bot ran.
+
+  `data\journal\paper\<date>.json` holds that day in detail: every signal and what happened to it, outages,
+  bot starts, and equity every minute. The bot saves the day every round. After the close the day is marked
+  **complete**, a STOP file marks it **stopped HH:MM**, and a day the bot didn't finish shows as
+  **incomplete**. Days with trades but no journal are **rebuilt** from the trade log.
+- **Daily | Weekly | Monthly** card on the Trades page. It shows trades, win rate, net ₹ and return, charges,
+  average R, best and worst day, worst drawdown, skipped signals and outage minutes, with a **Download CSV**
+  button. It follows the Paper Account | Zerodha Account view.
+- **Saved reports:** `data\reports\paper_week_2026-W47.html` and `paper_month_2026-11.html`, written after
+  the close on the last trading day of each week or month, or at the next start if the bot missed the close.
+  Each file has a summary, equity at each close, a day-by-day table, the trades and the skip reasons. They
+  print cleanly to PDF, and the Trades page links to them. To make one any time, run
+  `reports.py --week 2026-W47` or `--month 2026-11`.
+- **One log file per day:** `data\logs\bot_<date>.log`. The old `data\bot.log` is split by date at the first
+  start, and the original is kept as `data\logs\bot_until_<date>.log`.
+- **Daily backup:** after the close, `data\` is zipped to `KiteConnect\backups\data\data_<date>.zip` and the
+  newest 30 are kept.
+  - **To protect against a disk failure,** set `BACKUP_DIR` to a OneDrive or USB folder. `BACKUP_KEEP`
+    changes how many backups are kept.
+  - **To back up by hand,** run `backup.py`.
+- Strategy, risk limits and backtest are unchanged: the same trades on the same data before and after each
+  change. 184 tests pass (28 new).
+
+## v1.5.0 (16 Nov 2026): choose the paper account's opening balance
+
+The paper account no longer has to start at ₹1,00,000. See the README section "Paper opening balance".
+
+- **Opening Balance · Paper Account** card on the Live page (Paper Account view): ₹10,000, ₹25,000, ₹50,000,
+  ₹1,00,000, ₹5,00,000 or a custom amount (whole rupees, ₹10,000 to ₹1 crore). Saving asks for confirmation;
+  the dashboard only accepts the change from its own page with that confirmation.
+- The choice is saved permanently (`data\paper_capital.json`) as **pending**, and the paper bot applies it at
+  its next start, before any trade. It waits while paper positions are open, and you can cancel it until then.
+- Cash moves by the difference between the old and new opening balance; past trades, realised P&L and charges
+  are never changed. Each change is recorded and shown on the account card; the Trades page's equity curve
+  uses the opening balance in force.
+- **Paper only:** live trading and the Zerodha account never read this setting. Backtest and advisor stay at
+  ₹1,00,000. Strategy and risk rules are unchanged; trade sizes follow equity as before.
+- 156 tests pass (14 new). Backtest unchanged (same 82 trades on the same data).
+
 ## v1.4.0 (16 Nov 2026): Paper Account | Zerodha Account dashboard views
 
 A **View: Paper Account | Zerodha Account** switch on the Live and Trades pages. It only changes what the
