@@ -130,6 +130,7 @@ class Bot:
         self.vix, self.vix_day = None, None
         self.holiday_checked = None
         self.bars = {}          # symbol -> latest closed 15-min bars (for the dashboard)
+        self.good_rows = {}     # symbol -> last evaluation row, shown again once data is back
 
     # -- helpers
     def note(self, msg, level=logging.INFO):
@@ -194,6 +195,10 @@ class Bot:
                 self.rows[sym] = {"reason": f"data error: {got}"}
                 continue
             bars, price, _ = got
+            if self.rows.get(sym, {}).get("reason", "").startswith("data error"):
+                # data is back: don't leave the old error on the dashboard until the next candle closes
+                self.rows[sym] = self.good_rows.get(sym) or {
+                    "reason": f"data OK again at {now:%H:%M} - waiting for the next candle"}
             closed = data_yahoo.closed_bars(bars, now, C.INTERVAL_MIN)
             if not closed:
                 continue
@@ -268,7 +273,7 @@ class Bot:
             ev = strategy.evaluate(closed, index_bars=index_bars.get(strategy.index_for(sym)))
             row = {k: ev[k] for k in ("or_high", "or_low", "close", "vwap", "vol_ratio", "reason")}
             row["bar"] = f"{last['t']:%H:%M}"
-            self.rows[sym] = row
+            self.rows[sym] = self.good_rows[sym] = row
             if ev["signal"]:
                 candidates.append((sym, closed, ev, row))
         # strongest breakout volume first, so scarce slots go to the best signals
