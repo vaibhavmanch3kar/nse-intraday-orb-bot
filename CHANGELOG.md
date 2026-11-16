@@ -6,6 +6,24 @@ Every version is on the [Releases page](https://github.com/vaibhavmanch3kar/nse-
 with a ZIP you can download. To go back to an older version, download that version's ZIP.
 Your settings (Windows user environment variables) and your `data` folder are not part of the ZIP, so keep them.
 
+## v1.3.1 (16 Nov 2026): internet drops and faster start-up
+
+Fixes after the first scheduled paper-trading day, when the PC's Wi-Fi dropped several times between
+9:20 and 9:45. Strategy, risk limits and backtest are unchanged (same 82 trades on the same data).
+
+- **Dashboard rows recover after an internet drop.** A stock's row used to keep showing "data error" until
+  the next 15-minute candle closed, even after prices were loading again, so a working bot looked stuck.
+  Now it shows the last result again, or "data OK again at HH:MM - waiting for the next candle".
+- **Outages are written to `bot.log`.** One warning when price data starts failing, with the reason in plain
+  words (for example "can't look up the data server's address (internet or DNS down?)"), and one line when all
+  stocks are back, with the start time and how long it lasted. Both also show in the dashboard's events.
+- **Faster start:** the "is the bot already running?" check in `run_bot.ps1` used a Windows process query
+  that took 1.5 to 3 minutes. The bot now holds a Windows mutex while it runs, checked in under a second, and a
+  second copy refuses to start. The scheduled task now runs at normal priority (Task Scheduler's default is
+  "below normal"). Start-up went from 2.5-6 minutes to 17 seconds.
+  - **To get the normal priority**, run `register_task.ps1` once more (it updates the existing task).
+- 123 tests pass (7 new).
+
 ## v1.3.0 (16 Nov 2026): learning advisor, Phases 1-3 (Guru Vashishtha)
 
 The advisor only reports. It never changes a setting, and it can't trade. Later phases (proposals tested
