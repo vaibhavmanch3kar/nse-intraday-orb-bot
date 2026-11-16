@@ -738,7 +738,7 @@ def journal_card(mode, view, period):
                 f"<td title='{tip}'>{sig_txt}</td>"
                 f"<td>{_maybe(journal._opt(r.get('outage_min')), '{:.0f} min')}</td>"
                 f"<td>{html.escape(r.get('bot_start') or '?')}–{html.escape(r.get('bot_stop') or '?')}</td>"
-                f"<td class='muted' style='white-space:normal'>{html.escape(r.get('note') or '')}</td></tr>")
+                f"<td class='muted' style='white-space:normal;min-width:150px'>{html.escape(r.get('note') or '')}</td></tr>")
         table = ("<table><tr><th>Day</th><th>Status</th><th>Trades</th><th>Won</th><th>Net</th><th>Return</th>"
                  "<th>Charges</th><th>Avg R</th><th>Worst drawdown</th><th>Signals</th><th>Data outages</th>"
                  f"<th>Bot ran</th><th>Note</th></tr>{''.join(body)}</table>")
@@ -753,7 +753,7 @@ def journal_card(mode, view, period):
                 f"<td>{s['return_pct']:+.2f}%</td><td>₹{s['charges']:,.0f}</td>"
                 f"<td>{_maybe(s['avg_r'], '{:+.2f}R')}</td>"
                 f"<td>{_money(s['best_day'])} / {_money(s['worst_day'])}</td>"
-                f"<td>{s['max_drawdown_pct']:.2f}%{'' if s['drawdown_known'] else '*'}</td>"
+                f"<td>{journal.drawdown_text(s)}</td>"
                 f"<td title='{html.escape(s['skip_reasons'])}'>{_maybe(s['skipped'], '{:.0f}')}</td>"
                 f"<td>{_maybe(s['outage_min'], '{:.0f} min')}</td></tr>")
         table = ("<table><tr><th>" + ("Week" if period == "week" else "Month") + "</th><th>Days</th><th>Trades</th>"

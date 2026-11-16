@@ -64,6 +64,9 @@ def test_rebuilt_days_show_unknowns():
                  outage_min=None, signals=None, skip_reasons="")]
     w = journal.summarise(rows, "week")[0]
     assert w["skipped"] is None and w["outage_min"] is None and not w["drawdown_known"]
+    assert journal.drawdown_text(w) == "–"
+    rows.append(dict(row("2026-11-17", 100129.51, -1000.0), max_drawdown_pct=None))
+    assert journal.drawdown_text(journal.summarise(rows, "week")[0]) == "1.00%*"     # close-to-close is known
 
 
 @pytest.fixture

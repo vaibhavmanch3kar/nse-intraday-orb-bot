@@ -177,7 +177,7 @@ def build(mode, period, key, today=None):
             f"<div>Average R<b>{_opt(s['avg_r'], '{:+.2f}R')}</b></div>"
             f"<div>Charges<b>{_inr(s['charges'])}</b></div>"
             f"<div>Best / worst day<b>{_inr(s['best_day'], True)} / {_inr(s['worst_day'], True)}</b></div>"
-            f"<div>Worst drawdown<b>{s['max_drawdown_pct']:.2f}%{'' if s['drawdown_known'] else '*'}</b></div>"
+            f"<div>Worst drawdown<b>{journal.drawdown_text(s)}</b></div>"
             f"<div>Skipped signals<b>{_opt(s['skipped'], '{:.0f}')}</b></div>"
             f"<div>Data outages<b>{_opt(s['outage_min'], '{:.0f} min')}</b></div></div>")
 

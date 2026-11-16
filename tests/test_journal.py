@@ -102,7 +102,7 @@ def test_past_running_day_shows_incomplete_and_missing_days_are_rebuilt():
     assert list(rows) == ["2026-11-16", "2026-11-17", "2026-11-18"]
     r16 = rows["2026-11-16"]
     assert r16["status"] == "rebuilt" and r16["start_equity"] == 100000.0 and round(r16["net_pnl"], 2) == 129.51
-    assert r16["bot_start"] == "09:06" and r16["bot_stop"] == "09:30" and "2 bot starts" in r16["note"]
+    assert r16["note"].startswith("from the trade log only") and r16["bot_start"] == "09:06" and r16["bot_stop"] == "09:54" and "2 bot starts" in r16["note"]
     assert r16["signals"] is None and r16["max_drawdown_pct"] is None           # not recoverable
     assert rows["2026-11-17"]["status"] == "incomplete" and "last seen 09:40" in rows["2026-11-17"]["note"]
     assert round(rows["2026-11-18"]["start_equity"], 2) == 100129.51

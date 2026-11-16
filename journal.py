@@ -312,7 +312,6 @@ def rebuild_day(mode, day, all_trades=None):
     end = start + ts["realised"]
     lines = _log_lines(day) if mode in ("paper", "live") else []
     starts = [ln[11:16] for ln in lines if " started in " in ln and mode.upper() in ln]
-    stops = [ln[11:16] for ln in lines if "STOP file found" in ln or "market closed" in ln]
     outages = sum(1 for ln in lines if "price data problem" in ln)
     return {"date": day, "status": "rebuilt", "opening_balance": opening if mode == "paper" else None,
             "start_equity": start, "end_equity": end, "net_pnl": end - start,
@@ -321,8 +320,8 @@ def rebuild_day(mode, day, all_trades=None):
             "total_r": ts["total_r"], "best_trade": ts["best_trade"], "worst_trade": ts["worst_trade"],
             "max_drawdown_inr": None, "max_drawdown_pct": None, "signals": None, "taken": ts["trades"],
             "skipped": None, "skip_reasons": "", "outages": outages or None, "outage_min": None,
-            "bot_start": starts[0] if starts else "", "bot_stop": stops[-1] if stops else "",
-            "note": "rebuilt from the trade log" + (f"; {len(starts)} bot starts" if len(starts) > 1 else "")}
+            "bot_start": starts[0] if starts else "", "bot_stop": lines[-1][11:16] if lines else "",   # last sign of life
+            "note": "from the trade log only" + (f"; {len(starts)} bot starts" if len(starts) > 1 else "")}
 
 
 def days(mode, today=None):
@@ -420,6 +419,13 @@ def summarise(rows, period):
             "skip_reasons": _merge_reasons(r.get("skip_reasons") for r in g),
         })
     return out
+
+
+def drawdown_text(s):
+    """'0.60%', '0.40%*' when some days are unknown, '–' when nothing is known."""
+    if not s["drawdown_known"] and not s["max_drawdown_pct"]:
+        return "–"
+    return f"{s['max_drawdown_pct']:.2f}%{'' if s['drawdown_known'] else '*'}"
 
 
 def _merge_reasons(texts):
