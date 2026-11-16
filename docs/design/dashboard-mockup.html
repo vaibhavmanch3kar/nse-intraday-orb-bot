@@ -1,0 +1,422 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ayodhya ORB · dashboard redesign mockup</title>
+<style>
+  /* the mockup viewer (not part of the design) */
+  body{margin:0;font:14px system-ui,"Segoe UI",sans-serif;background:#0e0912;color:#eee}
+  .bar{position:sticky;top:0;z-index:5;display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 16px;background:#1a121f;border-bottom:1px solid #33263a}
+  .bar b{color:#fcd34d;margin-right:8px}
+  .bar button{background:#2a1d31;color:#eee;border:1px solid #4a3352;border-radius:8px;padding:7px 12px;cursor:pointer;font:inherit}
+  .bar button.on{background:#f59e0b;color:#241000;border-color:#fcd34d;font-weight:700}
+  .bar .note{color:#b9a7c0;font-size:12px;margin-left:auto}
+  .stage{display:flex;flex-wrap:wrap;gap:24px;padding:20px 16px;align-items:flex-start;justify-content:center}
+  .frame{display:flex;flex-direction:column;gap:6px;align-items:center}
+  .frame span{color:#b9a7c0;font-size:12px}
+  .desk{width:min(1280px,calc(100vw - 32px));overflow:hidden;border-radius:10px;border:1px solid #33263a}
+  .desk iframe{width:1280px;height:860px;border:0;transform-origin:0 0;display:block}
+  .phone{width:390px;height:844px;border:10px solid #2a2230;border-radius:38px;overflow:hidden;box-shadow:0 10px 40px #0008;flex:none}
+  .phone iframe{width:390px;height:824px;border:0;display:block}
+</style>
+</head>
+<body>
+<div class="bar">
+  <b>🏹 Ayodhya ORB · redesign mockup</b>
+  <button data-show="both" class="on">Desktop + phone</button>
+  <button data-show="desk">Desktop</button>
+  <button data-show="phone">Phone</button>
+  <span style="width:12px"></span>
+  <button data-theme="dark" class="on">Dark</button>
+  <button data-theme="light">Light</button>
+  <span class="note">Sample figures only · nothing here talks to the bot or Zerodha</span>
+</div>
+<div class="stage">
+  <div class="frame" id="deskFrame"><div class="desk" id="desk"><iframe id="deskIf" title="Desktop mockup"></iframe></div><span>Desktop · 1280 px</span></div>
+  <div class="frame" id="phoneFrame"><div class="phone"><iframe id="phoneIf" title="Phone mockup"></iframe></div><span>Phone · 390 px</span></div>
+</div>
+
+<template id="app">
+<style>
+:root{
+  --bg:#130a18; --surface:#1d1224; --surface-2:#271a30; --border:#36263f; --text:#f5ead9; --muted:#b3a191;
+  --accent:#f59e0b; --accent-ink:#241000; --gold:#fcd34d; --up:#34d399; --dn:#f87171; --warn:#fbbf24; --info:#c4b5fd;
+  --up-bg:rgba(52,211,153,.12); --dn-bg:rgba(248,113,113,.12); --warn-bg:rgba(251,191,36,.12);
+  --live:#ef4444; --shadow:0 1px 0 rgba(255,255,255,.03) inset, 0 8px 24px rgba(0,0,0,.25);
+  --radius:12px; --font:system-ui,"Segoe UI",Roboto,sans-serif; --serif:Georgia,"Palatino Linotype",serif;
+}
+[data-theme=light]{
+  --bg:#f7f2ea; --surface:#ffffff; --surface-2:#f8f1e6; --border:#e6dac8; --text:#2a1f17; --muted:#6c5e50;
+  --accent:#c2410c; --accent-ink:#fff; --gold:#a16207; --up:#047857; --dn:#b91c1c; --warn:#a16207; --info:#6d28d9;
+  --up-bg:#e7f6ef; --dn-bg:#fdecec; --warn-bg:#fdf3dc; --live:#b91c1c; --shadow:0 1px 2px rgba(60,40,20,.06),0 6px 18px rgba(60,40,20,.06);
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 var(--font)}
+.num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
+.up{color:var(--up)} .dn{color:var(--dn)} .muted{color:var(--muted)} .warn{color:var(--warn)}
+a{color:var(--accent)}
+button{font:inherit}
+
+/* header */
+.top{position:sticky;top:0;z-index:4;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--border)}
+.top-in{max-width:1440px;margin:0 auto;display:flex;align-items:center;gap:18px;padding:10px 24px}
+.brand{display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--text)}
+.brand .logo{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;background:linear-gradient(135deg,var(--gold),var(--accent));font-size:18px}
+.brand b{font:600 18px var(--serif);color:var(--gold);letter-spacing:.3px;display:block;line-height:1.1}
+.brand small{color:var(--muted);font-size:11px}
+.tabs{display:flex;gap:4px}
+.tabs a{display:flex;flex-direction:column;padding:6px 12px;border-radius:9px;color:var(--muted);text-decoration:none;line-height:1.15}
+.tabs a b{color:var(--text);font-weight:600;font-size:13px} .tabs a small{font-size:11px}
+.tabs a.on{background:var(--surface-2);box-shadow:inset 0 -2px 0 var(--accent)} .tabs a.on b{color:var(--gold)}
+.right{margin-left:auto;display:flex;align-items:center;gap:10px}
+.seg{display:inline-flex;background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:3px}
+.seg button{border:0;background:none;color:var(--muted);padding:6px 12px;border-radius:7px;cursor:pointer;font-weight:600;font-size:13px;min-height:32px}
+.seg button.on.paper{background:linear-gradient(180deg,var(--gold),var(--accent));color:var(--accent-ink)}
+.seg button.on.zerodha{background:var(--live);color:#fff}
+.icon-btn{width:36px;height:36px;border-radius:9px;border:1px solid var(--border);background:var(--surface-2);color:var(--text);cursor:pointer;font-size:16px}
+.ribbon{height:3px;background:repeating-linear-gradient(90deg,var(--accent) 0 14px,#b91c1c 14px 28px,var(--gold) 28px 42px);opacity:.85}
+
+/* status strip */
+.status{max-width:1440px;margin:0 auto;padding:12px 24px 0;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:999px;background:var(--surface);border:1px solid var(--border);font-size:12.5px;white-space:nowrap}
+.chip i{width:8px;height:8px;border-radius:50%;background:var(--muted);display:inline-block}
+.chip.ok i{background:var(--up);box-shadow:0 0 0 3px var(--up-bg)} .chip.bad i{background:var(--dn)} .chip.amber i{background:var(--warn)}
+.chip.mode{border-color:var(--gold);color:var(--gold);font-weight:700;letter-spacing:.3px}
+.chip .pulse{animation:pulse 2s infinite}
+@keyframes pulse{50%{opacity:.35}}
+@media (prefers-reduced-motion:reduce){.chip .pulse{animation:none}}
+.updated{margin-left:auto;color:var(--muted);font-size:12px}
+
+/* view banner */
+.viewbar{max-width:1440px;margin:10px auto 0;padding:0 24px}
+.viewbar div{border-radius:10px;padding:8px 14px;font-weight:700;font-size:12.5px;letter-spacing:.6px;display:flex;gap:10px;align-items:center}
+.paper .viewbar div{background:var(--warn-bg);color:var(--gold);border:1px solid color-mix(in srgb,var(--gold) 45%,transparent)}
+.zerodha .viewbar div{background:var(--dn-bg);color:var(--dn);border:2px solid var(--live)}
+
+/* layout */
+.wrap{max-width:1440px;margin:0 auto;padding:14px 24px 32px}
+.kpis{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px}
+.kpi{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;box-shadow:var(--shadow);min-width:0}
+.kpi label{display:block;color:var(--muted);font-size:12px}
+.kpi .v{font-size:22px;font-weight:650;margin-top:2px;white-space:nowrap}
+.kpi .s{font-size:12px;margin-top:2px}
+.meter{height:6px;border-radius:99px;background:var(--surface-2);margin-top:8px;overflow:hidden}
+.meter span{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,var(--up),var(--warn) 70%,var(--dn))}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:16px;margin-top:16px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);margin-bottom:16px}
+.card > h2,.card summary{display:flex;align-items:center;gap:8px;margin:0;padding:12px 16px;font:600 14px var(--font);border-bottom:1px solid var(--border)}
+.card h2 .theme,.card summary .theme{font-family:var(--serif);color:var(--gold);font-weight:600}
+.card h2 .tag,.card summary .tag{margin-left:auto}
+.card .body{padding:12px 16px}
+.tag{font-size:11.5px;padding:2px 8px;border-radius:99px;background:var(--surface-2);color:var(--muted);border:1px solid var(--border);font-weight:600}
+.tag.up{color:var(--up);background:var(--up-bg);border-color:transparent} .tag.dn{color:var(--dn);background:var(--dn-bg);border-color:transparent}
+.tag.amber{color:var(--warn);background:var(--warn-bg);border-color:transparent}
+.paper .acct-frame{outline:2px solid color-mix(in srgb,var(--gold) 55%,transparent);outline-offset:-1px}
+.zerodha .acct-frame{outline:2px solid var(--live);outline-offset:-1px}
+
+/* chart */
+.chart-wrap{position:relative;padding:8px 8px 4px}
+.chart-wrap svg{width:100%;height:220px;display:block;touch-action:none}
+.ranges{display:flex;gap:4px;margin-left:auto}
+.ranges button{border:1px solid var(--border);background:var(--surface-2);color:var(--muted);border-radius:7px;padding:3px 9px;font-size:12px;cursor:pointer}
+.ranges button.on{color:var(--text);border-color:var(--accent)}
+.tip{position:absolute;pointer-events:none;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:6px 9px;font-size:12px;box-shadow:var(--shadow);display:none;white-space:nowrap}
+
+/* positions */
+.pos{display:grid;grid-template-columns:1.1fr 1fr 1fr 1.6fr .9fr;gap:12px;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border)}
+.pos:last-child{border-bottom:0}
+.pos .sym b{font-size:15px} .side{font-size:11px;font-weight:700;padding:1px 6px;border-radius:5px;margin-left:6px}
+.side.long{background:var(--up-bg);color:var(--up)} .side.short{background:var(--dn-bg);color:var(--dn)}
+.rail{position:relative;height:8px;border-radius:99px;background:linear-gradient(90deg,var(--dn-bg),var(--surface-2) 40%,var(--up-bg));margin:14px 0 4px}
+.rail .dot{position:absolute;top:50%;width:14px;height:14px;border-radius:50%;background:var(--text);border:3px solid var(--surface);transform:translate(-50%,-50%);box-shadow:0 0 0 1px var(--border)}
+.rail .entry{position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--muted)}
+.rail-l{display:flex;justify-content:space-between;font-size:11px;color:var(--muted)}
+.lbl{font-size:11.5px;color:var(--muted);display:block}
+
+/* watchlist */
+table{width:100%;border-collapse:collapse}
+th{font-size:12px;color:var(--muted);font-weight:600;text-align:left;padding:8px 16px;border-bottom:1px solid var(--border)}
+td{padding:8px 16px;border-bottom:1px solid var(--border);white-space:nowrap}
+tr:last-child td{border-bottom:0}
+td.r,th.r{text-align:right}
+.st{font-size:12px;font-weight:600;padding:2px 8px;border-radius:99px;background:var(--surface-2);color:var(--muted)}
+.st.sig{background:var(--warn-bg);color:var(--warn)} .st.in{color:var(--info)}
+
+/* side column */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:40px;padding:8px 14px;border-radius:9px;border:0;cursor:pointer;font-weight:650;text-decoration:none}
+.btn.primary{background:linear-gradient(180deg,var(--gold),var(--accent));color:var(--accent-ink)}
+.btn.ghost{background:var(--surface-2);color:var(--text);border:1px solid var(--border)}
+.btn.danger{background:var(--dn-bg);color:var(--dn);border:1px solid color-mix(in srgb,var(--dn) 40%,transparent)}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.list{list-style:none;margin:0;padding:0}
+.list li{padding:8px 0;border-bottom:1px dashed var(--border);font-size:13px;display:flex;gap:8px}
+.list li:last-child{border-bottom:0}
+.list time{color:var(--muted);font-size:12px;min-width:58px}
+details.card summary{cursor:pointer;list-style:none}
+details.card summary::-webkit-details-marker{display:none}
+details.card summary::after{content:"▾";margin-left:8px;color:var(--muted)}
+details.card[open] summary::after{content:"▴"}
+details.card:not([open]) summary{border-bottom:0}
+.small{font-size:12px}
+.zerodha-only{display:none} .zerodha .zerodha-only{display:block} .zerodha .paper-only{display:none}
+.login-needed{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+
+/* bottom nav (phone) */
+.bottom{display:none}
+
+/* ---------- phone ---------- */
+@media (max-width:760px){
+  .top-in{padding:8px 14px;gap:10px}
+  .brand small{display:none}
+  .tabs{display:none}
+  .right .seg{display:none}
+  .status{padding:10px 14px 0;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
+  .updated{display:none}
+  .phone-seg{display:flex !important;padding:10px 14px 0}
+  .phone-seg .seg{width:100%} .phone-seg .seg button{flex:1;min-height:40px}
+  .viewbar{padding:0 14px}
+  .wrap{padding:12px 14px 96px}
+  .kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  .kpi .v{font-size:19px}
+  .grid{grid-template-columns:1fr;gap:0;margin-top:12px}
+  .chart-wrap svg{height:180px}
+  .pos{grid-template-columns:1fr 1fr;row-gap:6px}
+  .pos .railbox{grid-column:1/-1}
+  .wl .hide-s{display:none}
+  td,th{padding:8px 12px}
+  .bottom{display:grid;grid-template-columns:repeat(4,1fr);position:fixed;left:0;right:0;bottom:0;z-index:6;
+    background:color-mix(in srgb,var(--surface) 94%,transparent);backdrop-filter:blur(8px);border-top:1px solid var(--border);padding:6px 4px calc(6px + env(safe-area-inset-bottom))}
+  .bottom a{display:flex;flex-direction:column;align-items:center;gap:2px;text-decoration:none;color:var(--muted);font-size:11px;min-height:48px;justify-content:center;border-radius:10px}
+  .bottom a span{font-size:19px;line-height:1}
+  .bottom a.on{color:var(--gold);background:var(--surface-2)}
+}
+.phone-seg{display:none}
+</style>
+<header class="top">
+  <div class="top-in">
+    <a class="brand" href="#" aria-label="Ayodhya ORB home"><span class="logo">🏹</span><span><b>Ayodhya ORB</b><small>॥ अयोध्या ॥ · NSE intraday ORB</small></span></a>
+    <nav class="tabs" aria-label="Pages">
+      <a class="on" href="#"><b>Live</b><small>Ayodhya Darbar</small></a>
+      <a href="#"><b>Trades</b><small>Rajkosh</small></a>
+      <a href="#"><b>Review</b><small>Chitrakoot</small></a>
+      <a href="#"><b>Scanner</b><small>Hanuman's Watch</small></a>
+    </nav>
+    <div class="right">
+      <div class="seg" role="group" aria-label="Account view"><button class="paper on" data-view="paper">Paper Account</button><button class="zerodha" data-view="zerodha">Zerodha Account</button></div>
+      <button class="icon-btn" id="themeBtn" title="Light / dark theme" aria-label="Switch light or dark theme">☾</button>
+    </div>
+  </div>
+  <div class="ribbon"></div>
+</header>
+
+<div class="phone-seg"><div class="seg" role="group" aria-label="Account view"><button class="paper on" data-view="paper">Paper Account</button><button class="zerodha" data-view="zerodha">Zerodha Account</button></div></div>
+
+<div class="status" aria-label="Status">
+  <span class="chip ok"><i class="pulse"></i>Market open · 11:32</span>
+  <span class="chip ok"><i></i>Bot running</span>
+  <span class="chip mode">Bot trading: Abhyas · PAPER</span>
+  <span class="chip amber"><i></i>Yahoo data · 14 min behind</span>
+  <span class="chip"><i></i>Zerodha: not logged in</span>
+  <span class="updated" id="upd">Updated 11:32:10 · refreshes every 10 s</span>
+</div>
+
+<div class="viewbar"><div><span class="paper-only">PAPER ACCOUNT · virtual money</span><span class="zerodha-only">LIVE · REAL ZERODHA ACCOUNT · read-only (this view can't trade)</span></div></div>
+
+<main class="wrap">
+  <section class="kpis acct-frame" style="border-radius:var(--radius)" aria-label="Account">
+    <div class="kpi"><label>Total equity</label><div class="v num" id="eq">₹1,00,412.30</div><div class="s up num">▲ ₹412.30 since start</div></div>
+    <div class="kpi"><label>Available funds</label><div class="v num">₹97,108.80</div><div class="s muted num">₹3,303.50 in 1 position</div></div>
+    <div class="kpi"><label>Today's P&amp;L</label><div class="v num up" id="day">▲ ₹282.79</div><div class="s muted num">booked ₹129.51 · open ₹153.28</div></div>
+    <div class="kpi"><label>Open P&amp;L</label><div class="v num up" id="open">▲ ₹153.28</div><div class="s up num">+0.92R</div></div>
+    <div class="kpi"><label>Trades today</label><div class="v num">2 <span class="muted" style="font-size:14px">of 4</span></div><div class="meter" aria-label="2 of 4 trades used"><span style="width:50%"></span></div></div>
+    <div class="kpi"><label>Maryada · daily loss limit</label><div class="v num">0% <span class="muted" style="font-size:14px">of 2%</span></div><div class="meter" aria-label="no loss today"><span style="width:2%"></span></div></div>
+  </section>
+
+  <div class="grid">
+    <div>
+      <section class="card">
+        <h2>Today's equity <span class="ranges" role="group" aria-label="Range"><button class="on">Today</button><button>1W</button><button>1M</button><button>All</button></span></h2>
+        <div class="chart-wrap" id="chartWrap"><svg id="chart" viewBox="0 0 800 220" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Equity during the day"></svg><div class="tip" id="tip"></div></div>
+      </section>
+
+      <section class="card">
+        <h2>Open positions <span class="tag">held by the bot · Abhyas</span></h2>
+        <div class="pos">
+          <div class="sym"><b>TCS</b><span class="side long">LONG</span><span class="lbl num">x 1 · in trade 42 min</span></div>
+          <div><span class="lbl">Entry → price</span><span class="num">3,412.50 → <b>3,428.10</b></span></div>
+          <div><span class="lbl">Open P&amp;L</span><b class="num up">▲ ₹153.28 · +0.92R</b></div>
+          <div class="railbox"><span class="lbl">Lakshman Rekha · stop → Lakshya · target</span>
+            <div class="rail" aria-label="price between stop and target"><span class="entry" style="left:33%"></span><span class="dot" style="left:64%"></span></div>
+            <div class="rail-l num"><span class="dn">3,395.60</span><span>entry 3,412.50</span><span class="up">3,446.30</span></div></div>
+          <div><span class="lbl">Muhurat · time stop</span><span class="num">check 12:30</span><span class="lbl">Anusaran trail 3,401.20</span></div>
+        </div>
+      </section>
+
+      <section class="card wl">
+        <h2>Sena · Watchlist <span class="tag">last closed 15-min bar · 11:15</span></h2>
+        <div style="overflow-x:auto"><table>
+          <tr><th>Stock</th><th class="r">Price</th><th class="r hide-s">Opening range</th><th class="r hide-s">VWAP</th><th class="r hide-s">Vol ×</th><th>Status</th></tr>
+          <tr><td><b>TCS</b></td><td class="r num">3,428.10</td><td class="r num hide-s">3,395.6 – 3,410.0</td><td class="r num hide-s">3,409.8</td><td class="r num hide-s">2.4</td><td><span class="st sig">in trade · LONG</span></td></tr>
+          <tr><td><b>ITC</b></td><td class="r num">294.55</td><td class="r num hide-s">284.00 – 286.75</td><td class="r num hide-s">293.62</td><td class="r num hide-s">4.7</td><td><span class="st">traded today</span></td></tr>
+          <tr><td><b>BHARTIARTL</b></td><td class="r num">2,147.50</td><td class="r num hide-s">2,123.0 – 2,155.7</td><td class="r num hide-s">2,153.7</td><td class="r num hide-s">1.3</td><td><span class="st in">inside range</span></td></tr>
+          <tr><td><b>HDFCBANK</b></td><td class="r num">813.05</td><td class="r num hide-s">802.45 – 808.60</td><td class="r num hide-s">812.03</td><td class="r num hide-s">0.6</td><td><span class="st">no fresh breakout</span></td></tr>
+          <tr><td><b>KOTAKBANK</b></td><td class="r num">492.90</td><td class="r num hide-s">490.60 – 494.45</td><td class="r num hide-s">493.98</td><td class="r num hide-s">1.1</td><td><span class="st in">inside range</span></td></tr>
+          <tr><td><b>SBIN</b></td><td class="r num">1,089.40</td><td class="r num hide-s">1,083.9 – 1,093.5</td><td class="r num hide-s">1,091.5</td><td class="r num hide-s">0.9</td><td><span class="st in">inside range</span></td></tr>
+        </table></div>
+        <div class="body small muted">+ 6 more · tap a stock for its chart</div>
+      </section>
+    </div>
+
+    <aside>
+      <section class="card">
+        <h2><span class="theme">Aadesh</span> · Controls</h2>
+        <div class="body"><div class="row"><button class="btn ghost">⏸ Pause new entries</button><button class="btn danger">■ Stop bot</button></div>
+        <p class="small muted" style="margin:8px 0 0">Both ask before acting. Open positions keep their stop.</p></div>
+      </section>
+
+      <section class="card paper-only">
+        <h2>Opening balance <span class="tag amber">paper only</span></h2>
+        <div class="body"><div class="num" style="font-size:18px;font-weight:650">₹1,00,000</div>
+        <p class="small muted" style="margin:4px 0 10px">Changes apply at the bot's next start. Never touches Zerodha.</p>
+        <button class="btn ghost">Change…</button></div>
+      </section>
+
+      <section class="card zerodha-only">
+        <h2><span class="theme">Setu</span> · Zerodha login</h2>
+        <div class="body login-needed"><span class="warn">Log in to see your real account (read-only).</span><button class="btn primary">Log in to Zerodha</button></div>
+      </section>
+
+      <details class="card" open>
+        <summary><span class="theme">Sandesh</span> · Recent events</summary>
+        <div class="body"><ul class="list">
+          <li><time>11:30:31</time><span>🏹 ENTER LONG TCS x1 @ 3,412.50 · stop 3,395.60</span></li>
+          <li><time>10:45:13</time><span>🏆 EXIT LONG ITC x62 @ 294.30 (Muhurat · time stop) <b class="up">▲ ₹129.51</b></span></li>
+          <li><time>09:58:30</time><span class="warn">price data back: all 12 stocks OK (about 8 min)</span></li>
+          <li><time>09:54:24</time><span>Ayodhya ORB started in Abhyas · PAPER</span></li>
+        </ul></div>
+      </details>
+
+      <details class="card">
+        <summary><span class="theme">Panchang</span> · NSE calendar <span class="tag">trading day</span></summary>
+        <div class="body small">Next trading day Tue 17 Nov<br><span class="muted">Holidays: Tue 24 Nov Guru Nanak Jayanti · Fri 25 Dec Christmas</span></div>
+      </details>
+
+      <details class="card">
+        <summary>Data &amp; limits</summary>
+        <div class="body small"><div>Loss streak <b>0</b> <span class="muted">· Vanvas cool-down after 3</span></div><div>Price data <b>Yahoo</b> <span class="muted">· free, may lag</span></div><div>Risk per trade <b>0.5%</b> · max 3 positions</div></div>
+      </details>
+    </aside>
+  </div>
+</main>
+
+<nav class="bottom" aria-label="Pages">
+  <a class="on" href="#"><span>🏹</span>Live</a>
+  <a href="#"><span>📜</span>Trades</a>
+  <a href="#"><span>🪔</span>Review</a>
+  <a href="#"><span>🚩</span>Scanner</a>
+</nav>
+
+<script>
+(function(){
+  // sample intraday equity (every 5 min from 09:15)
+  var pts=[], e=100000, t=9*60+15;
+  var shape=[0,0,0,-20,-35,-10,25,60,95,110,129.5,129.5,129.5,140,120,135,160,190,210,240,265,282.8];
+  shape.forEach(function(d,i){pts.push([t+i*5, e+d]);});
+  var svg=document.getElementById('chart'), tip=document.getElementById('tip'), wrap=document.getElementById('chartWrap');
+  var W=800,H=220,L=64,R=12,T=14,B=26;
+  function css(v){return getComputedStyle(document.body).getPropertyValue(v).trim();}
+  function draw(){
+    // draw at the real on-screen size, so labels stay 12 px on a phone and lines never stretch
+    W=Math.round(svg.clientWidth)||800; H=Math.round(svg.clientHeight)||220; L=W<500?58:66;
+    svg.setAttribute('viewBox','0 0 '+W+' '+H);
+    var lo=Math.min.apply(null,pts.map(p=>p[1])), hi=Math.max.apply(null,pts.map(p=>p[1]));
+    var pad=(hi-lo)*.15||10; lo-=pad; hi+=pad;
+    var x=function(i){return L+i*(W-L-R)/(pts.length-1)}, y=function(v){return T+(hi-v)/(hi-lo)*(H-T-B)};
+    var up=pts[pts.length-1][1]>=pts[0][1], col=up?css('--up'):css('--dn');
+    var line=pts.map((p,i)=>x(i).toFixed(1)+','+y(p[1]).toFixed(1)).join(' ');
+    var area='M'+x(0)+','+y(pts[0][1])+' L'+line.split(' ').join(' L')+' L'+x(pts.length-1)+','+(H-B)+' L'+x(0)+','+(H-B)+'Z';
+    var g='';
+    [hi-pad, (hi+lo)/2, lo+pad].forEach(function(v){g+='<line x1="'+L+'" x2="'+(W-R)+'" y1="'+y(v)+'" y2="'+y(v)+'" stroke="'+css('--border')+'"/>'+
+      '<text x="'+(L-8)+'" y="'+(y(v)+4)+'" fill="'+css('--muted')+'" font-size="12" text-anchor="end">₹'+Math.round(v).toLocaleString('en-IN')+'</text>';});
+    g+='<line x1="'+L+'" x2="'+(W-R)+'" y1="'+y(e)+'" y2="'+y(e)+'" stroke="'+css('--muted')+'" stroke-dasharray="4 4"/>';
+    ['09:15','10:15','11:15'].forEach(function(s,k){var i=k*12; if(i<pts.length) g+='<text x="'+x(i)+'" y="'+(H-6)+'" fill="'+css('--muted')+'" font-size="12" text-anchor="middle">'+s+'</text>';});
+    g+='<defs><linearGradient id="fill" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="'+col+'" stop-opacity=".28"/><stop offset="1" stop-color="'+col+'" stop-opacity="0"/></linearGradient></defs>';
+    g+='<path d="'+area+'" fill="url(#fill)"/><polyline points="'+line+'" fill="none" stroke="'+col+'" stroke-width="2.2" stroke-linejoin="round"/>';
+    g+='<line id="cross" y1="'+T+'" y2="'+(H-B)+'" stroke="'+css('--muted')+'" stroke-dasharray="3 3" visibility="hidden"/><circle id="cdot" r="5" fill="'+col+'" stroke="'+css('--surface')+'" stroke-width="2" visibility="hidden"/>';
+    svg.innerHTML=g;
+    function show(clientX){
+      var r=svg.getBoundingClientRect(), sx=(clientX-r.left)/r.width*W;
+      var i=Math.max(0,Math.min(pts.length-1,Math.round((sx-L)/((W-L-R)/(pts.length-1)))));
+      var p=pts[i], cx=x(i), cy=y(p[1]);
+      var c=svg.querySelector('#cross'), d=svg.querySelector('#cdot');
+      c.setAttribute('x1',cx);c.setAttribute('x2',cx);c.setAttribute('visibility','visible');
+      d.setAttribute('cx',cx);d.setAttribute('cy',cy);d.setAttribute('visibility','visible');
+      var hh=Math.floor(p[0]/60), mm=('0'+p[0]%60).slice(-2), diff=p[1]-e;
+      tip.innerHTML='<b>'+hh+':'+mm+'</b> · ₹'+p[1].toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})+
+        ' <span style="color:'+(diff>=0?css('--up'):css('--dn'))+'">'+(diff>=0?'▲ +':'▼ ')+'₹'+diff.toFixed(2)+'</span>';
+      tip.style.display='block';
+      var px=cx/W*r.width, left=Math.min(Math.max(px-60,4),r.width-170);
+      tip.style.left=left+'px'; tip.style.top='6px';
+    }
+    function hide(){tip.style.display='none';svg.querySelector('#cross').setAttribute('visibility','hidden');svg.querySelector('#cdot').setAttribute('visibility','hidden');}
+    svg.onpointermove=function(ev){show(ev.clientX)}; svg.onpointerdown=function(ev){show(ev.clientX)}; svg.onpointerleave=hide;
+  }
+  draw();
+  window.addEventListener('resize',draw);
+
+  // theme
+  var btn=document.getElementById('themeBtn');
+  function setTheme(t){document.documentElement.setAttribute('data-theme',t);btn.textContent=t==='light'?'☾':'☀';draw();}
+  btn.onclick=function(){setTheme(document.documentElement.getAttribute('data-theme')==='light'?'dark':'light');
+    try{parent.postMessage({theme:document.documentElement.getAttribute('data-theme')},'*')}catch(e){}};
+  window.addEventListener('message',function(ev){if(ev.data&&ev.data.setTheme)setTheme(ev.data.setTheme);});
+  setTheme(document.documentElement.getAttribute('data-theme')||'dark');
+
+  // Paper | Zerodha view (only changes what you see; asks before showing the real account)
+  document.querySelectorAll('[data-view]').forEach(function(b){b.onclick=function(){
+    var v=b.getAttribute('data-view');
+    if(v==='zerodha'&&!document.body.classList.contains('zerodha')&&!confirm('Show your REAL Zerodha account (read-only)? This only changes what you see; the bot keeps trading in its own mode.'))return;
+    document.body.className=v;
+    document.querySelectorAll('[data-view]').forEach(function(x){x.classList.toggle('on',x.getAttribute('data-view')===v)});
+  };});
+
+  // "live" clock: numbers update in place, no page reload
+  var s=10;
+  setInterval(function(){s=(s+10)%60;document.getElementById('upd').textContent='Updated 11:32:'+('0'+s).slice(-2)+' · refreshes every 10 s';},10000);
+})();
+</script>
+</template>
+
+<script>
+(function(){
+  var tpl=document.getElementById('app').innerHTML, theme='dark';
+  var deskIf=document.getElementById('deskIf'), phoneIf=document.getElementById('phoneIf');
+  function load(){
+    var html='<!doctype html><html lang="en" data-theme="'+theme+'"><head><meta charset="utf-8">'+
+      '<meta name="viewport" content="width=device-width, initial-scale=1"><title>Ayodhya ORB</title></head>'+
+      '<body class="paper">'+tpl+'</body></html>';
+    deskIf.srcdoc=html; phoneIf.srcdoc=html;
+  }
+  function fit(){
+    var box=document.getElementById('desk'), s=Math.min(1,box.clientWidth/1280);
+    deskIf.style.transform='scale('+s+')'; box.style.height=(860*s)+'px';
+  }
+  document.querySelectorAll('[data-show]').forEach(function(b){b.onclick=function(){
+    var v=b.dataset.show;
+    document.querySelectorAll('[data-show]').forEach(x=>x.classList.toggle('on',x===b));
+    document.getElementById('deskFrame').style.display=v==='phone'?'none':'';
+    document.getElementById('phoneFrame').style.display=v==='desk'?'none':'';
+    fit();
+  };});
+  document.querySelectorAll('.bar [data-theme]').forEach(function(b){b.onclick=function(){
+    theme=b.dataset.theme;
+    document.querySelectorAll('.bar [data-theme]').forEach(x=>x.classList.toggle('on',x===b));
+    [deskIf,phoneIf].forEach(function(f){try{f.contentWindow.postMessage({setTheme:theme},'*')}catch(e){}});
+  };});
+  window.addEventListener('resize',fit);
+  load(); fit();
+})();
+</script>
+</body>
+</html>
