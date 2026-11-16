@@ -19,6 +19,7 @@ from urllib.parse import parse_qs, urlparse
 
 import config as C
 import theme as T
+import webui
 
 STATUS_FILE = os.path.join(C.DATA_DIR, "status.json")
 
@@ -64,66 +65,23 @@ def _fmt(v, nd=2):
     return html.escape(str(v))
 
 
-SERIF = "Georgia,'Palatino Linotype','Times New Roman',serif"
-CSS = (":root{" + "".join(f"--{k.replace('_', '-')}:{v};" for k, v in T.COLORS.items()) + "}" + """
-body{margin:0;background:var(--bg);color:var(--fg);font:14px system-ui,Segoe UI,sans-serif;
- background-image:radial-gradient(ellipse at top,#3d2047 0,var(--bg) 55%);background-attachment:fixed}
-main{max-width:1100px;margin:0 auto;padding:16px}
-header.realm{text-align:center;padding:6px 0 12px;margin-bottom:8px;border-bottom:4px solid transparent;
- border-image:repeating-linear-gradient(90deg,var(--acc) 0 14px,#b91c1c 14px 28px,var(--gold) 28px 42px) 1}
-header.realm .dev{color:var(--gold);font-size:14px}
-header.realm .app{font:600 26px SERIF;color:var(--gold);letter-spacing:1px}
-header.realm .line2{color:var(--muted);font-size:12px}
-.card{background:var(--card);border:1px solid var(--line);border-top:2px solid rgba(245,158,11,.5);border-radius:10px;
- padding:14px 16px;margin:12px 0;overflow-x:auto}
-h1{font:600 22px SERIF;color:var(--gold);margin:8px 0 4px} h2{font:600 15px SERIF;margin:0 0 8px;color:var(--acc)}
-.kpis{display:flex;flex-wrap:wrap;gap:18px} .kpis div b{display:block;font-size:18px}
-table{border-collapse:collapse;width:100%} td,th{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
-th{color:var(--gold);font-weight:600}
-.up{color:var(--up)} .dn{color:var(--dn)} .muted{color:var(--muted)} .warn{color:var(--warn)} .sig{color:var(--acc);font-weight:600}
-.btn,button{background:linear-gradient(180deg,var(--gold),var(--acc));color:#2a1204;border:0;border-radius:6px;padding:8px 14px;
- font-weight:600;text-decoration:none;cursor:pointer;display:inline-block;margin:4px 6px 4px 0}
-button.red{background:var(--dn);color:#fff} .tag{padding:2px 8px;border-radius:999px;background:var(--line);font-size:12px}
-ul{margin:0;padding-left:18px} .msg{color:var(--up)}
-nav{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 2px;justify-content:center}
-nav a{color:var(--fg);text-decoration:none;padding:6px 12px;border-radius:6px;background:var(--card);border:1px solid var(--line)}
-nav a small{color:var(--muted)} nav a.on{background:var(--acc);color:#2a1204;font-weight:600;border-color:var(--gold)}
-nav a.on small{color:#4a2508}
-.banner{background:var(--banner-bg);color:var(--banner-fg);border:1px solid #7c3a10;border-radius:8px;padding:10px 14px;margin:10px 0}
-.tm{color:#d8b4fe;font-size:13px}
-table.wrap td{white-space:normal}
-.days a{color:var(--acc);margin-right:10px;text-decoration:none} .days a.on{color:var(--fg);font-weight:700;text-decoration:underline}
-footer{text-align:center;color:var(--muted);font-size:11px;margin:20px 0 6px}
-.switch{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:10px 0}
-.switch a{color:var(--fg);text-decoration:none;padding:7px 14px;border-radius:6px;border:1px solid var(--line);background:var(--card)}
-.switch a.paper.on{background:linear-gradient(180deg,var(--gold),var(--acc));color:#2a1204;font-weight:700;border-color:var(--gold)}
-.switch a.zerodha.on{background:var(--dn);color:#fff;font-weight:700;border-color:#fecaca}
-.viewbar{text-align:center;font-weight:700;letter-spacing:1px;border-radius:6px;padding:6px;margin:8px 0;font-size:13px}
-.viewbar.paper{background:rgba(245,158,11,.15);color:var(--gold);border:1px solid var(--gold)}
-.viewbar.zerodha{background:rgba(220,38,38,.18);color:#fecaca;border:2px solid var(--dn)}
-.card.acct.paper{border:2px solid var(--gold)} .card.acct.zerodha{border:2px solid var(--dn);background:linear-gradient(180deg,rgba(220,38,38,.10),var(--card) 40%)}
-.tag.dn{background:var(--dn);color:#fff}
-.opts{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 8px} .opt{padding:6px 10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);cursor:pointer}
-input[type=number]{background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:4px}
-""").replace("SERIF", SERIF)
-
-
-VIEW_PAGES = ("/", "/trades")  # pages with the Paper Account | Zerodha Account switch
+VIEW_PAGES = webui.VIEW_PAGES  # pages with the Paper Account | Zerodha Account switch
 
 
 def page(title, active, body, refresh=None, view=None):
-    nav = "".join(f"<a href='{u}{'?view=' + view if view and u in VIEW_PAGES else ''}' "
-                  f"class='{'on' if u == active else ''}'>{icon} {T.name(key)} "
-                  f"<small>· {T.plain(key)}</small></a>" for u, key, icon in T.PAGES)
+    """Wrap a page body in the dashboard frame (header, page tabs, account switch, theme switch)."""
+    switch = view_switch(active, view, read_status()) if view and active in VIEW_PAGES else ""
     meta = f'<meta http-equiv="refresh" content="{refresh}">' if refresh else ""
-    head = (f"<header class='realm'><div class='dev'>{T.DEVANAGARI}</div><div class='app'>{T.BOW} {T.APP}</div>"
-            f"<div class='line2'>{html.escape(T.TAGLINE)}</div></header>")
-    foot = (f"<footer>{T.APP} · {T.term('paper')} trading by default · "
-            f"software only, not investment advice</footer>")
-    return (f'<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" '
-            f'content="width=device-width, initial-scale=1">{meta}<title>{html.escape(title)} · {T.APP}</title>'
-            f'<link rel="icon" href="{T.FAVICON}"><style>{CSS}</style></head>'
-            f'<body><main>{head}<nav>{nav}</nav>{body}{foot}</main></body></html>')
+    return webui.shell(title, active, body, view=view, switch=switch, extra_head=meta)
+
+
+def mode_chips(status, extra=""):
+    """The mode the bot trades in (set only in its own settings), next to the account switch."""
+    mode = T.mode_label((status or {}).get("mode") or ("live" if C.is_live() else "paper"))
+    live = " live" if "LIVE" in mode else ""
+    return (f"<div class='chips'><span class='chip mode{live}' title='The mode the bot trades in (set in its own settings)'>"
+            f"Bot trading: {html.escape(mode)}</span>{extra}"
+            f"<span class='muted small'>The Paper | Zerodha switch only changes what you see.</span></div>")
 
 
 def read_status():
@@ -247,10 +205,10 @@ def view_switch(path, view, status):
     for v, label in VIEWS.items():
         on = " on" if v == view else ""
         click = f' onclick="{confirm}"' if v == "zerodha" and view != "zerodha" else ""
-        links.append(f"<a class='{v}{on}' href='{path}?view={v}'{click}>{label}</a>")
-    return (f"<div class='switch'><span class='muted'>View:</span> {''.join(links)}"
-            f"<span class='muted' style='font-size:12px'>Only changes what you see. "
-            f"The bot is trading: <b>{html.escape(bot_mode)}</b></span></div>")
+        cur = " aria-current='true'" if v == view else ""
+        links.append(f"<a class='{v}{on}' href='{path}?view={v}'{click}{cur}>{label}</a>")
+    return (f"<div class='seg' role='group' aria-label='Account view (only changes what you see; "
+            f"the bot is trading {html.escape(bot_mode)})'>{''.join(links)}</div>")
 
 
 def view_banner(view):
@@ -459,7 +417,6 @@ def render(msg="", q=None):
     return page(T.plain("live_page"), "/", f"""
 <h1>{T.BOW} {T.name('live_page')} <span class="tag" title="The mode the bot trades in (set in its own settings)">Bot trading: {html.escape(T.mode_label(mode))}</span> <span class="tag {'up' if running else 'warn'}">{run_tag}</span> {f'<span class="tag warn">{T.name("pause").upper()} · PAUSED</span>' if paused else ''}</h1>
 <div class="muted">{T.plain('live_page')} · bot status updated {_fmt(when[11:19])} IST · page auto-refreshes every 20 s</div>
-{view_switch("/", view, s)}
 {view_banner(view)}
 {account_card(view, s)}
 {capital_card() if view == "paper" else ""}
@@ -783,7 +740,7 @@ def render_trades(q=None):
     mode = "live" if view == "zerodha" else "paper"   # each view reads only its own trade file
     parts = [f"<h1>{T.SCROLL} {T.term('trades')}</h1>"
              f"<div class='muted'>The royal treasury's ledger: every closed trade, after Zerodha charges.</div>",
-             view_switch("/trades", view, s), view_banner(view)]
+             mode_chips(s), view_banner(view)]
     rows = trade_rows(mode)
     label = f"{T.name(mode)} · {VIEWS[view]}"
     start, note = C.PAPER_START_INR, ""

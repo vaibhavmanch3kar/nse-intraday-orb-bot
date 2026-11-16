@@ -108,8 +108,8 @@ def test_trades_page_tabs(server, sample):
     assert "2026-W47 · 16–20 Nov" in week and "3 <span class='muted'>(2 full)</span>" in week
     month, _ = get(server + "/trades?view=paper&period=month")
     assert "November 2026" in month and "December 2026" in month
-    bad, _ = get(server + "/trades?view=paper&period=<script>")
-    assert "<script>" not in bad and "Mon 16 Nov 2026" in bad          # unknown period -> daily
+    bad, _ = get(server + "/trades?view=paper&period=<script>evil1</script>")
+    assert "evil1" not in bad and "Mon 16 Nov 2026" in bad             # unknown period -> daily, never echoed
     assert snapshot() == before                                        # viewing writes nothing
 
 
