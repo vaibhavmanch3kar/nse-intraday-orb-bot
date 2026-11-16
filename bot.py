@@ -24,6 +24,7 @@ import costs
 import data_yahoo
 import marketdata
 import holidays
+import journal
 import risk
 import strategy
 import theme as T
@@ -147,6 +148,9 @@ class Bot:
         self.bars = {}          # symbol -> latest closed 15-min bars (for the dashboard)
         self.good_rows = {}     # symbol -> last evaluation row, shown again once data is back
         self.data_down_since = None  # time the current price-data problem started (None = data OK)
+        self.started_at = now_ist()
+        self.journal = None     # today's journal.DayJournal (recording only - never read by trading code)
+        self.journal_warned = set()
 
     # -- helpers
     def note(self, msg, level=logging.INFO):
@@ -192,6 +196,47 @@ class Bot:
             self.note(f"price data back: all {len(C.WATCHLIST)} stocks OK "
                       f"(problem from {self.data_down_since:%H:%M}, about {mins:.0f} min)")
             self.data_down_since = None
+
+    # -- daily journal (recording only: a journal problem is a warning, never a reason to stop)
+    def journal_warn(self, text):
+        if text and text not in self.journal_warned:
+            self.journal_warned.add(text)
+            self.note(f"{T.WARN_ICON} journal: {text}", logging.WARNING)
+
+    def journal_round(self, now, candidates=(), square_off_time=None):
+        try:
+            if self.journal is None or self.journal.day != now.date().isoformat():
+                rebuilt = journal.backfill(self.mode, now.date())
+                if rebuilt:
+                    self.note(f"journal: saved {len(rebuilt)} earlier day(s) ({', '.join(rebuilt)})")
+                self.journal = journal.DayJournal(self.mode, now.date(), self.started_at, self.state)
+            j = self.journal
+            for sym, _closed, ev, row in candidates:
+                pos = self.state.positions.get(sym)
+                taken = bool(pos) and pos.get("opened") == str(now)
+                reason = row.get("reason", "")
+                if " - skip: " in reason:
+                    why = reason.split(" - skip: ", 1)[1]
+                elif "(paused)" in reason:
+                    why = "paused"
+                elif square_off_time is not None and now >= square_off_time:
+                    why = "after square-off time"
+                else:
+                    why = "entry not filled"
+                j.signal(now, sym, row.get("bar", ""), ev.get("signal"), taken, why)
+            j.round(now, self.state.equity(self.prices), len(self.state.positions), self.data_down_since)
+            self.journal_warn(j.save())
+        except Exception as e:  # noqa: BLE001
+            self.journal_warn(f"could not update today's journal ({e!r})")
+
+    def journal_finish(self, now, how):
+        if self.journal is None or self.journal.day != now.date().isoformat():
+            return
+        try:
+            self.journal.finish(now, self.state.equity(self.prices), how)
+            self.journal_warn(self.journal.save())
+        except Exception as e:  # noqa: BLE001
+            self.journal_warn(f"could not close today's journal ({e!r})")
 
     def reconcile(self):
         held = self.broker.open_mis_quantities()
@@ -360,6 +405,7 @@ class Bot:
                       f"{T.name('stop')} (stop) {stop:.2f} "
                       + (f"{T.name('target')} (target) {target:.2f}" if target is not None
                          else "no fixed target (trailing)"))
+        self.journal_round(now, candidates, square_off_time)
         self.write_status(now)
 
     def write_status(self, now):
@@ -425,6 +471,7 @@ class Bot:
         while True:
             if os.path.exists(C.STOP_FILE):
                 self.note("STOP file found - Ayodhya ORB shutting down (open positions stay protected by exchange stops in live mode)")
+                self.journal_finish(now_ist(), "stopped")
                 os.remove(C.STOP_FILE)
                 break
             now = now_ist()
@@ -447,6 +494,7 @@ class Bot:
             if now >= at(C.MARKET_CLOSE, today) + dt.timedelta(minutes=5):
                 self.note(f"{T.name('square_off')}: market closed. Day P&L ₹{self.state.d['day_pnl']:.2f}, "
                           f"equity ₹{self.state.equity():.2f}")
+                self.journal_finish(now, "complete")
                 self.end_of_day(now)
                 self.write_status(now)
                 break
