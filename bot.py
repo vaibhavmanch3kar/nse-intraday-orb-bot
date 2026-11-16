@@ -454,8 +454,38 @@ class Bot:
             time.sleep(C.POLL_SEC)
 
 
+SINGLE_INSTANCE_MUTEX = "Local\\AyodhyaORB_bot"   # run_bot.ps1 checks this same name
+_instance_handle = None
+
+
+def claim_single_instance(name=SINGLE_INSTANCE_MUTEX):
+    """Hold a named Windows mutex while the bot runs, so a second bot can't start and the launcher
+    can check "already running?" instantly. Windows releases it when the process ends, even after
+    a crash. Returns False if another bot already holds it; True otherwise (and on other systems)."""
+    global _instance_handle
+    if os.name != "nt":
+        return True
+    import ctypes
+    from ctypes import wintypes
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.CreateMutexW.restype = wintypes.HANDLE
+    k32.CreateMutexW.argtypes = (ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR)
+    handle = k32.CreateMutexW(None, False, name)
+    if not handle:
+        return True  # can't tell - don't block the start
+    if ctypes.get_last_error() == 183:  # ERROR_ALREADY_EXISTS
+        k32.CloseHandle(handle)
+        return False
+    _instance_handle = handle
+    return True
+
+
 def main():
     setup_logging()
+    if not claim_single_instance():
+        log.warning(f"{T.APP} is already running - not starting a second copy "
+                    "(dashboard: http://127.0.0.1:5000)")
+        return
     import web
     threading.Thread(target=web.serve, daemon=True).start()
     Bot().run()

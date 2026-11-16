@@ -113,3 +113,32 @@ def test_data_problem_plain_words():
         "connection to the data server timed out"
     assert "429" in bot.data_problem(Exception("rate limited (429)"))
     assert bot.data_problem(Exception("something else")) == "something else"
+
+
+def test_single_instance_mutex():
+    """The second claim of the same name fails while the first holder is alive (Windows only)."""
+    import os
+    import uuid
+    if os.name != "nt":
+        return
+    name = "Local\\AyodhyaORB_test_" + uuid.uuid4().hex
+    saved = bot._instance_handle
+    try:
+        assert bot.claim_single_instance(name) is True
+        assert bot.claim_single_instance(name) is False
+    finally:
+        bot._instance_handle = saved
+
+
+def test_main_refuses_second_copy(monkeypatch, caplog):
+    import logging
+    caplog.set_level(logging.INFO)
+    monkeypatch.setattr(bot, "setup_logging", lambda: None)
+    monkeypatch.setattr(bot, "claim_single_instance", lambda *a: False)
+
+    def must_not_start():
+        raise AssertionError("a second bot must not start")
+
+    monkeypatch.setattr(bot, "Bot", must_not_start)
+    bot.main()
+    assert any("already running" in r.getMessage() for r in caplog.records)

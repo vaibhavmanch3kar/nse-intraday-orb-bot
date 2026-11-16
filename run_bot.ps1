@@ -8,9 +8,11 @@ Set-Location -Path $PSScriptRoot
 $py = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
 if (-not (Test-Path $py)) { Write-Host "[x] .venv missing - double-click 1-SETUP.bat first" -ForegroundColor Red; exit 1 }
 
-# Don't start twice
-$running = Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
-           Where-Object { $_.CommandLine -like "*$PSScriptRoot*" -and $_.CommandLine -like "* bot.py*" }
+# Don't start twice. A running bot holds this named mutex (see claim_single_instance in bot.py);
+# checking it is instant, unlike the process (WMI) query used before, which took 1-3 minutes.
+$m = $null
+$running = [System.Threading.Mutex]::TryOpenExisting("Local\AyodhyaORB_bot", [ref]$m)
+if ($m) { $m.Dispose() }
 if ($running) { Write-Host "[i] Ayodhya ORB already running - opening the Ayodhya Darbar dashboard"; Start-Process "http://127.0.0.1:5000"; exit 0 }
 
 Start-Job -ScriptBlock { Start-Sleep 4; Start-Process "http://127.0.0.1:5000" } | Out-Null
