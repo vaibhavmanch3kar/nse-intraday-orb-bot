@@ -18,6 +18,7 @@ import threading
 import time
 
 import archive
+import capital
 import config as C
 import costs
 import data_yahoo
@@ -165,6 +166,19 @@ class Bot:
         self.broker = LiveBroker(self.kite)
         self.reconcile()
         return True
+
+    def apply_paper_capital(self):
+        """At start-up, before any trade: apply an opening-balance change chosen on the dashboard.
+        PAPER mode only - live trading never reads the paper capital setting."""
+        if self.live:
+            return
+        try:
+            msg = capital.apply_pending(self.state, now_ist())
+        except Exception as e:  # a bad settings file must never stop the bot
+            self.note(f"paper opening balance change not applied ({e!r})", logging.WARNING)
+            return
+        if msg:
+            self.note(msg)
 
     def log_data_health(self, fetched, now):
         """One log line when price data starts failing and one when it is back (not one per round)."""
@@ -406,6 +420,7 @@ class Bot:
         self.note(f"{T.BOW} {T.APP} started in {T.mode_label(self.mode)} mode, watching {len(C.WATCHLIST)} stocks")
         if C.DRY_RUN is False and not self.live:
             self.note("DRY_RUN=false but CONFIRM_LIVE is not YES - staying in PAPER mode", logging.WARNING)
+        self.apply_paper_capital()
         waiting_login_logged = False
         while True:
             if os.path.exists(C.STOP_FILE):
