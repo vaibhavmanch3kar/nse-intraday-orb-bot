@@ -212,6 +212,9 @@ input[type=number],input[type=search],select{background:var(--surface);color:var
   table.rt td::before{content:attr(data-label);color:var(--muted);font-size:12px;text-align:left;flex:none;max-width:45%}
   table.rt td.first{font-size:15px;text-align:left} table.rt td.first::before{display:none}
   table.rt tr:hover td{background:none}
+  .card.flush table.rt tr{padding:8px 14px}
+  table.rt td.block{display:block;text-align:left}
+  table.rt td.block::before{display:block;max-width:none;margin-bottom:2px}
   .bottom{display:grid;grid-template-columns:repeat(4,1fr);position:fixed;left:0;right:0;bottom:0;z-index:12;
    background:color-mix(in srgb,var(--surface) 94%,transparent);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);
    border-top:1px solid var(--border);padding:6px 4px calc(6px + env(safe-area-inset-bottom))}

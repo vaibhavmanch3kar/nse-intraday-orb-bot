@@ -806,10 +806,11 @@ def sparkline(closes, or_hi, or_lo, w=160, h=36):
     band = ""
     if or_hi and or_lo:
         band = (f"<rect x='0' y='{y(or_hi):.1f}' width='{w}' height='{max(1, y(or_lo) - y(or_hi)):.1f}' "
-                f"fill='{T.COLORS['acc']}' opacity='0.18'/>")
-    col = T.COLORS["up"] if closes[-1] >= closes[0] else T.COLORS["dn"]
-    return (f"<svg width='{w}' height='{h}' viewBox='0 0 {w} {h}' role='img' aria-label='intraday closes'>"
-            f"{band}<polyline points='{pts}' fill='none' stroke='{col}' stroke-width='1.5'/></svg>")
+                f"style='fill:var(--accent)' opacity='0.18'/>")
+    col = "var(--up)" if closes[-1] >= closes[0] else "var(--dn)"
+    return (f"<svg width='{w}' height='{h}' viewBox='0 0 {w} {h}' role='img' aria-label='closes, "
+            f"{'up' if closes[-1] >= closes[0] else 'down'} {abs(closes[-1] / closes[0] - 1) * 100:.1f}%'>"
+            f"{band}<polyline points='{pts}' fill='none' style='stroke:{col}' stroke-width='1.5'/></svg>")
 
 
 def render_review(day=None, refresh=False):
@@ -845,31 +846,39 @@ def render_review(day=None, refresh=False):
         else:
             outcome = f"<span class='muted'>{html.escape(x.get('note') or '-')}</span>"
             r_cell = "-"
-        rows.append(f"<tr><td><b>{html.escape(sym)}</b></td><td>{sparkline(x.get('closes', []), x.get('or_high'), x.get('or_low'))}</td>"
-                    f"<td>{_fmt(x.get('or_low'))} – {_fmt(x.get('or_high'))}</td>"
-                    f"<td class='{'up' if (chg or 0) >= 0 else 'dn'}'>{'-' if chg is None else f'{chg:+.2f}%'}</td>"
-                    f"<td style='white-space:normal'>{outcome}</td><td>{r_cell}</td></tr>")
+        rows.append(f"<tr><td class='first' data-label='Stock'><b>{html.escape(sym)}</b></td>"
+                    f"<td data-label='Day'>{sparkline(x.get('closes', []), x.get('or_high'), x.get('or_low'))}</td>"
+                    f"<td data-label='Opening range' class='r'>{_fmt(x.get('or_low'))} – {_fmt(x.get('or_high'))}</td>"
+                    f"<td data-label='Day %' class='r {'up' if (chg or 0) >= 0 else 'dn'}'>"
+                    f"{'-' if chg is None else ('▲ ' if chg >= 0 else '▼ ') + f'{chg:+.2f}%'}</td>"
+                    f"<td data-label='Signal → outcome' class='block' style='white-space:normal;text-align:left'>{outcome}</td>"
+                    f"<td data-label='Result' class='r'>{r_cell}</td></tr>")
     st = r.get("settings", {})
     settings = " · ".join(f"{k}={v}" for k, v in st.items())
     total = r.get("total_r", 0.0)
+    built = html.escape(str(r.get('built', ''))[:16].replace('T', ' '))
+    at_risk = total * C.PAPER_START_INR * C.RISK_PER_TRADE_PCT / 100
     body = f"""
-<h1>{T.LAMP} {T.term('review')} <span class="tag">{r['day']}</span></h1>
-<div class="muted">At Chitrakoot we look back calmly: the day replayed through the strategy rules, one stock at a time
-(portfolio limits not applied). Built {html.escape(str(r.get('built', ''))[:16].replace('T', ' '))} from 15-min data.</div>
-<div class="card days">Day: {days} <form method="get" action="/review" style="display:inline">
-<input type="hidden" name="day" value="{r['day']}"><input type="hidden" name="refresh" value="1"><button>Refresh</button></form></div>
-<div class="card kpis"><div>Signals<b>{r.get('signals', 0)}</b></div><div>Winners<b>{r.get('wins', 0)}</b></div>
-<div>Total<b class="{'up' if total > 0 else 'dn'}">{total:+.2f}R</b></div>
-<div>At 0.5% risk on ₹1L<b class="{'up' if total > 0 else 'dn'}">≈ ₹{total * C.PAPER_START_INR * C.RISK_PER_TRADE_PCT / 100:+,.0f}</b></div></div>
-<div class="card"><h2>Stocks — chart shows 15-min closes, saffron band = opening range</h2><table>
-<tr><th>Stock</th><th>Day</th><th>Opening range</th><th>Day %</th><th>Signal → outcome</th><th>Result</th></tr>{''.join(rows)}</table></div>
-<div class="card muted">Rules: {html.escape(settings)}. R = profit or loss as a multiple of the risk
-(entry to stop), after 0.05% slippage and Zerodha charges.<br>
+<div class="page-head"><h1>{T.LAMP} {T.term('review')} <span class="tag">{r['day']}</span></h1>
+<span class="sub">The day replayed through the strategy rules, one stock at a time (portfolio limits not applied) ·
+built {built} from 15-min data</span></div>
+<div class="chips"><span class="muted small">Day:</span><span class="days">{days}</span>
+<form method="get" action="/review" style="display:inline;margin:0"><input type="hidden" name="day" value="{r['day']}">
+<input type="hidden" name="refresh" value="1"><button class="ghost small">↻ Refresh</button></form></div>
+<div class="kgrid k4">{_kpi("Signals", f"{r.get('signals', 0)}")}{_kpi("Winners", f"{r.get('wins', 0)}")}
+{_kpi("Total", f"{total:+.2f}R", "after slippage and charges", _cls(total))}
+{_kpi("At 0.5% risk on ₹1L", _signed(at_risk), "about", _cls(at_risk))}</div>
+<section class="card flush"><div class="hd">Stocks <span class="end"><span class="tag">chart = 15-min closes ·
+saffron band = opening range</span></span></div><table class="rt">
+<tr><th>Stock</th><th>Day</th><th class="r">Opening range</th><th class="r">Day %</th><th>Signal → outcome</th>
+<th class="r">Result</th></tr>{''.join(rows)}</table></section>
+<details class="card"><summary>How to read this page</summary><div class="small muted">Rules: {html.escape(settings)}.
+R = profit or loss as a multiple of the risk (entry to stop), after 0.05% slippage and Zerodha charges.<br>
 {T.SEER} {T.term('time_machine')}: the trade replayed 10,000 times using this stock's own 5-minute moves from the same
 time of day (±10 min) over the last 60 days, shuffled. It assumes no edge, so it's a baseline: a good setup
 should beat these odds. The replays also inherit the stock's recent intraday drift.
-The verdict compares target-first vs stop-first at 1R with break-even (50%): within 5 points is a coin flip.
-{T.SCROLL} History is the real record: the bot's same rules (same direction) run on each earlier session.</div>"""
+The verdict compares target-first vs stop-first at 1R with break-even (50%): within 5 points is a coin flip.<br>
+{T.SCROLL} History is the real record: the bot's same rules (same direction) run on each earlier session.</div></details>"""
     return page("Session review", "/review", body)
 
 
@@ -879,7 +888,7 @@ def render_scanner(refresh=False):
         r = scanner.scan() if refresh else scanner.latest()
     except Exception as e:
         return page("Swing scanner", "/scanner", f"<h1>{T.FLAG} {T.term('scanner')}</h1><div class='banner'>Scan failed: {html.escape(str(e))}</div>")
-    counts = "".join(f"<div>{html.escape(k)}<b>{v}</b></div>" for k, v in r.get("counts", {}).items())
+    counts = "".join(_kpi(html.escape(k), f"{v}") for k, v in r.get("counts", {}).items())
     rows = []
     hits = [(s, x) for s, x in r.get("rows", {}).items() if x["setups"]]
     for s, x in sorted(hits, key=lambda kv: (-len(kv[1]["setups"]), kv[0])):
@@ -888,26 +897,34 @@ def render_scanner(refresh=False):
         plan = (f"stop {_fmt(x['stop'])} · target {_fmt(x['target'])} · qty {x['qty']}"
                 if x.get("stop") else "-")
         rows.append(
-            f"<tr><td><b>{html.escape(s)}</b></td><td>{sparkline(x.get('closes', []), None, None)}</td>"
-            f"<td class='sig' style='white-space:normal'>{html.escape(', '.join(x['setups']))}</td>"
-            f"<td>{_fmt(x['close'])}<br><span class='{'up' if x['change_pct'] >= 0 else 'dn'}'>{x['change_pct']:+.2f}%</span></td>"
-            f"<td>{_fmt(x.get('rsi'), 0)}</td><td>{trend}<br><span class='muted'>{x['from_52w_high_pct']:+.1f}% vs 52w high</span></td>"
-            f"<td style='white-space:normal'>{plan}</td></tr>")
+            f"<tr><td class='first' data-label='Stock'><b>{html.escape(s)}</b></td>"
+            f"<td data-label='60 days'>{sparkline(x.get('closes', []), None, None)}</td>"
+            f"<td data-label='Setup' style='white-space:normal'><span class='st sig'>{html.escape(', '.join(x['setups']))}</span></td>"
+            f"<td data-label='Close' class='r'><span>{_fmt(x['close'])} <span class='{'up' if x['change_pct'] >= 0 else 'dn'}'>"
+            f"{'▲' if x['change_pct'] >= 0 else '▼'} {x['change_pct']:+.2f}%</span></span></td>"
+            f"<td data-label='RSI' class='r'>{_fmt(x.get('rsi'), 0)}</td>"
+            f"<td data-label='Trend'><span>{trend} <span class='muted'>· {x['from_52w_high_pct']:+.1f}% vs 52w high</span></span></td>"
+            f"<td data-label='Plan' class='block' style='white-space:normal'>{plan}</td></tr>")
     table = "".join(rows) or "<tr><td colspan=7 class='muted'>No setups on the last session.</td></tr>"
     risk_rs = C.PAPER_START_INR * C.RISK_PER_TRADE_PCT / 100
+    built = html.escape(str(r.get('built', ''))[:16].replace('T', ' '))
+    errors = (' Data errors: ' + html.escape(', '.join(r['errors']))) if r.get('errors') else ''
     body = f"""
-<h1>{T.FLAG} {T.term('scanner')} <span class="tag">{html.escape(str(r.get('day')))}</span></h1>
-<div class="banner">Research only - Hanuman scouts, the bot does not trade these. They are multi-day (CNC) setups on daily candles;
-check the chart yourself before acting. Built {html.escape(str(r.get('built', ''))[:16].replace('T', ' '))}.</div>
-<div class="card kpis">{counts}</div>
-<form method="get" action="/scanner"><input type="hidden" name="refresh" value="1"><button>Re-scan</button></form>
-<div class="card"><h2>Stocks with a setup on the last closed daily candle (60-day chart)</h2><table>
-<tr><th>Stock</th><th>60 days</th><th>Setup</th><th>Close</th><th>RSI</th><th>Trend</th><th>Plan (₹{risk_rs:,.0f} risk)</th></tr>{table}</table></div>
-<div class="card muted">Setups: 20-day high breakout · bull flag (≥8% pole, tight shallow flag) · 20-day MA reclaim ·
+<div class="page-head"><h1>{T.FLAG} {T.term('scanner')} <span class="tag">{html.escape(str(r.get('day')))}</span></h1>
+<span class="sub">Multi-day (CNC) setups on the last closed daily candle · built {built}</span></div>
+<div class="banner"><b>Research only</b> - Hanuman scouts, the bot does not trade these. Check the chart yourself before acting.</div>
+<div class="kgrid k4">{counts}</div>
+<section class="card flush"><div class="hd">Stocks with a setup <span class="end">
+<form method="get" action="/scanner" style="margin:0"><input type="hidden" name="refresh" value="1">
+<button class="ghost small">↻ Re-scan</button></form></span></div>
+<table class="rt"><tr><th>Stock</th><th>60 days</th><th>Setup</th><th class="r">Close</th><th class="r">RSI</th><th>Trend</th>
+<th>Plan (₹{risk_rs:,.0f} risk)</th></tr>{table}</table></section>
+<details class="card"><summary>How the setups and the plan work</summary><div class="small muted">
+Setups: 20-day high breakout · bull flag (≥8% pole, tight shallow flag) · 20-day MA reclaim ·
 oversold (RSI&lt;30) · oversold bounce (RSI&lt;30 in last 3 days, close above yesterday's high).
 Plan: stop = close − 1.5 × ATR(14), target = 2R, qty risks {C.RISK_PER_TRADE_PCT}% of ₹{C.PAPER_START_INR:,.0f}
 (capped at {C.MAX_POSITION_PCT:.0f}% of capital). The TWS interview's rule: prefer stocks in an uptrend (above the 200 DMA,
-near highs).{(' Data errors: ' + html.escape(', '.join(r['errors']))) if r.get('errors') else ''}</div>"""
+near highs).{errors}</div></details>"""
     return page("Swing scanner", "/scanner", body)
 
 
@@ -1315,19 +1332,24 @@ def render_journey(src, i):
                                   charts.journey(today, trade, ema, band), f"{sym} 15-minute candles with the trade")
     net, rr = _num(r.get("net")), _num(r.get("r"))
     held = f"{int((closed - opened).total_seconds() // 60)} min" if closed else "-"
+    side = r.get('direction', '')
+    back = f"/trades?view={'zerodha' if src == 'live' else 'paper'}#{'backtest' if src == 'backtest' else 'log'}"
+    trail = f'EMA{C.TRAIL_EMA} trail' if C.TRAIL_EMA > 0 else 'no trail'
     body = f"""
-<h1>{T.PATH} {T.name('journey')}: {html.escape(sym)} <span class="tag {'up' if r.get('direction') == 'LONG' else 'dn'}">{html.escape(r.get('direction', ''))}</span>
+<div class="page-head"><h1>{T.PATH} {T.name('journey')}: {html.escape(sym)}
+<span class="tag {'up' if side == 'LONG' else 'dn'}">{html.escape(side)}</span>
 <span class="tag">{opened:%a %d %b %Y}</span> <span class="tag">{html.escape(src)}</span></h1>
-<div class="muted"><a class="sig" href="/trades">← back to {T.term('trades')}</a></div>
-<div class="card kpis"><div>Result<b class="{'up' if net > 0 else 'dn'}">₹{net:,.2f} ({rr:+.2f}R)</b></div>
-<div>Entry<b>{_fmt(_num(r.get('entry')))} at {opened:%H:%M}</b></div>
-<div>Exit<b>{_fmt(_num(r.get('exit')))} at {closed.strftime('%H:%M') if closed else '-'}</b></div>
-<div>Exit reason<b>{html.escape(T.reason_label(r.get('reason', '-')))}</b></div><div>Held<b>{held}</b></div>
-<div>Qty<b>{html.escape(r.get('qty', '-'))}</b></div><div>Charges<b>₹{_num(r.get('charges')):,.2f}</b></div></div>
-<div class="card"><h2>15-minute candles · saffron band = opening range · red dashed = {T.term('stop')} · grey dotted = entry ·
-violet = {f'EMA{C.TRAIL_EMA} trail' if C.TRAIL_EMA > 0 else 'no trail'} · ▲▼ = entry and exit</h2>{chart}</div>
-<div class="card muted">Hover a candle for its prices. The chart uses today's price data, so it can differ slightly
-from what the bot saw live if a bar has since been corrected.</div>"""
+<span class="sub"><a href="{back}">← back to {T.term('trades')}</a></span></div>
+<div class="kgrid">{_kpi("Result", f"{_signed(net)}", f"{rr:+.2f}R", _cls(net))}
+{_kpi("Entry", _fmt(_num(r.get('entry'))), f"at {opened:%H:%M}")}
+{_kpi("Exit", _fmt(_num(r.get('exit'))), f"at {closed.strftime('%H:%M') if closed else '-'}")}
+{_kpi("Exit reason", html.escape(T.reason_label(r.get('reason', '-'))))}
+{_kpi("Held", held, f"qty {html.escape(r.get('qty', '-'))}")}
+{_kpi("Charges", f"₹{_num(r.get('charges')):,.2f}")}</div>
+<section class="card"><h2>15-minute candles <span class="muted small">saffron band = opening range · red dashed =
+{T.term('stop')} · grey dotted = entry · violet = {trail} · ▲▼ = entry and exit</span></h2>{chart}</section>
+<div class="muted small">Hover or tap a candle (or use the arrow keys) for its prices. The chart uses today's price
+data, so it can differ slightly from what the bot saw live if a bar has since been corrected.</div>"""
     return page(f"{sym} trade", "/trades", body)
 
 
