@@ -162,6 +162,71 @@ def market_calendar():
             f"<b>{nxt:%a %d %b}</b><br><span class='muted'>Upcoming holidays: {up}</span>{warn}</div>")
 
 
+def _inr(v, signed=False):
+    """₹1,23,456.78 style (Western grouping, as elsewhere on the dashboard); '-' if missing."""
+    if v is None:
+        return "-"
+    sign = ("+" if v > 0 else "-" if v < 0 else "") if signed else ("-" if v < 0 else "")
+    return f"{sign}₹{abs(v):,.2f}"
+
+
+def _pl(v):
+    """Signed ₹ amount coloured green/red."""
+    cls = "" if not v else ("up" if v > 0 else "dn")
+    return f"<b class='{cls}'>{_inr(v, signed=True)}</b>"
+
+
+def _clock(iso):
+    return html.escape(iso[11:19]) if iso else "-"
+
+
+ACCOUNT_REFRESH_SEC = 10
+
+
+def paper_card(acct, status=None):
+    """The Paper Account card (virtual money). Data comes from accounts.paper_account() only."""
+    title = f"{T.name('paper')} · Paper Account <span class='tag'>virtual money</span>"
+    if acct.get("error"):
+        return f"<h2>{title}</h2><div class='warn'>⚠ {html.escape(acct['error'])}</div>"
+    warnings = list(acct.get("warnings", []))
+    s = status or {}
+    lag = s.get("data_lag_min")
+    if s.get("mode") == "paper" and lag is not None and lag > 20:
+        warnings.append(f"Prices are about {lag:.0f} min behind the market "
+                        f"({'Kite' if (s.get('data_source') or {}).get('using') == 'kite' else 'Yahoo'} data).")
+    k = [("Starting balance", f"<b>{_inr(acct['start'])}</b>"),
+         ("Total equity", f"<b>{_inr(acct['equity'])}</b>"),
+         ("Available funds", f"<b>{_inr(acct['available'])}</b>"),
+         ("Invested (open positions)", f"<b>{_inr(acct['invested'])}</b>"),
+         ("Realised P&amp;L (since start)", _pl(acct["realised"])),
+         ("Realised today", _pl(acct["realised_today"])),
+         ("Unrealised P&amp;L", _pl(acct["unrealised"])),
+         ("Total P&amp;L", _pl(acct["total_pnl"])),
+         ("Charges paid", f"<b>{_inr(acct['charges'])}</b>")]
+    kpis = "".join(f"<div>{label}{val}</div>" for label, val in k)
+    warn = "".join(f"<div class='warn'>⚠ {html.escape(w)}</div>" for w in warnings)
+    return (f"<h2>{title}</h2><div class='kpis'>{kpis}</div>{warn}"
+            f"<div class='muted' style='margin-top:6px'>Updated {_clock(acct.get('as_of'))} IST (the bot's last round) · "
+            f"checked {_clock(acct.get('now'))} · refreshes every {ACCOUNT_REFRESH_SEC} s · "
+            f"unrealised P&amp;L is before exit charges · available = equity − invested (no leverage)</div>")
+
+
+def account_card_html(view, status=None):
+    import accounts
+    return paper_card(accounts.paper_account(), status)
+
+
+def account_card(view, status=None):
+    """The card plus a small script that refreshes it in place (no page reload)."""
+    return (f"<div class='card acct {view}' id='acct'>{account_card_html(view, status)}</div>"
+            f"<script>setInterval(function(){{fetch('/api/account?view={view}',{{cache:'no-store'}})"
+            f".then(function(r){{if(!r.ok)throw 0;return r.text()}})"
+            f".then(function(h){{document.getElementById('acct').innerHTML=h}})"
+            f".catch(function(){{var e=document.getElementById('acct');if(e&&!e.querySelector('.offline'))"
+            f"e.insertAdjacentHTML('afterbegin',\"<div class='warn offline'>⚠ Can't reach the dashboard server: "
+            f"values below may be old.</div>\")}})}},{ACCOUNT_REFRESH_SEC * 1000});</script>")
+
+
 def _badge(text, cls, tip=""):
     t = f" title='{html.escape(tip)}'" if tip else ""
     return f"<span class='tag {cls}' style='font-size:11px;margin-left:4px'{t}>{html.escape(text)}</span>"
@@ -257,9 +322,8 @@ def render(msg=""):
 <div class="{'up' if ok else 'warn'}">{html.escape(login_msg)}</div>{login_btn}
 <div class="muted">{T.term('paper')} mode doesn't need a login, except for {T.name('kite_data')} (Kite) price data.
 {T.term('live')} mode needs one every day (tokens expire ~06:00 IST).</div></div>
+{account_card("paper", s)}
 <div class="card kpis">
-<div>Equity<b>₹{_fmt(s.get('equity'))}</b></div><div>Today P&amp;L<b class="{'up' if (s.get('day_pnl') or 0)>=0 else 'dn'}">₹{_fmt(s.get('day_pnl'))}</b></div>
-<div>Total P&amp;L<b>₹{_fmt(s.get('realized_pnl'))}</b></div><div>Charges paid<b>₹{_fmt(s.get('charges_paid'))}</b></div>
 <div>Trades today<b>{_fmt(s.get('trades_today'))}</b></div><div>Loss streak<b>{_fmt(s.get('loss_streak'))}</b>{streak_note}</div>
 <div>Data delay<b class="{lag_cls}">{lag_txt}</b></div>{data_source_kpi(s)}</div>
 <div class="card"><h2>{T.term('positions')}</h2><table class="wrap"><tr><th>Stock</th><th>Side · Qty</th><th>Entry → Price</th><th>Open P&amp;L</th>
@@ -652,6 +716,9 @@ class Handler(BaseHTTPRequestHandler):
             self._send(render_journey(q.get("src", ["paper"])[0], idx))
         elif u.path == "/scanner":
             self._send(render_scanner(refresh=q.get("refresh", ["0"])[0] == "1"))
+        elif u.path == "/api/account":
+            # read-only: renders the account card; never changes the bot's mode or settings
+            self._send(account_card_html(q.get("view", ["paper"])[0], read_status()))
         elif u.path == "/api/status":
             try:
                 with open(STATUS_FILE, encoding="utf-8") as f:
