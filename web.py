@@ -94,11 +94,24 @@ nav a.on small{color:#4a2508}
 table.wrap td{white-space:normal}
 .days a{color:var(--acc);margin-right:10px;text-decoration:none} .days a.on{color:var(--fg);font-weight:700;text-decoration:underline}
 footer{text-align:center;color:var(--muted);font-size:11px;margin:20px 0 6px}
+.switch{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:10px 0}
+.switch a{color:var(--fg);text-decoration:none;padding:7px 14px;border-radius:6px;border:1px solid var(--line);background:var(--card)}
+.switch a.paper.on{background:linear-gradient(180deg,var(--gold),var(--acc));color:#2a1204;font-weight:700;border-color:var(--gold)}
+.switch a.zerodha.on{background:var(--dn);color:#fff;font-weight:700;border-color:#fecaca}
+.viewbar{text-align:center;font-weight:700;letter-spacing:1px;border-radius:6px;padding:6px;margin:8px 0;font-size:13px}
+.viewbar.paper{background:rgba(245,158,11,.15);color:var(--gold);border:1px solid var(--gold)}
+.viewbar.zerodha{background:rgba(220,38,38,.18);color:#fecaca;border:2px solid var(--dn)}
+.card.acct.paper{border:2px solid var(--gold)} .card.acct.zerodha{border:2px solid var(--dn);background:linear-gradient(180deg,rgba(220,38,38,.10),var(--card) 40%)}
+.tag.dn{background:var(--dn);color:#fff}
 """).replace("SERIF", SERIF)
 
 
-def page(title, active, body, refresh=None):
-    nav = "".join(f"<a href='{u}' class='{'on' if u == active else ''}'>{icon} {T.name(key)} "
+VIEW_PAGES = ("/", "/trades")  # pages with the Paper Account | Zerodha Account switch
+
+
+def page(title, active, body, refresh=None, view=None):
+    nav = "".join(f"<a href='{u}{'?view=' + view if view and u in VIEW_PAGES else ''}' "
+                  f"class='{'on' if u == active else ''}'>{icon} {T.name(key)} "
                   f"<small>· {T.plain(key)}</small></a>" for u, key, icon in T.PAGES)
     meta = f'<meta http-equiv="refresh" content="{refresh}">' if refresh else ""
     head = (f"<header class='realm'><div class='dev'>{T.DEVANAGARI}</div><div class='app'>{T.BOW} {T.APP}</div>"
@@ -211,8 +224,48 @@ def paper_card(acct, status=None):
             f"unrealised P&amp;L is before exit charges · available = equity − invested (no leverage)</div>")
 
 
+VIEWS = {"paper": "Paper Account", "zerodha": "Zerodha Account"}
+
+
+def current_view(q, status):
+    """Which account the page shows: ?view=paper|zerodha, else the account the bot trades with.
+    Only changes what the page displays: the bot's mode is set in its own settings, never here."""
+    v = (q.get("view") or [""])[0]
+    if v in VIEWS:
+        return v
+    return "zerodha" if (status or {}).get("mode") == "live" else "paper"
+
+
+def view_switch(path, view, status):
+    bot_mode = T.mode_label((status or {}).get("mode") or ("live" if C.is_live() else "paper"))
+    confirm = ("return confirm('This shows your REAL Zerodha account (read-only).\\n\\n"
+               f"The bot keeps trading exactly as before ({bot_mode}). Switching views never changes "
+               "the trading mode or places an order.\\n\\nShow the Zerodha Account?')")
+    links = []
+    for v, label in VIEWS.items():
+        on = " on" if v == view else ""
+        click = f' onclick="{confirm}"' if v == "zerodha" and view != "zerodha" else ""
+        links.append(f"<a class='{v}{on}' href='{path}?view={v}'{click}>{label}</a>")
+    return (f"<div class='switch'><span class='muted'>View:</span> {''.join(links)}"
+            f"<span class='muted' style='font-size:12px'>Only changes what you see. "
+            f"The bot is trading: <b>{html.escape(bot_mode)}</b></span></div>")
+
+
+def view_banner(view):
+    if view == "zerodha":
+        return ("<div class='viewbar zerodha'>LIVE · REAL ZERODHA ACCOUNT · real money · read-only view</div>")
+    return "<div class='viewbar paper'>PAPER ACCOUNT · virtual money</div>"
+
+
+def zerodha_card(acct=None):
+    return (f"<h2>{T.name('live')} · Zerodha Account <span class='tag dn'>real money</span></h2>"
+            "<div class='muted'>Zerodha account details are not available yet.</div>")
+
+
 def account_card_html(view, status=None):
     import accounts
+    if view == "zerodha":
+        return zerodha_card()
     return paper_card(accounts.paper_account(), status)
 
 
@@ -275,8 +328,9 @@ def position_row(p):
             f"<td>{stop_cell}</td><td>{trail_cell}</td><td>{time_cell}</td><td>{held_cell}</td></tr>")
 
 
-def render(msg=""):
+def render(msg="", q=None):
     s = read_status()
+    view = current_view(q or {}, s)
     running = bot_running(s)
     ok, login_msg = login_status()
     url = login_url()
@@ -313,8 +367,10 @@ def render(msg=""):
                    if cooldown else f"<br><span class='muted' style='font-size:11px'>{T.name('cooldown')} after {C.LOSS_STREAK_LIMIT}</span>")
     run_tag = T.term("running") if running else T.term("not_running")
     return page(T.plain("live_page"), "/", f"""
-<h1>{T.BOW} {T.name('live_page')} <span class="tag">{html.escape(T.mode_label(mode))}</span> <span class="tag {'up' if running else 'warn'}">{run_tag}</span> {f'<span class="tag warn">{T.name("pause").upper()} · PAUSED</span>' if paused else ''}</h1>
-<div class="muted">{T.plain('live_page')} · updated {_fmt(when[11:19])} IST · auto-refreshes every 20 s</div>
+<h1>{T.BOW} {T.name('live_page')} <span class="tag" title="The mode the bot trades in (set in its own settings)">Bot trading: {html.escape(T.mode_label(mode))}</span> <span class="tag {'up' if running else 'warn'}">{run_tag}</span> {f'<span class="tag warn">{T.name("pause").upper()} · PAUSED</span>' if paused else ''}</h1>
+<div class="muted">{T.plain('live_page')} · bot status updated {_fmt(when[11:19])} IST · page auto-refreshes every 20 s</div>
+{view_switch("/", view, s)}
+{view_banner(view)}
 {banner}
 {calendar}
 {f'<p class="msg">{html.escape(msg)}</p>' if msg else ''}
@@ -322,15 +378,15 @@ def render(msg=""):
 <div class="{'up' if ok else 'warn'}">{html.escape(login_msg)}</div>{login_btn}
 <div class="muted">{T.term('paper')} mode doesn't need a login, except for {T.name('kite_data')} (Kite) price data.
 {T.term('live')} mode needs one every day (tokens expire ~06:00 IST).</div></div>
-{account_card("paper", s)}
+{account_card(view, s)}
 <div class="card kpis">
 <div>Trades today<b>{_fmt(s.get('trades_today'))}</b></div><div>Loss streak<b>{_fmt(s.get('loss_streak'))}</b>{streak_note}</div>
 <div>Data delay<b class="{lag_cls}">{lag_txt}</b></div>{data_source_kpi(s)}</div>
-<div class="card"><h2>{T.term('positions')}</h2><table class="wrap"><tr><th>Stock</th><th>Side · Qty</th><th>Entry → Price</th><th>Open P&amp;L</th>
+<div class="card"><h2>{T.term('positions')} held by the bot <span class="tag">{html.escape(T.mode_label(mode))}</span></h2><table class="wrap"><tr><th>Stock</th><th>Side · Qty</th><th>Entry → Price</th><th>Open P&amp;L</th>
 <th>{T.term('stop')}</th><th>{T.term('trail')}</th><th>{T.term('time_stop')}</th><th>In trade</th></tr>{pos_rows}</table></div>
 <div class="card"><h2>{T.term('watchlist')} (last closed 15-min bar)</h2><table><tr><th>Stock</th><th>Bar</th><th>Opening range</th><th>Close</th><th>VWAP</th><th>Vol ×</th><th>Status</th></tr>{sig_rows}</table></div>
 {controls}
-<div class="card"><h2>{T.term('events')}</h2><ul>{events}</ul></div>""", refresh=20)
+<div class="card"><h2>{T.term('events')}</h2><ul>{events}</ul></div>""", refresh=20, view=view)
 
 
 def sparkline(closes, or_hi, or_lo, w=160, h=36):
@@ -544,18 +600,23 @@ def trade_section(rows, src, label, start_cash, show_log=True):
     return kpis + charts_html + log
 
 
-def render_trades():
+def render_trades(q=None):
+    s = read_status()
+    view = current_view(q or {}, s)
+    mode = "live" if view == "zerodha" else "paper"   # each view reads only its own trade file
     parts = [f"<h1>{T.SCROLL} {T.term('trades')}</h1>"
-             f"<div class='muted'>The royal treasury's ledger: every closed trade, after Zerodha charges.</div>"]
-    for mode in ("paper", "live"):
-        rows = trade_rows(mode)
-        if not rows and mode == "live":
-            continue
-        start = C.PAPER_START_INR
-        parts.append(trade_section(rows, mode, f"{T.name(mode)} · {mode.title()}", start))
-        parts.append(edge_card(rows, f"{mode.title()} trading"))
-        if not rows:
-            parts.append("<div class='card muted'>No trades yet - the bot records them here once it trades on a market day.</div>")
+             f"<div class='muted'>The royal treasury's ledger: every closed trade, after Zerodha charges.</div>",
+             view_switch("/trades", view, s), view_banner(view)]
+    rows = trade_rows(mode)
+    label = f"{T.name(mode)} · {VIEWS[view]}"
+    parts.append(f"<div class='card acct {view}' style='padding:4px 16px'>"
+                 + trade_section(rows, mode, label, C.PAPER_START_INR) + "</div>")
+    parts.append(edge_card(rows, f"{mode.title()} trading"))
+    if not rows:
+        parts.append("<div class='card muted'>No trades yet - the bot records them here once it trades on a market day.</div>"
+                     if mode == "paper" else
+                     "<div class='card muted'>No real-money trades: the bot has only traded on paper. This list shows "
+                     "trades the bot places in live mode (data\\trades_live.csv), not your whole Zerodha tradebook.</div>")
     bt = trade_rows("backtest")
     if bt:
         first, last = bt[0].get("opened", "")[:10], max(r.get("closed", "")[:10] for r in bt)
@@ -564,7 +625,7 @@ def render_trades():
                      f"Full list: data\\backtest_trades.csv</div>")
         parts.append(trade_section(bt, "backtest", "Backtest", C.PAPER_START_INR))
         parts.append(edge_card(bt, "Backtest", compact=True))
-    return page("Trades", "/trades", "".join(parts))
+    return page("Trades", "/trades", "".join(parts), view=view)
 
 
 _BARS_CACHE = {}
@@ -696,7 +757,7 @@ class Handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         q = parse_qs(u.query)
         if u.path == "/":
-            self._send(render(q.get("msg", [""])[0]))
+            self._send(render(q.get("msg", [""])[0], q))
         elif u.path == "/review":
             day = q.get("day", [None])[0]
             if day:
@@ -707,7 +768,7 @@ class Handler(BaseHTTPRequestHandler):
                     day = None
             self._send(render_review(day, refresh=q.get("refresh", ["0"])[0] == "1"))
         elif u.path == "/trades":
-            self._send(render_trades())
+            self._send(render_trades(q))
         elif u.path == "/journey":
             try:
                 idx = int(q.get("i", [""])[0])

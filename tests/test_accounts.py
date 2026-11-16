@@ -110,3 +110,75 @@ def test_live_page_has_refreshing_account_card(server):
     assert code == 200 and "id='acct'" in body and "/api/account?view=paper" in body
     code, frag = get(server + "/api/account?view=paper")
     assert code == 200 and "Paper Account" in frag and "<html" not in frag
+
+
+# -- Item 2: the Paper Account | Zerodha Account switch
+
+def write_status(mode):
+    with open(os.path.join(C.DATA_DIR, "status.json"), "w", encoding="utf-8") as f:
+        json.dump({"mode": mode, "time": MON_1030.isoformat()}, f)
+
+
+def test_default_view_follows_the_bots_mode():
+    assert web.current_view({}, {"mode": "paper"}) == "paper"
+    assert web.current_view({}, {"mode": "live"}) == "zerodha"
+    assert web.current_view({}, {}) == "paper"
+    assert web.current_view({"view": ["zerodha"]}, {"mode": "paper"}) == "zerodha"
+    assert web.current_view({"view": ["anything"]}, {"mode": "paper"}) == "paper"
+
+
+def test_switch_labels_highlight_and_confirmation(server):
+    write_status("paper")
+    _, body = get(server + "/")
+    assert "Paper Account</a>" in body and "Zerodha Account</a>" in body
+    assert "class='paper on'" in body and "PAPER ACCOUNT · virtual money" in body
+    assert "onclick=\"return confirm('This shows your REAL Zerodha account" in body
+    assert "Bot trading: Abhyas · PAPER" in body
+    _, body = get(server + "/?view=zerodha")
+    assert "class='zerodha on'" in body and "LIVE · REAL ZERODHA ACCOUNT" in body
+    assert "card acct zerodha" in body and "/api/account?view=zerodha" in body
+    assert "Bot trading: Abhyas · PAPER" in body                # the bot's mode is unchanged
+    assert "href='/trades?view=zerodha'" in body                 # the view carries over to Trades
+
+
+def _trades(name, symbol):
+    import csv
+    with open(os.path.join(C.DATA_DIR, name), "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=["closed", "symbol", "direction", "net", "r"])
+        w.writeheader()
+        w.writerow({"closed": "2026-11-16 10:00", "symbol": symbol, "direction": "LONG", "net": "10", "r": "0.1"})
+
+
+def test_trade_histories_stay_separate(server):
+    write_status("paper")
+    _trades("trades_paper.csv", "PAPERONLY")
+    _trades("trades_live.csv", "LIVEONLY")
+    _, paper = get(server + "/trades?view=paper")
+    _, live = get(server + "/trades?view=zerodha")
+    assert "PAPERONLY" in paper and "LIVEONLY" not in paper
+    assert "LIVEONLY" in live and "PAPERONLY" not in live
+    os.remove(os.path.join(C.DATA_DIR, "trades_live.csv"))
+    _, live = get(server + "/trades?view=zerodha")
+    assert "No real-money trades" in live and "PAPERONLY" not in live
+
+
+def _snapshot():
+    files = {}
+    for root, _, names in os.walk(C.DATA_DIR):
+        for n in names:
+            p = os.path.join(root, n)
+            files[p] = (os.path.getmtime(p), open(p, "rb").read())
+    return files, (C.DRY_RUN, C.CONFIRM_LIVE, C.is_live(), C.DATA_SOURCE), dict(os.environ)
+
+
+def test_switching_views_changes_nothing(server):
+    """Viewing either account never changes the trading mode, settings or any file, and never trades."""
+    write_status("paper")
+    write_paper_state(ONE_LONG)
+    _trades("trades_paper.csv", "SBIN")
+    before = _snapshot()
+    for url in ("/", "/?view=paper", "/?view=zerodha", "/?view=live", "/trades?view=paper", "/trades?view=zerodha",
+                "/api/account?view=paper", "/api/account?view=zerodha", "/api/account?view=bogus"):
+        assert get(server + url)[0] == 200, url
+    assert _snapshot() == before
+    assert not os.path.exists(C.STOP_FILE) and not os.path.exists(C.PAUSE_FILE)
