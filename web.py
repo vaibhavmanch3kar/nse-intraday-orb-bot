@@ -691,6 +691,83 @@ def trade_section(rows, src, label, start_cash, show_log=True):
     return kpis + charts_html + log
 
 
+def _money(v):
+    if v is None:
+        return "–"
+    return f"<span class='{'up' if v > 0 else 'dn' if v < 0 else ''}'>{'-' if v < 0 else ''}₹{abs(v):,.0f}</span>"
+
+
+def _maybe(v, fmt):
+    return "–" if v is None else fmt.format(v)
+
+
+def journal_card(mode, view, period):
+    """Daily | Weekly | Monthly results from the daily journal (data/journal/journal_<mode>.csv)."""
+    import journal
+    period = period if period in journal.PERIODS else "day"
+    rows = journal.days(mode)
+    tabs = " ".join(f"<a class='{'on' if p == period else ''}' href='/trades?view={view}&amp;period={p}#journal'>{name}</a>"
+                    for p, name in journal.PERIODS.items())
+    dl = (f"<a class='sig' href='/journal.csv?view={view}&amp;period={period}' download>⬇ Download CSV</a>"
+          if rows else "")
+    head = (f"<div class='card' id='journal'><h2>{T.SCROLL} Daily journal · {html.escape(T.name(mode))}</h2>"
+            f"<div class='days'>{tabs} {dl}</div>")
+    if not rows:
+        return (head + "<div class='muted'>No days yet. The bot writes one row per trading day to "
+                f"data\\journal\\journal_{mode}.csv from its next start.</div></div>")
+    status_cls = {"complete": "up", "rebuilt": "muted", "running": "warn"}
+    if period == "day":
+        body = []
+        for r in reversed(rows):
+            st = r.get("status") or ""
+            sig = journal._opt(r.get("signals"))
+            sig_txt = ("–" if sig is None else
+                       f"{int(sig)} <span class='muted'>({int(journal._f(r.get('taken')))} taken, "
+                       f"{int(journal._f(r.get('skipped')))} skipped)</span>")
+            tip = html.escape(r.get("skip_reasons") or "")
+            trades = int(journal._f(r.get("trades")))
+            body.append(
+                f"<tr><td>{html.escape(journal.period_label(r['date'], 'day'))}</td>"
+                f"<td class='{status_cls.get(st, 'dn')}'>{html.escape(st)}</td>"
+                f"<td>{trades}</td><td>{int(journal._f(r.get('wins')))}</td>"
+                f"<td>{_money(journal._opt(r.get('net_pnl')))}</td>"
+                f"<td>{_maybe(journal._opt(r.get('return_pct')), '{:+.2f}%')}</td>"
+                f"<td>₹{journal._f(r.get('charges')):,.0f}</td>"
+                f"<td>{_maybe(journal._f(r.get('total_r')) / trades if trades else None, '{:+.2f}R')}</td>"
+                f"<td>{_maybe(journal._opt(r.get('max_drawdown_pct')), '{:.2f}%')}</td>"
+                f"<td title='{tip}'>{sig_txt}</td>"
+                f"<td>{_maybe(journal._opt(r.get('outage_min')), '{:.0f} min')}</td>"
+                f"<td>{html.escape(r.get('bot_start') or '?')}–{html.escape(r.get('bot_stop') or '?')}</td>"
+                f"<td class='muted' style='white-space:normal'>{html.escape(r.get('note') or '')}</td></tr>")
+        table = ("<table><tr><th>Day</th><th>Status</th><th>Trades</th><th>Won</th><th>Net</th><th>Return</th>"
+                 "<th>Charges</th><th>Avg R</th><th>Worst drawdown</th><th>Signals</th><th>Data outages</th>"
+                 f"<th>Bot ran</th><th>Note</th></tr>{''.join(body)}</table>")
+    else:
+        body = []
+        for s in reversed(journal.summarise(rows, period)):
+            odd = [st for st in s["statuses"] if st != "complete"]
+            days_txt = f"{s['days']}" + (f" <span class='muted'>({s['full_days']} full)</span>" if odd else "")
+            body.append(
+                f"<tr><td>{html.escape(s['label'])}</td><td>{days_txt}</td><td>{s['trades']}</td>"
+                f"<td>{_maybe(s['win_rate'], '{:.0f}%')}</td><td>{_money(s['net'])}</td>"
+                f"<td>{s['return_pct']:+.2f}%</td><td>₹{s['charges']:,.0f}</td>"
+                f"<td>{_maybe(s['avg_r'], '{:+.2f}R')}</td>"
+                f"<td>{_money(s['best_day'])} / {_money(s['worst_day'])}</td>"
+                f"<td>{s['max_drawdown_pct']:.2f}%{'' if s['drawdown_known'] else '*'}</td>"
+                f"<td title='{html.escape(s['skip_reasons'])}'>{_maybe(s['skipped'], '{:.0f}')}</td>"
+                f"<td>{_maybe(s['outage_min'], '{:.0f} min')}</td></tr>")
+        table = ("<table><tr><th>" + ("Week" if period == "week" else "Month") + "</th><th>Days</th><th>Trades</th>"
+                 "<th>Won</th><th>Net</th><th>Return</th><th>Charges</th><th>Avg R</th><th>Best / worst day</th>"
+                 f"<th>Worst drawdown</th><th>Skipped signals</th><th>Data outages</th></tr>{''.join(body)}</table>")
+    notes = ("<div class='muted' style='margin-top:6px'>Newest first. <b>complete</b> = the bot ran to the close; "
+             "<b>stopped HH:MM</b> = stopped by the STOP file; <b>incomplete</b> = the bot stopped without saying "
+             "goodbye (crash, PC off); <b>rebuilt</b> = from the trade log only, so signals, drawdown and outages "
+             "are unknown (–). Worst drawdown = the biggest fall from a high, inside a day (checked every round) or "
+             "from one day's close to a later one; * = some days unknown. Hover a signal count for the skip "
+             f"reasons. Saved in data\\journal\\journal_{mode}.csv.</div>")
+    return head + table + notes + "</div>"
+
+
 def render_trades(q=None):
     s = read_status()
     view = current_view(q or {}, s)
@@ -709,6 +786,7 @@ def render_trades(q=None):
                     f"({_inr(start)}). {capital_lines()}</div>")
     parts.append(f"<div class='card acct {view}' style='padding:4px 16px'>"
                  + trade_section(rows, mode, label, start) + note + "</div>")
+    parts.append(journal_card(mode, view, (q or {}).get("period", ["day"])[0]))
     parts.append(edge_card(rows, f"{mode.title()} trading"))
     if not rows:
         parts.append("<div class='card muted'>No trades yet - the bot records them here once it trades on a market day.</div>"
@@ -867,6 +945,21 @@ class Handler(BaseHTTPRequestHandler):
             self._send(render_review(day, refresh=q.get("refresh", ["0"])[0] == "1"))
         elif u.path == "/trades":
             self._send(render_trades(q))
+        elif u.path == "/journal.csv":
+            # read-only download of the journal table; each view reads only its own account's journal
+            import journal
+            view = q.get("view", ["paper"])[0]
+            mode = "live" if view == "zerodha" else "paper"
+            period = q.get("period", ["day"])[0]
+            period = period if period in journal.PERIODS else "day"
+            data = journal.summary_csv(mode, period).encode("utf-8-sig")   # BOM: Excel shows ₹ correctly
+            self.send_response(200)
+            self.send_header("Content-Type", "text/csv; charset=utf-8")
+            self.send_header("Content-Disposition", f'attachment; filename="journal_{mode}_{period}.csv"')
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(data)
         elif u.path == "/journey":
             try:
                 idx = int(q.get("i", [""])[0])

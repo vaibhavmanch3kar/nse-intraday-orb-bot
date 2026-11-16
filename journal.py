@@ -351,6 +351,114 @@ def backfill(mode, today=None):
     return changed
 
 
+# -- daily / weekly / monthly summaries (for the Trades page and the saved reports)
+
+PERIODS = {"day": "Daily", "week": "Weekly", "month": "Monthly"}
+
+
+def period_key(date_str, period):
+    d = dt.date.fromisoformat(date_str)
+    if period == "week":
+        y, w, _ = d.isocalendar()
+        return f"{y}-W{w:02d}"
+    if period == "month":
+        return f"{d:%Y-%m}"
+    return date_str
+
+
+def period_label(key, period, dates=()):
+    if period == "week":
+        if dates:
+            a, b = dt.date.fromisoformat(min(dates)), dt.date.fromisoformat(max(dates))
+            span = f"{a:%d %b}" if a == b else (f"{a.day}–{b:%d %b}" if a.month == b.month else f"{a:%d %b}–{b:%d %b}")
+            return f"{key} · {span}"
+        return key
+    if period == "month":
+        return f"{dt.date.fromisoformat(key + '-01'):%B %Y}"
+    return f"{dt.date.fromisoformat(key):%a %d %b %Y}"
+
+
+def _opt(x):
+    return None if x in (None, "") else _f(x, None)
+
+
+def summarise(rows, period):
+    """Group journal rows (oldest first) by day, ISO week (Mon-Sun) or calendar month.
+    Returns a list of dicts, oldest first. None means 'not known' (for example on rebuilt days)."""
+    groups = {}
+    for r in rows:
+        groups.setdefault(period_key(r["date"], period), []).append(r)
+    out = []
+    for key, g in groups.items():
+        nets = [_f(r.get("net_pnl")) for r in g]
+        start = _f(g[0].get("start_equity"))
+        ends = [_f(r.get("end_equity")) for r in g]
+        trades = sum(int(_f(r.get("trades"))) for r in g)
+        wins = sum(int(_f(r.get("wins"))) for r in g)
+        total_r = sum(_f(r.get("total_r")) for r in g)
+        intraday = [v for v in (_opt(r.get("max_drawdown_pct")) for r in g) if v is not None]
+        _, close_dd = drawdown([start] + ends)
+        skipped = [_opt(r.get("skipped")) for r in g]
+        outage = [_opt(r.get("outage_min")) for r in g]
+        out.append({
+            "key": key, "label": period_label(key, period, [r["date"] for r in g]),
+            "dates": [r["date"] for r in g], "days": len(g),
+            "full_days": sum(1 for r in g if r.get("status") == "complete"),
+            "statuses": [r.get("status") or "" for r in g],
+            "trades": trades, "wins": wins, "losses": trades - wins,
+            "win_rate": wins / trades * 100 if trades else None,
+            "net": sum(nets), "start_equity": start, "end_equity": ends[-1] if ends else start,
+            "return_pct": sum(nets) / start * 100 if start else 0.0,
+            "charges": sum(_f(r.get("charges")) for r in g), "total_r": total_r,
+            "avg_r": total_r / trades if trades else None,
+            "best_day": max(nets) if nets else None, "worst_day": min(nets) if nets else None,
+            "max_drawdown_pct": max(intraday + [close_dd]),
+            "drawdown_known": len(intraday) == len(g),
+            "skipped": sum(v for v in skipped if v is not None) if any(v is not None for v in skipped) else None,
+            "outage_min": sum(v for v in outage if v is not None) if any(v is not None for v in outage) else None,
+            "signals": sum(int(_f(r.get("signals"))) for r in g if _opt(r.get("signals")) is not None),
+            "skip_reasons": _merge_reasons(r.get("skip_reasons") for r in g),
+        })
+    return out
+
+
+def _merge_reasons(texts):
+    total = {}
+    for t in texts:
+        for part in (t or "").split(";"):
+            if ":" in part:
+                k, v = part.rsplit(":", 1)
+                total[k.strip()] = total.get(k.strip(), 0) + int(_f(v))
+    return "; ".join(f"{k}: {v}" for k, v in sorted(total.items(), key=lambda kv: (-kv[1], kv[0])))
+
+
+SUMMARY_COLS = ["period", "days", "complete_days", "trades", "wins", "losses", "win_rate_pct", "net_pnl",
+                "return_pct", "charges", "total_r", "avg_r", "best_day", "worst_day", "max_drawdown_pct",
+                "skipped_signals", "skip_reasons", "outage_min", "start_equity", "end_equity"]
+
+
+def summary_csv(mode, period, today=None):
+    """The Trades page table as CSV text: the journal rows for 'day', one row per week/month otherwise."""
+    import io
+    rows = days(mode, today)
+    buf = io.StringIO()
+    if period == "day":
+        w = csv.DictWriter(buf, fieldnames=COLS, extrasaction="ignore", lineterminator="\n")
+        w.writeheader()
+        for r in rows:
+            w.writerow({k: _cell(r.get(k)) for k in COLS})
+        return buf.getvalue()
+    w = csv.writer(buf, lineterminator="\n")
+    w.writerow(SUMMARY_COLS)
+    for s in summarise(rows, period):
+        w.writerow([_cell(v) for v in (s["key"], s["days"], s["full_days"], s["trades"], s["wins"], s["losses"],
+                                       s["win_rate"], s["net"], s["return_pct"], s["charges"], s["total_r"],
+                                       s["avg_r"], s["best_day"], s["worst_day"], s["max_drawdown_pct"],
+                                       s["skipped"], s["skip_reasons"], s["outage_min"], s["start_equity"],
+                                       s["end_equity"])])
+    return buf.getvalue()
+
+
 def main():
     import argparse
     ap = argparse.ArgumentParser(description="Daily journal (read-only for trading)")
