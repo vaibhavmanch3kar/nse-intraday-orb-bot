@@ -279,12 +279,15 @@ def shell(title, active, body, view=None, switch="", extra_head=""):
     foot = (f"<footer>{T.APP} · {T.DEVANAGARI} · {T.term('paper')} trading by default · "
             f"software only, not investment advice</footer>")
     bottom = f"<nav class='bottom' aria-label='Pages'>{nav_links(active, view, 'bottom')}</nav>"
+    import chartjs
+    charts_css = chartjs.CSS if "data-chart=" in body else ""
+    charts_js = f"<script>{chartjs.JS}</script>" if "data-chart=" in body else ""
     return (f"<!doctype html><html lang='en'><head><meta charset='utf-8'>"
             f"<meta name='viewport' content='width=device-width, initial-scale=1, viewport-fit=cover'>"
             f"<meta name='theme-color' content='{T.PALETTES['dark']['bg']}'>"
             f"<title>{html.escape(title)} · {T.APP}</title>"
             f'<link rel="icon" href="{T.FAVICON}">'
-            f"<script>{HEAD_JS}</script><style>{css()}</style>{extra_head}</head>"
+            f"<script>{HEAD_JS}</script><style>{css()}{charts_css}</style>{extra_head}</head>"
             f"<body data-view='{html.escape(view or '')}'><a class='skip' href='#main'>Skip to content</a>{head}{phone_switch}"
             f"<main class='wrap' id='main'>{body}{foot}</main>{bottom}"
-            f"<script>{THEME_JS}</script></body></html>")
+            f"<script>{THEME_JS}</script>{charts_js}</body></html>")

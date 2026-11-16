@@ -122,6 +122,41 @@ def pnl_bars(values, labels=None, w=900, h=180, title="P&L per trade"):
     return _svg(w, h, "".join(parts), title)
 
 
+def _bar_index(bars, when):
+    """The candle containing `when` (a close time on a bar boundary belongs to the bar before)."""
+    if when is None:
+        return None
+    import datetime as _dt
+    probe = when - _dt.timedelta(seconds=1)
+    idx = 0
+    for i, b in enumerate(bars):
+        if b["t"] <= probe:
+            idx = i
+    return idx
+
+
+def journey_data(bars, trade, ema=None, or_range=None):
+    """The same trade picture as numbers, for the interactive candle chart (chartjs 'candles')."""
+    lines = []
+    if trade.get("stop"):
+        lines.append({"n": "stop", "v": round(trade["stop"], 2), "c": "dn"})
+    if trade.get("target"):
+        lines.append({"n": "target", "v": round(trade["target"], 2), "c": "up"})
+    if trade.get("entry"):
+        lines.append({"n": "entry", "v": round(trade["entry"], 2), "c": "mu", "dash": "2 3"})
+    up = trade.get("direction") == "LONG"
+    marks = []
+    for key, price_key, kind in (("opened", "entry", "entry"), ("closed", "exit", "exit")):
+        i, px = _bar_index(bars, trade.get(key)), trade.get(price_key)
+        if i is not None and px:
+            marks.append({"i": i, "p": round(px, 2), "k": kind, "upward": (key == "opened") == up})
+    return {"type": "candles", "h": 340,
+            "bars": [[f"{b['t']:%H:%M}", b["o"], b["h"], b["l"], b["c"]] for b in bars],
+            "ema": [None if e is None else round(e, 2) for e in ema] if ema else None,
+            "band": [or_range[0], or_range[1]] if or_range and all(or_range) else None,
+            "lines": lines, "marks": marks}
+
+
 def journey(bars, trade, ema=None, or_range=None, w=900, h=320, title="Trade journey"):
     """Candles for one session with the trade drawn on top.
 

@@ -594,7 +594,11 @@ def live_equity(view, s=None):
     if len(pts) < 2 and (s or {}).get("mode", "paper") != mode:
         return ""   # the bot isn't trading this account: nothing to chart
     import charts
-    body = (charts.intraday(pts, start) if len(pts) >= 2 else
+    import chartjs
+    body = (chartjs.container({"type": "line", "pts": [[t[:5], round(v, 2)] for t, v in pts],
+                               "base": start if start is not None else pts[0][1]},
+                              charts.intraday(pts, start), "Equity during the day")
+            if len(pts) >= 2 else
             "<div class='empty'>The chart fills in while the bot runs today (from the daily journal).</div>")
     return (f"<section class='card flush' id='equity'><div class='hd'>Today's equity "
             f"<span class='tag'>{html.escape(T.mode_label(mode))}</span></div><div class='bd spark'>{body}</div></section>")
@@ -950,6 +954,15 @@ def breakdown_table(rows, key, title):
             f"<th>Won</th><th>Net</th><th>Avg</th></tr>{''.join(out)}</table></div>")
 
 
+def _day_label(iso_day):
+    """'2026-11-16' -> '16 Nov'"""
+    import datetime as dt
+    try:
+        return dt.date.fromisoformat(iso_day).strftime("%d %b")
+    except ValueError:
+        return iso_day or "-"
+
+
 def trade_section(rows, src, label, start_cash, show_log=True):
     """KPIs, equity curve, P&L bars, breakdowns and the trade log (with chart links) for one trade list."""
     import charts
@@ -971,10 +984,19 @@ def trade_section(rows, src, label, start_cash, show_log=True):
             f"<div>Max drawdown<b class='{'dn' if max_dd else ''}'>{max_dd:.2f}%</b></div></div>")
     if not rows:
         return kpis
+    import chartjs
+    days = [(r.get("closed") or "")[:10] for r in rows]
+    eq_pts = [[_day_label(d), round(v, 2), d, t] for d, v, t in zip(days, equity, tips)]
+    bar_pts = [[f"#{i + 1} {_day_label(d)}", round(v, 2), t] for i, (d, v, t) in enumerate(zip(days, nets, tips))]
+    eq_chart = chartjs.container({"type": "line", "pts": eq_pts, "base": start_cash, "from0": True, "dd": True,
+                                  "ranges": True, "firstLabel": "start"},
+                                 charts.equity_curve(equity, start_cash, tips), f"{label}: equity after each closed trade")
+    bar_chart = chartjs.container({"type": "bars", "pts": bar_pts, "h": 170},
+                                  charts.pnl_bars(nets, tips), f"{label}: profit or loss per trade")
     charts_html = (f"<div class='card'><h2>{html.escape(label)}: equity after each closed trade "
-                   f"(red area = drawdown from the peak)</h2>{charts.equity_curve(equity, start_cash, tips)}"
-                   f"<h2 style='margin-top:12px'>Profit or loss per trade (hover a bar for details)</h2>"
-                   f"{charts.pnl_bars(nets, tips)}</div>"
+                   f"<span class='muted small'>(red area = drawdown from the peak)</span></h2>{eq_chart}"
+                   f"<h2 style='margin-top:14px'>Profit or loss per trade <span class='muted small'>"
+                   f"(hover, tap or use the arrow keys for details)</span></h2>{bar_chart}</div>"
                    f"<div class='card' style='display:flex;flex-wrap:wrap;gap:18px'>"
                    f"{breakdown_table(rows, 'reason', 'By exit reason')}"
                    f"{breakdown_table(rows, 'direction', 'Long vs short')}"
@@ -1179,7 +1201,10 @@ def render_journey(src, i):
         trade = {"direction": r.get("direction"), "entry": _num(r.get("entry")), "exit": _num(r.get("exit")),
                  "stop": _num(r.get("stop")), "target": _num(r.get("target")) or None,
                  "opened": opened, "closed": closed}
-        chart = charts.journey(today, trade, ema, (orng["low"], orng["high"]) if orng else None)
+        import chartjs
+        band = (orng["low"], orng["high"]) if orng else None
+        chart = chartjs.container(charts.journey_data(today, trade, ema, band),
+                                  charts.journey(today, trade, ema, band), f"{sym} 15-minute candles with the trade")
     net, rr = _num(r.get("net")), _num(r.get("r"))
     held = f"{int((closed - opened).total_seconds() // 60)} min" if closed else "-"
     body = f"""
