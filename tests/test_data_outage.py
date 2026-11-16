@@ -78,3 +78,38 @@ def test_new_candle_after_outage_is_evaluated(monkeypatch):
     clock[0] = dt.datetime.combine(day, dt.time(10, 0, 30), tzinfo=IST)
     b.cycle()
     assert b.rows["SBIN"]["bar"] == "09:45"
+
+
+def test_outage_logged_once_and_recovery_logged(monkeypatch, caplog):
+    import logging
+    caplog.set_level(logging.INFO)
+    bars, day = quiet_day()
+    feed, clock = [bars], [dt.datetime.combine(day, dt.time(9, 45, 30), tzinfo=IST)]
+    setup(monkeypatch, feed, clock)
+    b = bot.Bot()
+    b.cycle()
+    assert not [r for r in caplog.records if "price data" in r.getMessage()]
+
+    feed[0] = DNS_ERROR
+    for hhmm in ((9, 46), (9, 47), (9, 48)):          # three failed rounds -> one warning
+        clock[0] = dt.datetime.combine(day, dt.time(*hhmm), tzinfo=IST)
+        b.cycle()
+    warnings = [r for r in caplog.records if "price data problem" in r.getMessage()]
+    assert len(warnings) == 1 and warnings[0].levelno == logging.WARNING
+    assert "1 of 1 stocks failed (can't look up the data server's address" in warnings[0].getMessage()
+
+    feed[0] = bars
+    clock[0] = dt.datetime.combine(day, dt.time(9, 52), tzinfo=IST)
+    b.cycle()
+    b.cycle()                                         # a second good round logs nothing more
+    back = [r.getMessage() for r in caplog.records if "price data back" in r.getMessage()]
+    assert back == ["price data back: all 1 stocks OK (problem from 09:46, about 6 min)"]
+    assert any("price data back" in e for e in b.events)   # also shown on the dashboard
+
+
+def test_data_problem_plain_words():
+    assert "DNS" in bot.data_problem(DNS_ERROR)
+    assert bot.data_problem(Exception("ConnectTimeoutError(... 'Connection to x timed out')")) == \
+        "connection to the data server timed out"
+    assert "429" in bot.data_problem(Exception("rate limited (429)"))
+    assert bot.data_problem(Exception("something else")) == "something else"

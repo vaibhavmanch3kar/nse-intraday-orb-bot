@@ -115,6 +115,20 @@ def at(t: str, day: dt.date):
     return dt.datetime.combine(day, strategy.hm(t), tzinfo=IST)
 
 
+def data_problem(err) -> str:
+    """A long requests/urllib3 error in a few plain words (the full text stays on the dashboard row)."""
+    s = str(err)
+    if "NameResolution" in s or "getaddrinfo" in s or "Failed to resolve" in s:
+        return "can't look up the data server's address (internet or DNS down?)"
+    if "ConnectTimeout" in s or "timed out" in s.lower():
+        return "connection to the data server timed out"
+    if "429" in s:
+        return "the data server is rate-limiting us (429)"
+    if "Max retries" in s or "ConnectionError" in s or "Connection aborted" in s:
+        return "can't connect to the data server"
+    return s[:150]
+
+
 class Bot:
     def __init__(self):
         self.live = C.is_live()
@@ -131,6 +145,7 @@ class Bot:
         self.holiday_checked = None
         self.bars = {}          # symbol -> latest closed 15-min bars (for the dashboard)
         self.good_rows = {}     # symbol -> last evaluation row, shown again once data is back
+        self.data_down_since = None  # time the current price-data problem started (None = data OK)
 
     # -- helpers
     def note(self, msg, level=logging.INFO):
@@ -150,6 +165,19 @@ class Bot:
         self.broker = LiveBroker(self.kite)
         self.reconcile()
         return True
+
+    def log_data_health(self, fetched, now):
+        """One log line when price data starts failing and one when it is back (not one per round)."""
+        failed = [s for s in C.WATCHLIST if isinstance(fetched.get(s), Exception) or fetched.get(s) is None]
+        if failed and self.data_down_since is None:
+            self.data_down_since = now
+            self.note(f"⚠ price data problem: {len(failed)} of {len(C.WATCHLIST)} stocks failed "
+                      f"({data_problem(fetched.get(failed[0]))}) - retrying every round", logging.WARNING)
+        elif not failed and self.data_down_since is not None:
+            mins = (now - self.data_down_since).total_seconds() / 60
+            self.note(f"price data back: all {len(C.WATCHLIST)} stocks OK "
+                      f"(problem from {self.data_down_since:%H:%M}, about {mins:.0f} min)")
+            self.data_down_since = None
 
     def reconcile(self):
         held = self.broker.open_mis_quantities()
@@ -208,6 +236,7 @@ class Bot:
             if closed[-1]["t"].date() == today:
                 lags.append((now - closed[-1]["t"]).total_seconds() / 60 - C.INTERVAL_MIN)
         self.data_lag_min = max(lags) if lags else None
+        self.log_data_health(fetched, now)
 
         index_bars = {}
         if C.INDEX_FILTER:
