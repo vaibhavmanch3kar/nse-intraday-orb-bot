@@ -765,7 +765,16 @@ def journal_card(mode, view, period):
              "are unknown (–). Worst drawdown = the biggest fall from a high, inside a day (checked every round) or "
              "from one day's close to a later one; * = some days unknown. Hover a signal count for the skip "
              f"reasons. Saved in data\\journal\\journal_{mode}.csv.</div>")
-    return head + table + notes + "</div>"
+    import reports
+    files = reports.saved(mode)
+    saved = ""
+    if files:
+        links = " · ".join(f"<a class='sig' href='/reports/{html.escape(n)}' target='_blank'>"
+                           f"{html.escape(n.split('_', 1)[1].replace('_', ' ').replace('.html', ''))}</a>"
+                           for n in files[:12])
+        saved = (f"<div style='margin-top:8px'>{T.SCROLL} Saved reports (data\\reports, open and print or save as PDF): "
+                 f"{links}{' · …' if len(files) > 12 else ''}</div>")
+    return head + table + notes + saved + "</div>"
 
 
 def render_trades(q=None):
@@ -960,6 +969,15 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(data)
+        elif u.path.startswith("/reports/"):
+            import reports
+            name = u.path[len("/reports/"):]
+            path = os.path.join(reports.reports_dir(), name)
+            if not reports.NAME_RE.match(name) or not os.path.isfile(path):
+                self._send("not found", 404, "text/plain")
+                return
+            with open(path, encoding="utf-8") as f:
+                self._send(f.read())
         elif u.path == "/journey":
             try:
                 idx = int(q.get("i", [""])[0])

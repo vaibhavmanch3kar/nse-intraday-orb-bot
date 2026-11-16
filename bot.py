@@ -25,6 +25,7 @@ import data_yahoo
 import marketdata
 import holidays
 import journal
+import reports
 import risk
 import strategy
 import theme as T
@@ -210,6 +211,9 @@ class Bot:
                 if rebuilt:
                     self.note(f"journal: saved {len(rebuilt)} earlier day(s) ({', '.join(rebuilt)})")
                 self.journal = journal.DayJournal(self.mode, now.date(), self.started_at, self.state)
+                for path in reports.catch_up(self.mode, now.date()):
+                    self.note(f"{T.SCROLL} report saved (missed after the last close): "
+                              f"{os.path.join('data', 'reports', os.path.basename(path))}")
             j = self.journal
             for sym, _closed, ev, row in candidates:
                 pos = self.state.positions.get(sym)
@@ -457,6 +461,18 @@ class Bot:
             self.note(msg)
         except Exception as e:
             self.note(f"{T.WARN_ICON} candle archive failed: {e!r}", logging.WARNING)
+        self.save_reports(now)
+
+    def save_reports(self, now):
+        """After the close on the last trading day of a week or month: the saved weekly/monthly report."""
+        try:
+            for period, key in reports.due(now.date()):
+                path = reports.write(self.mode, period, key)
+                if path:
+                    self.note(f"{T.SCROLL} {period}ly report saved: "
+                              f"{os.path.join('data', 'reports', os.path.basename(path))}")
+        except Exception as e:  # noqa: BLE001 - a report problem never stops the bot
+            self.note(f"{T.WARN_ICON} weekly/monthly report not saved ({e!r})", logging.WARNING)
 
     def run(self):
         if not holidays.year_listed(now_ist().year):
