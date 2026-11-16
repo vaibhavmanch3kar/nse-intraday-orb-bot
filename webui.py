@@ -285,6 +285,6 @@ def shell(title, active, body, view=None, switch="", extra_head=""):
             f"<title>{html.escape(title)} · {T.APP}</title>"
             f'<link rel="icon" href="{T.FAVICON}">'
             f"<script>{HEAD_JS}</script><style>{css()}</style>{extra_head}</head>"
-            f"<body><a class='skip' href='#main'>Skip to content</a>{head}{phone_switch}"
+            f"<body data-view='{html.escape(view or '')}'><a class='skip' href='#main'>Skip to content</a>{head}{phone_switch}"
             f"<main class='wrap' id='main'>{body}{foot}</main>{bottom}"
             f"<script>{THEME_JS}</script></body></html>")

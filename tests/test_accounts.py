@@ -120,7 +120,7 @@ def get(url):
 def test_live_page_has_refreshing_account_card(server):
     write_paper_state(ONE_LONG)
     code, body = get(server + "/")
-    assert code == 200 and "id='acct'" in body and "card acct paper" in body
+    assert code == 200 and "id='acct'" in body and "card acct paper" in body and "/api/live?view=" in body
     code, frag = get(server + "/api/account?view=paper")
     assert code == 200 and "Paper Account" in frag and "<html" not in frag
 

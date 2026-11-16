@@ -661,72 +661,130 @@ def live_events(s):
             f"</summary><ul class='list'>{body}</ul></details>")
 
 
+def live_notice(s, running):
+    if running:
+        return ""
+    when = (s.get("time") or "")
+    return (f"<div class='banner'><b>Bot is not running</b> ({T.name('not_running')}: markets closed, weekend, or stopped). "
+            f"Showing the last saved state{' from ' + html.escape(when[:16].replace('T', ' ')) if when else ''}. "
+            f"See <a href='/review'>{T.term('review')}</a> for how the last trading day played out, "
+            f"or <a href='/trades'>{T.term('trades')}</a> for history.</div>")
+
+
+def live_controls(s, running):
+    """Pause/Resume and Stop (both ask first). Shown only while the bot runs."""
+    if not running:
+        return ""
+    paused = s.get("paused")
+    ask = "Resume new entries?" if paused else "Pause new entries? Open positions keep being managed."
+    label = "▶ Resume new entries" if paused else f"⏸ {T.name('pause')} · Pause new entries"
+    return (f"<section class='card'><div class='hd'><span class='theme'>{T.term('controls')}</span></div>"
+            f"<form method='post' action='/{'resume' if paused else 'pause'}' style='display:inline' "
+            f"onsubmit=\"return confirm('{ask}')\"><button class='ghost'>{label}</button></form>"
+            f"<form method='post' action='/stop' style='display:inline' "
+            f"onsubmit=\"return confirm('Stop the bot? In live mode open positions keep their exchange stop-loss.')\">"
+            f"<button class='red'>■ Stop bot</button></form>"
+            f"<div class='muted small'>Both ask before acting. Open positions keep their stop.</div></section>")
+
+
+def live_limits(s):
+    cooldown = s.get("cooldown_until")
+    lag = s.get("data_lag_min")
+    lag_txt = "-" if lag is None else f"{lag:.0f} min"
+    until = f" · <span class='warn'>until {html.escape(str(cooldown))}</span>" if cooldown else ""
+    return (f"<details class='card' id='limits'><summary>Data &amp; limits</summary><dl class='facts'>"
+            f"<dt>Loss streak</dt><dd>{_fmt(s.get('loss_streak'))} <span class='muted'>· {T.name('cooldown')} after "
+            f"{C.LOSS_STREAK_LIMIT}</span>{until}</dd>"
+            f"<dt>Price data</dt><dd>{data_source_text(s)}</dd>"
+            f"<dt>Data delay</dt><dd>{lag_txt}</dd>"
+            f"<dt>Per trade</dt><dd>{C.RISK_PER_TRADE_PCT:g}% risk · at most {C.MAX_OPEN_POSITIONS} positions, "
+            f"{C.MAX_TRADES_PER_DAY} trades a day</dd>"
+            f"<dt>{T.name('daily_loss')}</dt><dd>stop new trades at −{C.MAX_DAILY_LOSS_PCT:g}% in a day (booked + open)</dd>"
+            f"<dt>Exits</dt><dd>{T.term('stop')} · {T.term('trail')} · {T.term('time_stop')} · "
+            f"{T.term('square_off')} at {C.SQUARE_OFF}</dd>"
+            f"</dl></details>")
+
+
+def live_login(ok, login_msg):
+    url = login_url()
+    login_btn = (f"<a class='btn' href='{html.escape(url)}'>Log in to Zerodha</a>" if url and not ok else "")
+    return (f"<section class='card'><div class='hd'><span class='theme'>{T.term('login')}</span></div>"
+            f"<div class='{'up' if ok else 'warn'}'>{html.escape(login_msg)}</div>{login_btn}"
+            f"<div class='muted small'>{T.term('paper')} mode doesn't need a login, except for {T.name('kite_data')} (Kite) "
+            f"price data. {T.term('live')} mode needs one every day (tokens expire ~06:00 IST).</div></section>")
+
+
+LIVE_REFRESH_SEC = ACCOUNT_REFRESH_SEC
+
+
 def live_regions(view, s):
-    """The parts of the Live page that change while the bot runs (also sent by /api/live)."""
+    """The parts of the Live page that change while the bot runs. /api/live sends the same parts and the
+    page swaps them in place every few seconds (no reload; the opening-balance form is never touched)."""
     running = bot_running(s)
-    ok, _ = login_status()
-    out = {"status": _status_chips(s, running, view, ok, s.get("data_lag_min")),
-           "acct": live_kpis(view, s), "equity": live_equity(view, s),
-           "positions": live_positions(s, view), "watchlist": live_watchlist(s), "events": live_events(s)}
-    if view == "zerodha":
-        out["zpositions"] = zerodha_positions()
-    return out
+    ok, login_msg = login_status()
+    return {"status": _status_chips(s, running, view, ok, s.get("data_lag_min")),
+            "notice": live_notice(s, running), "acct": live_kpis(view, s), "equity": live_equity(view, s),
+            "zpositions": zerodha_positions() if view == "zerodha" else "",
+            "positions": live_positions(s, view), "watchlist": live_watchlist(s),
+            "controls": live_controls(s, running), "login": live_login(ok, login_msg),
+            "events": live_events(s), "limits": live_limits(s)}
+
+
+LIVE_JS = """
+(function(){
+  var view=document.body.getAttribute('data-view')||'paper', every=SEC*1000, busy=false, failed=false;
+  var off=document.getElementById('offline');
+  function openState(box){var m={};box.querySelectorAll('details[id]').forEach(function(d){m[d.id]=d.open});return m}
+  function restore(box,m){box.querySelectorAll('details[id]').forEach(function(d){if(d.id in m)d.open=m[d.id]})}
+  function stamp(){var u=document.getElementById('updated'); if(!u)return;
+    u.textContent='Updated '+new Date().toTimeString().slice(0,8)+' · every SEC s'+(failed?' · OFFLINE':'');}
+  function tick(){
+    if(busy||document.hidden)return; busy=true;
+    fetch('/api/live?view='+encodeURIComponent(view),{cache:'no-store'})
+     .then(function(r){if(!r.ok)throw new Error(r.status);return r.json()})
+     .then(function(d){
+        failed=false; if(off)off.hidden=true;
+        Object.keys(d.regions||{}).forEach(function(k){
+          var box=document.querySelector('[data-region="'+k+'"]'); if(!box)return;
+          var h=d.regions[k]; if(box._html===h)return;
+          var m=openState(box); box.innerHTML=h; box._html=h; restore(box,m);
+        });
+        stamp(); document.dispatchEvent(new CustomEvent('regionsupdated'));
+     })
+     .catch(function(){failed=true; if(off)off.hidden=false; stamp();})
+     .then(function(){busy=false});
+  }
+  document.querySelectorAll('[data-region]').forEach(function(b){b._html=b.innerHTML});
+  setInterval(tick,every);
+  document.addEventListener('visibilitychange',function(){if(!document.hidden)tick()});
+  stamp();
+})();
+""".replace("SEC", str(LIVE_REFRESH_SEC))
 
 
 def render(msg="", q=None):
     s = read_status()
     view = current_view(q or {}, s)
-    running = bot_running(s)
-    ok, login_msg = login_status()
-    url = login_url()
-    paused = s.get("paused")
     reg = live_regions(view, s)
-    when = (s.get("time") or "")
-    banner = "" if running else (
-        f"<div class='banner'><b>Bot is not running</b> ({T.name('not_running')}: markets closed, weekend, or stopped). "
-        f"Showing the last saved state{' from ' + html.escape(when[:16].replace('T', ' ')) if when else ''}. "
-        f"See <a href='/review'>{T.term('review')}</a> for how the last trading day played out, "
-        f"or <a href='/trades'>{T.term('trades')}</a> for history.</div>")
-    login_btn = (f"<a class='btn' href='{html.escape(url)}'>Log in to Zerodha</a>" if url and not ok else "")
-    controls = (f"""<section class="card"><div class="hd"><span class="theme">{T.term('controls')}</span></div>
-<form method="post" action="/{'resume' if paused else 'pause'}" style="display:inline"
- onsubmit="return confirm('{'Resume new entries?' if paused else 'Pause new entries? Open positions keep being managed.'}')">
-<button class="ghost">{'▶ Resume new entries' if paused else '⏸ ' + T.name('pause') + ' · Pause new entries'}</button></form>
-<form method="post" action="/stop" style="display:inline" onsubmit="return confirm('Stop the bot? In live mode open positions keep their exchange stop-loss.')"><button class="red">■ Stop bot</button></form>
-<div class="muted small">Both ask before acting. Open positions keep their stop.</div></section>"""
-                if running else "")
-    cooldown = s.get("cooldown_until")
-    lag = s.get("data_lag_min")
-    lag_txt = "-" if lag is None else f"{lag:.0f} min"
-    limits = (f"<details class='card'><summary>Data &amp; limits</summary><dl class='facts'>"
-              f"<dt>Loss streak</dt><dd>{_fmt(s.get('loss_streak'))} <span class='muted'>· {T.name('cooldown')} after "
-              f"{C.LOSS_STREAK_LIMIT}</span>{f' · <span class=warn>until {html.escape(str(cooldown))}</span>' if cooldown else ''}</dd>"
-              f"<dt>Price data</dt><dd>{data_source_text(s)}</dd>"
-              f"<dt>Data delay</dt><dd>{lag_txt}</dd>"
-              f"<dt>Per trade</dt><dd>{C.RISK_PER_TRADE_PCT:g}% risk · at most {C.MAX_OPEN_POSITIONS} positions, "
-              f"{C.MAX_TRADES_PER_DAY} trades a day</dd>"
-              f"<dt>{T.name('daily_loss')}</dt><dd>stop new trades at −{C.MAX_DAILY_LOSS_PCT:g}% in a day (booked + open)</dd>"
-              f"<dt>Exits</dt><dd>{T.term('stop')} · {T.term('trail')} · {T.term('time_stop')} · "
-              f"{T.term('square_off')} at {C.SQUARE_OFF}</dd>"
-              f"</dl></details>")
-    login = (f"<section class='card'><div class='hd'><span class='theme'>{T.term('login')}</span></div>"
-             f"<div class='{'up' if ok else 'warn'}'>{html.escape(login_msg)}</div>{login_btn}"
-             f"<div class='muted small'>{T.term('paper')} mode doesn't need a login, except for {T.name('kite_data')} (Kite) "
-             f"price data. {T.term('live')} mode needs one every day (tokens expire ~06:00 IST).</div></section>")
     capital = capital_card() if view == "paper" else ""
+
+    def R(k):
+        return f"<div data-region='{k}'>{reg[k]}</div>"
+    note = (f'<div class="banner" style="border-color:var(--up)" role="status">{html.escape(msg)}</div>' if msg else "")
     body = f"""<style>{LIVE_CSS}</style>
-<div class="page-head"><h1>{T.BOW} {T.name('live_page')}</h1><span class="sub">{T.plain('live_page')} · {html.escape(T.mode_label(s.get('mode') or 'paper'))} bot</span></div>
-{reg['status']}
+<div class="page-head"><h1>{T.BOW} {T.name('live_page')}</h1><span class="sub">{T.plain('live_page')} · updates in place every {LIVE_REFRESH_SEC} s</span></div>
+{R('status')}
 {view_banner(view)}
-{banner}
-{f'<div class="banner" style="border-color:var(--up)">{html.escape(msg)}</div>' if msg else ''}
-{reg['acct']}
+<div class="banner" id="offline" role="status" hidden>⚠ Can't reach the dashboard server: the figures below may be old. It keeps trying.</div>
+{R('notice')}
+{note}
+{R('acct')}
 <div class="grid" style="margin-top:16px">
-<div>{reg['equity']}{reg.get('zpositions', '')}{reg['positions']}{reg['watchlist']}</div>
-<aside>{controls}{capital}{login if view == 'zerodha' or not ok else ''}{reg['events']}{market_calendar()}{limits}
-{login if view != 'zerodha' and ok else ''}</aside>
-</div>"""
-    return page(T.plain("live_page"), "/", body, refresh=20, view=view)
+<div>{R('equity')}{R('zpositions')}{R('positions')}{R('watchlist')}</div>
+<aside>{R('controls')}{capital}{R('login')}{R('events')}{market_calendar()}{R('limits')}</aside>
+</div>
+<script>{LIVE_JS}</script>"""
+    return page(T.plain("live_page"), "/", body, view=view)
 
 
 def sparkline(closes, or_hi, or_lo, w=160, h=36):
@@ -1235,6 +1293,12 @@ class Handler(BaseHTTPRequestHandler):
             self._send(render_journey(q.get("src", ["paper"])[0], idx))
         elif u.path == "/scanner":
             self._send(render_scanner(refresh=q.get("refresh", ["0"])[0] == "1"))
+        elif u.path == "/api/live":
+            # read-only: the Live page's changing parts as JSON, for in-place updates
+            s = read_status()
+            view = current_view(q, s)
+            body = json.dumps({"view": view, "regions": live_regions(view, s)}, ensure_ascii=False)
+            self._send(body, ctype="application/json; charset=utf-8")
         elif u.path == "/api/account":
             # read-only: renders the account card; never changes the bot's mode or settings
             self._send(account_card_html(q.get("view", ["paper"])[0], read_status()))
