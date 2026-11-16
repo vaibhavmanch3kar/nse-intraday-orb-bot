@@ -10,9 +10,9 @@ import html
 
 import theme as T
 
-# page tabs in the order shown: path, TERMS key, icon
-NAV = [("/", "live_page", T.BOW, "Live"), ("/trades", "trades", T.SCROLL, "Trades"),
-       ("/review", "review", T.LAMP, "Review"), ("/scanner", "scanner", T.FLAG, "Scanner")]
+# page tabs in the order shown: path, TERMS key, icon name (the icon comes from the theme in use), short label
+NAV = [("/", "live_page", "BOW", "Live"), ("/trades", "trades", "SCROLL", "Trades"),
+       ("/review", "review", "LAMP", "Review"), ("/scanner", "scanner", "FLAG", "Scanner")]
 VIEW_PAGES = ("/", "/trades")      # pages with the Paper Account | Zerodha Account switch
 THEME_KEY = "ayodhya-theme"        # the browser remembers your light/dark choice (per browser, nothing else)
 
@@ -22,6 +22,8 @@ def _vars(p):
 
 
 def _tokens():
+    if T._ui:  # colours and shapes of the dashboard theme in use (themes/<id>/tokens.css)
+        return T._ui.tokens_css()
     dark, light = T.PALETTES["dark"], T.PALETTES["light"]
     alias = ("--card:var(--surface);--fg:var(--text);--line:var(--border);--acc:var(--accent);"
              "--radius:12px;--font:system-ui,'Segoe UI',Roboto,'Noto Sans',sans-serif;"
@@ -248,14 +250,31 @@ THEME_JS = """
 """
 
 
+def empty(text, cls="empty", tag="div"):
+    """An empty-state message. Themes with a bot avatar show it beside the text (decorative only, the
+    same picture whatever the numbers are); Default shows the text alone, as before."""
+    art = T.avatar()
+    if not art:
+        return f"<{tag} class='{cls}'>{text}</{tag}>"
+    cls = cls if "empty" in cls.split() else cls + " empty"
+    return f"<{tag} class='{cls}'><span class='empty-art' aria-hidden='true'>{art}</span><span>{text}</span></{tag}>"
+
+
+def _favicon():
+    av = T.avatar()
+    return T._ui.data_uri(av) if (av and T._ui) else T.FAVICON
+
+
 def css():
-    return _tokens() + BASE_CSS
+    skin = T._ui.active().skin_css if T._ui else ""  # a theme's decorative extras (Default has none)
+    return _tokens() + BASE_CSS + skin
 
 
 def nav_links(active, view, cls):
     """Page tabs (desktop) or bottom navigation (phone). The current account view carries over."""
     out = []
-    for path, key, icon, short in NAV:
+    for path, key, icon_name, short in NAV:
+        icon = getattr(T, icon_name)
         href = path + (f"?view={view}" if view and path in VIEW_PAGES else "")
         on = " on" if path == active else ""
         cur = " aria-current='page'" if path == active else ""
@@ -272,14 +291,16 @@ def shell(title, active, body, view=None, switch="", extra_head=""):
     """The whole page: header with brand, page tabs, account switch and theme switch; the body;
     footer; and the phone's bottom navigation."""
     head = (f"<header class='top'><div class='top-in'>"
-            f"<a class='brand' href='/' aria-label='{T.APP} home'><span class='logo' aria-hidden='true'>{T.BOW}</span>"
-            f"<span><b>{T.APP}</b><small>{T.DEVANAGARI} · NSE intraday ORB</small></span></a>"
+            f"<a class='brand' href='/' aria-label='{T.APP} home'><span class='logo' aria-hidden='true'>{T.avatar() or T.BOW}</span>"
+            f"<span><b>{T.APP}</b><small>{html.escape(T.ui('brand_sub'), quote=False)}</small></span></a>"
             f"<nav class='tabs' aria-label='Pages'>{nav_links(active, view, 'tabs')}</nav>"
             f"<div class='right'>{switch}"
+            f"<a class='icon-btn' href='/settings' aria-label='Settings (dashboard theme)' title='Settings (dashboard theme)'"
+            f"{' aria-current=' + chr(39) + 'page' + chr(39) if active == '/settings' else ''}>{T.GEAR}</a>"
             f"<button type='button' class='icon-btn' id='themeBtn' aria-label='Switch theme'>☀</button></div>"
             f"</div><div class='ribbon'></div></header>")
     phone_switch = f"<div class='phone-seg'>{switch}</div>" if switch else ""
-    foot = (f"<footer>{T.APP} · {T.DEVANAGARI} · {T.term('paper')} trading by default · "
+    foot = (f"<footer>{T.APP} · {html.escape(T.ui('footer_motto'), quote=False)} · {T.term('paper')} trading by default · "
             f"software only, not investment advice</footer>")
     bottom = f"<nav class='bottom' aria-label='Pages'>{nav_links(active, view, 'bottom')}</nav>"
     import chartjs
@@ -287,9 +308,9 @@ def shell(title, active, body, view=None, switch="", extra_head=""):
     charts_js = f"<script>{chartjs.JS}</script>" if "data-chart=" in body else ""
     return (f"<!doctype html><html lang='en'><head><meta charset='utf-8'>"
             f"<meta name='viewport' content='width=device-width, initial-scale=1, viewport-fit=cover'>"
-            f"<meta name='theme-color' content='{T.PALETTES['dark']['bg']}'>"
+            f"<meta name='theme-color' content='{T._ui.active().tokens['dark']['bg'] if T._ui else T.PALETTES['dark']['bg']}'>"
             f"<title>{html.escape(title)} · {T.APP}</title>"
-            f'<link rel="icon" href="{T.FAVICON}">'
+            f'<link rel="icon" href="{_favicon()}">'
             f"<script>{HEAD_JS}</script><style>{css()}{charts_css}</style>{extra_head}</head>"
             f"<body data-view='{html.escape(view or '')}'><a class='skip' href='#main'>Skip to content</a>{head}{phone_switch}"
             f"<main class='wrap' id='main'>{body}{foot}</main>{bottom}"

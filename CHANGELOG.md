@@ -6,6 +6,36 @@ Every version is on the [Releases page](https://github.com/vaibhavmanch3kar/nse-
 with a ZIP you can download. To go back to an older version, download that version's ZIP.
 Your settings (Windows user environment variables) and your `data` folder are not part of the ZIP, so keep them.
 
+## Unreleased (branch feature/dashboard-themes): dashboard themes, Default, Playground and Sandbox
+
+Display only. The strategy, risk limits, bot logic, orders, settings, the trading mode and account data are
+unchanged. Default looks exactly as before: pixel-identical screenshots of every page in dark and light, apart
+from the new Settings button.
+
+- **Settings page** (`/settings`, and a gear button at the top right): choose **Default**, **Playground** or
+  **Sandbox**. Each choice has a small live preview drawn in that theme.
+  - The choice is a browser cookie (`ayodhya-ui-theme`) and applies on the next page with no restart.
+  - An unknown or missing choice falls back to Default.
+  - Light/dark (☀/☾) works with every theme.
+- **`themes/` folder.** One self-contained folder per theme, plus `registry.json`:
+  - `theme.json`, `tokens.css` (colours for dark and light, shapes, fonts), `strings.json` (themed names, icons,
+    short texts) and `assets/` (original SVG avatar, header scene, icons and a small skin stylesheet).
+  - The loader is `uitheme.py`. How to add or edit a theme is in `themes/README.md`.
+- **Playground** is bright and rounded, with a robot helper (Bolt). **Sandbox** is square and pixel-style,
+  with a block robot (Cubit) and a pixel landscape.
+  - The art is original. No game's names, logos, characters, textures or assets are used.
+- **Finance wording stays plain in every theme.** Themed names only ever sit beside the plain term
+  ("Quest Log · Trades", "Practice · PAPER", "Real Money · LIVE").
+  - Prices, P&L signs and arrows, status words, stops, errors, banners and confirmations read the same in every
+    theme. A test renders every page in all three themes and compares the numbers, signs, currency, times and
+    status words.
+- **Accessibility and size:**
+  - Every new theme meets WCAG AA (4.5:1) for text in dark and light.
+  - Keyboard: radio buttons, focus returns to your choice after saving.
+  - No animation is added, and reduced motion is respected. No new network requests.
+  - Decorative assets (tokens.css plus assets/): Default 1.7 KB, Playground 6.6 KB, Sandbox 9.7 KB.
+- **Tests:** `tests/test_themes.py` adds 44 tests, for 248 in total.
+
 ## v1.7.0 (16 Nov 2026): redesigned dashboard: light and dark, desktop and phone
 
 A display-only redesign. The strategy, risk limits, bot logic, balances and live-trading safety are

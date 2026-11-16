@@ -1,0 +1,21 @@
+Default theme (branch) vs baseline (main v1.7.0): headless Chrome 1366x2400, same data copy, clock frozen 2026-11-17 12:30 IST.
+masked = with the stated tolerance masks; unmasked = raw differing pixels and their bounding box (x0,y0,x1,y1).
+
+backtest-dark.png {'identical': True, 'pixels': 0} | unmasked: 5624 (995, 13, 1288, 53)
+backtest-light.png {'identical': True, 'pixels': 0} | unmasked: 5626 (995, 13, 1288, 53)
+journal-dark.png {'identical': True, 'pixels': 0} | unmasked: 5624 (995, 13, 1288, 53)
+journal-light.png {'identical': True, 'pixels': 0} | unmasked: 5626 (995, 13, 1288, 53)
+journey-dark.png {'identical': True, 'pixels': 0} | unmasked: 1384 (1250, 14, 1288, 52)
+journey-light.png {'identical': True, 'pixels': 0} | unmasked: 1384 (1250, 14, 1288, 52)
+live-dark.png {'identical': True, 'pixels': 0} | unmasked: 5816 (32, 13, 1288, 154)
+live-light.png {'identical': True, 'pixels': 0} | unmasked: 5942 (32, 13, 1288, 154)
+log-dark.png {'identical': True, 'pixels': 0} | unmasked: 5624 (995, 13, 1288, 53)
+log-light.png {'identical': True, 'pixels': 0} | unmasked: 5626 (995, 13, 1288, 53)
+review-dark.png {'identical': True, 'pixels': 0} | unmasked: 1384 (1250, 14, 1288, 52)
+review-light.png {'identical': True, 'pixels': 0} | unmasked: 1384 (1250, 14, 1288, 52)
+scanner-dark.png {'identical': True, 'pixels': 0} | unmasked: 1384 (1250, 14, 1288, 52)
+scanner-light.png {'identical': True, 'pixels': 0} | unmasked: 1384 (1250, 14, 1288, 52)
+trades-dark.png {'identical': True, 'pixels': 0} | unmasked: 5624 (995, 13, 1288, 53)
+trades-light.png {'identical': True, 'pixels': 0} | unmasked: 5626 (995, 13, 1288, 53)
+zerodha-dark.png {'identical': True, 'pixels': 0} | unmasked: 6676 (32, 13, 1288, 154)
+zerodha-light.png {'identical': True, 'pixels': 0} | unmasked: 6777 (32, 13, 1288, 154)

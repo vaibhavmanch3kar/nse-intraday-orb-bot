@@ -1,0 +1,9 @@
+{
+  "_comment": "Dashboard themes (look only). 'id' is stored in the browser cookie ayodhya-ui-theme; 'dir' is the theme folder; 'name' is shown in Settings. An unknown or missing id falls back to 'default'.",
+  "default": "default",
+  "themes": [
+    {"id": "default", "name": "Default", "dir": "default"},
+    {"id": "roblox_inspired", "name": "Playground", "dir": "roblox_inspired"},
+    {"id": "minecraft_inspired", "name": "Sandbox", "dir": "minecraft_inspired"}
+  ]
+}

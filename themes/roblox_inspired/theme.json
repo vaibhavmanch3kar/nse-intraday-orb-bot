@@ -1,0 +1,13 @@
+{
+  "id": "roblox_inspired",
+  "name": "Playground",
+  "description": "Bright, rounded, game-lobby style with a friendly robot helper (Bolt). Inspired by online building games in general; uses no names, logos, characters or art from any game.",
+  "author": "kite-trader project",
+  "art": "Original SVG made for this project (avatar, scene, icons).",
+  "bot_name": "Bolt",
+  "assets": {
+    "avatar": "assets/avatar.svg",
+    "scene": "assets/scene.svg",
+    "skin_css": "assets/skin.css"
+  }
+}

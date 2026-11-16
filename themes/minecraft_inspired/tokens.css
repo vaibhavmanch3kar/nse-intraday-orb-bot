@@ -1,0 +1,62 @@
+/* Sandbox theme tokens. Original palette; all text colours meet WCAG AA (4.5:1) on bg, surface and
+   surface-2 (checked by tests/test_themes.py). Profit/loss always also shows a sign and an arrow. */
+
+/* colours, dark mode */
+:root[data-mode=dark] {
+  --bg: #14110b;
+  --surface: #1f1a12;
+  --surface-2: #2a2318;
+  --border: #4a3f2c;
+  --text: #f3ebd8;
+  --muted: #bcae92;
+  --accent: #e8a33d;
+  --accent-ink: #1e1300;
+  --gold: #f2c14e;
+  --up: #5fd38d;
+  --dn: #f87171;
+  --warn: #fbbf24;
+  --info: #8ec5ff;
+  --trail: #c4a1ff;
+  --live: #dc2626;
+  --up-bg: rgba(95,211,141,.13);
+  --dn-bg: rgba(248,113,113,.13);
+  --warn-bg: rgba(251,191,36,.12);
+  --banner-bg: #3b2a0c;
+  --banner-fg: #ffe3a3;
+  --shadow: 4px 4px 0 rgba(0,0,0,.35);
+}
+
+/* colours, light mode */
+:root[data-mode=light] {
+  --bg: #f4ecda;
+  --surface: #fffaf0;
+  --surface-2: #f0e5cd;
+  --border: #cfbb93;
+  --text: #2a2216;
+  --muted: #5c4f3a;
+  --accent: #8a4508;
+  --accent-ink: #ffffff;
+  --gold: #6f4400;
+  --up: #166534;
+  --dn: #b91c1c;
+  --warn: #7a4600;
+  --info: #1e40af;
+  --trail: #6d28d9;
+  --live: #b91c1c;
+  --up-bg: #e2f2e6;
+  --dn-bg: #fbe6e6;
+  --warn-bg: #f8ecca;
+  --banner-bg: #fbefcc;
+  --banner-fg: #5c3300;
+  --shadow: 4px 4px 0 rgba(60,45,20,.18);
+}
+
+/* shape and type (both modes) */
+:root[data-mode=any] {
+  --radius: 3px;
+  --font: system-ui,'Segoe UI',Roboto,'Noto Sans',sans-serif;
+  --serif: ui-monospace,'Cascadia Mono',Consolas,'Courier New',monospace;
+  --btn-radius: 0px;
+  --btn-bg: linear-gradient(180deg,var(--gold),var(--accent));
+  --card-border-width: 2px;
+}

@@ -1,0 +1,62 @@
+/* Playground theme tokens. Original palette; all text colours meet WCAG AA (4.5:1) on bg, surface and
+   surface-2 (checked by tests/test_themes.py). Profit/loss always also shows a sign and an arrow. */
+
+/* colours, dark mode */
+:root[data-mode=dark] {
+  --bg: #0b1330;
+  --surface: #141f45;
+  --surface-2: #1d2a57;
+  --border: #2e3f7a;
+  --text: #f4f7ff;
+  --muted: #aab6dc;
+  --accent: #6aa3ff;
+  --accent-ink: #061233;
+  --gold: #ffd23f;
+  --up: #34d399;
+  --dn: #fb7185;
+  --warn: #fbbf24;
+  --info: #c4b5fd;
+  --trail: #e879f9;
+  --live: #e11d48;
+  --up-bg: rgba(52,211,153,.14);
+  --dn-bg: rgba(251,113,133,.14);
+  --warn-bg: rgba(251,191,36,.13);
+  --banner-bg: #3a2a00;
+  --banner-fg: #ffe48a;
+  --shadow: 0 3px 0 rgba(0,0,0,.35), 0 10px 24px rgba(0,0,0,.25);
+}
+
+/* colours, light mode */
+:root[data-mode=light] {
+  --bg: #e9f3ff;
+  --surface: #ffffff;
+  --surface-2: #f2f7ff;
+  --border: #c3d6f2;
+  --text: #0d1a3f;
+  --muted: #4a5980;
+  --accent: #1d4ed8;
+  --accent-ink: #ffffff;
+  --gold: #9a3412;
+  --up: #047857;
+  --dn: #be123c;
+  --warn: #8a4b00;
+  --info: #6d28d9;
+  --trail: #a21caf;
+  --live: #be123c;
+  --up-bg: #e3f7ee;
+  --dn-bg: #ffe8ee;
+  --warn-bg: #fff3d6;
+  --banner-bg: #fff4cc;
+  --banner-fg: #6b3a00;
+  --shadow: 0 3px 0 rgba(29,78,216,.10), 0 8px 20px rgba(29,78,216,.08);
+}
+
+/* shape and type (both modes) */
+:root[data-mode=any] {
+  --radius: 16px;
+  --font: system-ui,'Segoe UI',Roboto,'Noto Sans',sans-serif;
+  --serif: 'Trebuchet MS','Segoe UI Semibold',system-ui,sans-serif;
+  --btn-radius: 12px;
+  --btn-bg: var(--accent);
+  --card-border-width: 2px;
+}

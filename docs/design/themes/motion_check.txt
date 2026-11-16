@@ -1,0 +1,9 @@
+Reduced-motion check (headless Chrome, live page, dark): three screenshots per run at virtual times 1.0 s, 1.7 s, 2.3 s;
+the pulsing market-open dot region (x 20-60) is compared across the three shots.
+
+Default    normal  pulsing dot changes between shots: True
+Default    reduce  pulsing dot changes between shots: False
+Playground normal  pulsing dot changes between shots: True
+Playground reduce  pulsing dot changes between shots: False
+Sandbox    normal  pulsing dot changes between shots: True
+Sandbox    reduce  pulsing dot changes between shots: False

@@ -599,7 +599,7 @@ def live_equity(view, s=None):
                                "base": start if start is not None else pts[0][1]},
                               charts.intraday(pts, start), "Equity during the day")
             if len(pts) >= 2 else
-            "<div class='empty'>The chart fills in while the bot runs today (from the daily journal).</div>")
+            webui.empty(T.ui("empty_equity")))
     return (f"<section class='card flush' id='equity'><div class='hd'>Today's equity "
             f"<span class='tag'>{html.escape(T.mode_label(mode))}</span></div><div class='bd spark'>{body}</div></section>")
 
@@ -610,7 +610,7 @@ def live_positions(s, view):
         return ""   # the bot's positions are paper positions: they belong to the Paper view
     if view == "paper" and mode == "live":
         return ""
-    cards = "".join(position_row(p) for p in s.get("positions", [])) or "<div class='empty'>No open positions</div>"
+    cards = "".join(position_row(p) for p in s.get("positions", [])) or webui.empty(T.ui("empty_positions"))
     return (f"<section class='card flush' id='positions'><div class='hd'><span class='theme'>{T.term('positions')}</span> <span class='end'><span class='tag'>held by the bot · "
             f"{html.escape(T.mode_label(mode))}</span></span></div>{cards}</section>")
 
@@ -869,7 +869,7 @@ built {built} from 15-min data</span></div>
 {_kpi("Total", f"{total:+.2f}R", "after slippage and charges", _cls(total))}
 {_kpi("At 0.5% risk on ₹1L", _signed(at_risk), "about", _cls(at_risk))}</div>
 <section class="card flush"><div class="hd">Stocks <span class="end"><span class="tag">chart = 15-min closes ·
-saffron band = opening range</span></span></div><table class="rt">
+{T.ui('band_colour')} band = opening range</span></span></div><table class="rt">
 <tr><th>Stock</th><th>Day</th><th class="r">Opening range</th><th class="r">Day %</th><th>Signal → outcome</th>
 <th class="r">Result</th></tr>{''.join(rows)}</table></section>
 <details class="card"><summary>How to read this page</summary><div class="small muted">Rules: {html.escape(settings)}.
@@ -912,7 +912,7 @@ def render_scanner(refresh=False):
     body = f"""
 <div class="page-head"><h1>{T.FLAG} {T.term('scanner')} <span class="tag">{html.escape(str(r.get('day')))}</span></h1>
 <span class="sub">Multi-day (CNC) setups on the last closed daily candle · built {built}</span></div>
-<div class="banner"><b>Research only</b> - Hanuman scouts, the bot does not trade these. Check the chart yourself before acting.</div>
+<div class="banner"><b>Research only</b> - {html.escape(T.ui('scanner_scout'), quote=False)}, the bot does not trade these. Check the chart yourself before acting.</div>
 <div class="kgrid k4">{counts}</div>
 <section class="card flush"><div class="hd">Stocks with a setup <span class="end">
 <form method="get" action="/scanner" style="margin:0"><input type="hidden" name="refresh" value="1">
@@ -1239,7 +1239,7 @@ def render_trades(q=None):
                     f"opening balance ({_inr(start)}). {capital_lines()}</div>")
     st = trade_stats(rows, start)
     empty = ("" if rows else
-             "<section class='card muted'>No trades yet - the bot records them here once it trades on a market day.</section>"
+             webui.empty(T.ui("empty_trades"), "card muted", "section")
              if mode == "paper" else
              "<section class='card muted'>No real-money trades: the bot has only traded on paper. This list shows "
              "trades the bot places in live mode (data\\trades_live.csv), not your whole Zerodha tradebook.</section>")
@@ -1261,7 +1261,7 @@ def render_trades(q=None):
     tabs = "".join(f"<a href='#{pid}' data-tab='{pid}' role='tab'>{name}</a>" for pid, name, _ in panels)
     body = (f"<style>{TRADES_CSS}</style>"
             f"<div class='page-head'><h1>{T.SCROLL} {T.term('trades')}</h1>"
-            f"<span class='sub'>The royal treasury's ledger: every closed trade, after Zerodha charges.</span></div>"
+            f"<span class='sub'>{html.escape(T.ui('trades_sub'), quote=False)}</span></div>"
             + mode_chips(s) + view_banner(view) + trade_kpis(st, label, view) + note
             + f"<nav class='ptabs' role='tablist' aria-label='Trades sections'>{tabs}</nav>"
             + "".join(f"<section class='panel' id='{pid}' role='tabpanel' aria-label='{name}'>{html_}</section>"
@@ -1349,8 +1349,8 @@ def render_journey(src, i):
 {_kpi("Exit reason", html.escape(T.reason_label(r.get('reason', '-'))))}
 {_kpi("Held", held, f"qty {html.escape(r.get('qty', '-'))}")}
 {_kpi("Charges", f"₹{_num(r.get('charges')):,.2f}")}</div>
-<section class="card"><h2>15-minute candles <span class="muted small">saffron band = opening range · red dashed =
-{T.term('stop')} · grey dotted = entry · violet = {trail} · ▲▼ = entry and exit</span></h2>{chart}</section>
+<section class="card"><h2>15-minute candles <span class="muted small">{T.ui('band_colour')} band = opening range · red dashed =
+{T.term('stop')} · grey dotted = entry · {T.ui('trail_colour')} = {trail} · ▲▼ = entry and exit</span></h2>{chart}</section>
 <div class="muted small">Hover or tap a candle (or use the arrow keys) for its prices. The chart uses today's price
 data, so it can differ slightly from what the bot saw live if a bar has since been corrected.</div>"""
     return page(f"{sym} trade", "/trades", body)
@@ -1385,6 +1385,85 @@ def edge_card(rows, label, compact=False):
             f"<span>{html.escape(text)}</span></div>{bar}{stats}</div>")
 
 
+SETTINGS_CSS = """
+.tpicks{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px;border:0;margin:0 0 12px;padding:0}
+.tpick{display:flex;flex-direction:column;gap:8px;padding:12px;border:1px solid var(--border);border-radius:var(--radius);
+ background:var(--surface-2);cursor:pointer}
+.tpick:has(input:checked){border-color:var(--accent);box-shadow:inset 0 0 0 2px var(--accent)}
+.tpick .tn{display:flex;align-items:center;gap:8px;font-weight:700} .tpick .td{color:var(--muted);font-size:12.5px}
+.tpick input{width:18px;height:18px;margin:0;accent-color:var(--accent)}
+.pv{display:block;border-radius:var(--radius);overflow:hidden;background:var(--bg);color:var(--text);
+ border:var(--card-border-width) solid var(--border);font:13px/1.4 var(--font)}
+.pv-top{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--border)}
+.pv-top b{font:600 14px var(--serif);color:var(--gold)}
+.pv-logo{width:26px;height:26px;display:grid;place-items:center;border-radius:7px;font-size:15px;flex:none}
+.pv-logo svg{width:26px;height:26px;display:block}
+.pv-body{display:flex;flex-wrap:wrap;gap:8px;padding:10px}
+.pv-kpi{background:var(--surface);border:var(--card-border-width) solid var(--border);border-radius:var(--radius);
+ padding:6px 9px;box-shadow:var(--shadow)}
+.pv-kpi small{display:block;color:var(--muted);font-size:11px} .pv-kpi b{font-size:15px;font-variant-numeric:tabular-nums}
+.pv-up{color:var(--up)} .pv-dn{color:var(--dn)}
+.pv-chip{align-self:center;border:1px solid var(--gold);color:var(--gold);border-radius:999px;padding:3px 9px;font-size:12px;font-weight:700}
+.pv-btn{align-self:center;background:var(--btn-bg);color:var(--accent-ink);
+ border-radius:var(--btn-radius);padding:5px 10px;font-weight:650;font-size:12px}
+.pv-name{font:600 12px var(--serif);color:var(--gold)}
+"""
+
+
+def _theme_preview(t):
+    """A small live preview tile drawn with theme t's own tokens and art (sample figures, clearly marked)."""
+    logo = t.avatar or html.escape(t.strings["icons"].get("bow", ""))
+    terms = t.strings["terms"]
+    return (f"<span class='pv pv-{t.id}' aria-hidden='true'>"
+            f"<span class='pv-top'><span class='pv-logo'>{logo}</span><b>{T.APP}</b>"
+            f"<span class='pv-name' style='margin-left:auto'>{html.escape(terms['live_page'])} · Live</span></span>"
+            f"<span class='pv-body'>"
+            f"<span class='pv-kpi'><small>Today's P&amp;L (sample)</small><b class='pv-up'>▲ ₹207.51</b></span>"
+            f"<span class='pv-kpi'><small>Open P&amp;L (sample)</small><b class='pv-dn'>▼ −₹42.10</b></span>"
+            f"<span class='pv-chip'>{html.escape(terms['paper'])} · PAPER</span>"
+            f"<span class='pv-btn'>⏸ {html.escape(terms['pause'])} · Pause new entries</span>"
+            f"</span></span>")
+
+
+def render_settings(saved=False):
+    """Settings: the dashboard theme (look only, saved in this browser)."""
+    cur = T.theme_id()
+    if not T._ui:
+        body = (f"<div class='page-head'><h1>{T.GEAR} {T.ui('settings_page')}</h1></div>"
+                "<div class='banner'>Themes could not be loaded, so the dashboard uses its built-in look.</div>")
+        return page(T.ui("settings_page"), "/settings", body)
+    previews = "".join(T._ui.preview_css(t, f".pv-{t.id}") for t in T._ui.THEMES.values())
+    picks = []
+    for tid in T._ui.ids():
+        t = T._ui.THEMES[tid]
+        checked = (" checked" + (" autofocus" if saved else "")) if tid == cur else ""  # keyboard focus returns here
+        in_use = " <span class='tag'>in use</span>" if tid == cur else ""
+        picks.append(f"<label class='tpick'><span class='tn'><input type='radio' name='ui_theme' value='{tid}'{checked}>"
+                     f"{html.escape(t.name)}{in_use}</span>"
+                     f"<span class='td'>{html.escape(t.description)}</span>{_theme_preview(t)}</label>")
+    note = ("<div class='banner' role='status'>Theme saved for this browser. The bot, its settings and your "
+            "accounts are unchanged.</div>" if saved else "")
+    body = f"""<style>{SETTINGS_CSS}{previews}</style>
+<div class="page-head"><h1>{T.GEAR} {html.escape(T.ui('settings_page'))}</h1><span class="sub">Dashboard look · saved in this browser only</span></div>
+{note}
+<section class="card" id="theme"><div class="hd">Theme</div>
+<p class="muted" style="margin-top:0">{html.escape(T.ui('settings_theme_intro'))}</p>
+<form method="get" action="/settings" id="themeForm">
+<fieldset class="tpicks"><legend class="sr">Dashboard theme</legend>{"".join(picks)}</fieldset>
+<button type="submit">Apply theme</button>
+<span class="muted small">Applies straight away, no restart. Choosing a theme also applies it.</span>
+</form>
+<p>Light or dark: use the ☀ / ☾ button at the top right. It works with every theme.</p>
+<p class="muted small">Stored as a cookie named <code>{T._ui.COOKIE}</code> in this browser only. A theme changes colours,
+pictures and the extra names shown next to the plain terms. It never changes the bot, its settings, the trading mode
+({T.term('paper')} / {T.term('live')}), orders or your accounts. Prices, P&amp;L, stops, errors and confirmations read the
+same in every theme.</p>
+</section>
+<script>(function(){{var f=document.getElementById('themeForm');if(!f)return;
+f.addEventListener('change',function(e){{if(e.target&&e.target.name==='ui_theme')f.submit();}});}})();</script>"""
+    return page(T.ui("settings_page"), "/settings", body)
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):  # keep the console clean
         pass
@@ -1404,6 +1483,29 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
+        """Every page is drawn in the dashboard theme chosen in this browser (cookie; Default if none).
+        The theme only changes the look; the request handling below is the same for every theme."""
+        tok = T._ui.activate(T._ui.from_cookie(self.headers.get("Cookie"))) if T._ui else None
+        try:
+            self._get()
+        finally:
+            if tok is not None:
+                T._ui.reset(tok)
+
+    def _settings(self, q):
+        """GET /settings shows the page; /settings?ui_theme=<id> saves the choice in a browser cookie
+        (look only: never the bot's settings, mode or accounts) and shows the page again."""
+        want = q.get("ui_theme", [None])[0]
+        if want is None or not T._ui:
+            self._send(render_settings(saved="saved" in q))
+            return
+        tid = want if want in T._ui.THEMES else T._ui.DEFAULT
+        self.send_response(303)
+        self.send_header("Set-Cookie", f"{T._ui.COOKIE}={tid}; Path=/; Max-Age=31536000; SameSite=Lax")
+        self.send_header("Location", "/settings?saved=1")
+        self.end_headers()
+
+    def _get(self):
         u = urlparse(self.path)
         q = parse_qs(u.query)
         if u.path == "/":
@@ -1449,6 +1551,8 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 idx = None
             self._send(render_journey(q.get("src", ["paper"])[0], idx))
+        elif u.path == "/settings":
+            self._settings(q)
         elif u.path == "/scanner":
             self._send(render_scanner(refresh=q.get("refresh", ["0"])[0] == "1"))
         elif u.path == "/api/live":
