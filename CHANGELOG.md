@@ -6,7 +6,7 @@ Every version is on the [Releases page](https://github.com/vaibhavmanch3kar/nse-
 with a ZIP you can download. To go back to an older version, download that version's ZIP.
 Your settings (Windows user environment variables) and your `data` folder are not part of the ZIP, so keep them.
 
-## Unreleased (branch feature/dashboard-themes): dashboard themes, Default, Playground and Sandbox
+## v1.8.0 (17 Nov 2026): dashboard themes: Default, Playground and Sandbox
 
 Display only. The strategy, risk limits, bot logic, orders, settings, the trading mode and account data are
 unchanged. Default looks exactly as before: pixel-identical screenshots of every page in dark and light, apart

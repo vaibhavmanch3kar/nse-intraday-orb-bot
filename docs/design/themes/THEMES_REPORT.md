@@ -1,6 +1,6 @@
 # Dashboard themes: implementation report
 
-Branch `feature/dashboard-themes`, created from `main` at v1.7.0 (eac7864). Changes are **uncommitted** for review.
+Branch `feature/dashboard-themes`, created from `main` at v1.7.0 (eac7864). Reviewed, committed as e58e3e0 and released as **v1.8.0**.
 
 The branch lives in its own worktree, `D:\08-Code-Projects\Trading\KiteConnect\kite-trader-themes`. The bot's own
 folder (`kite-trader`) stays on `main`, so the scheduled 09:00 bot runs unchanged code.
@@ -35,7 +35,7 @@ Inputs that were left to fill in:
 | `theme.py` | `name()`, `term()`, the page icons (`BOW`, `SCROLL`, …, through a module `__getattr__`) and a new `ui()` now come from the theme in use. Outside a page request (the bot, the console, logs) everything stays Default. The original values stay as built-in fallbacks, so a broken `themes/` folder can never stop the bot. Event-log icons (`ENTER_ICON`, …) are constants because they are stored data. |
 | `webui.py` | The page frame uses the theme's tokens and skin CSS, avatar (Default keeps the 🏹 logo), brand line, footer text, favicon and nav icons. Adds the Settings gear button and `empty()`, which shows the avatar beside empty-state text in game themes; Default output is unchanged. |
 | `web.py` | Display text only: 3 empty states, the Trades subtitle, the scanner's "Research only" flavour clause, and 2 chart colour words now come from `strings.json`. Adds the `/settings` page (`render_settings`, `SETTINGS_CSS`, preview tiles) and a `do_GET` wrapper that picks the theme from the cookie for that request. `_settings()` sets the cookie. **No POST handler, control action, Kite call or data function changed** (checked in the diff: the hunks are at the lines listed in section 6). |
-| `CHANGELOG.md` | An "Unreleased" entry for the branch. |
+| `CHANGELOG.md` | The v1.8.0 entry (written as "Unreleased" on the branch). |
 
 Not changed: strategy, risk, broker, bot loop, config, accounts, journal, capital, reports and scheduling.
 `DRY_RUN`, `CONFIRM_LIVE` and every live/paper switch are untouched.
