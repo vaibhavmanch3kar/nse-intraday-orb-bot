@@ -4,11 +4,15 @@ writes a file, or places an order.
 
   paper_account()    the virtual Abhyas account, read from data/state_paper.json only
                      (never from the live state or Zerodha)
+  zerodha_account()  the real Zerodha account from Kite's margins() and positions() calls only,
+                     through a wrapper that refuses every other Kite method (so no order can be
+                     placed from here). Kept in memory for 15 s; never written to a file or a log.
 """
 
 import datetime as dt
 import json
 import os
+import threading
 
 import config as C
 import holidays
@@ -80,3 +84,125 @@ def paper_account(now=None, state_path=None):
     if out["positions"] and as_of and not market_open(now) and as_of.date() < now.date():
         out["warnings"].append("Positions are from an earlier day: values are the last prices the bot saw.")
     return out
+
+
+# -- Zerodha (real account, read-only) -----------------------------------------------------------
+
+ZERODHA_CACHE_SEC = 15
+READ_ONLY_CALLS = ("margins", "positions")
+_cache = {"at": None, "data": None}
+_cache_lock = threading.Lock()
+
+
+class LoginNeeded(Exception):
+    pass
+
+
+class ReadOnlyKite:
+    """Exposes only Kite's read-only account calls. Anything else (place_order, modify_order,
+    cancel_order, convert_position, ...) raises, so this view can't trade even by mistake."""
+
+    def __init__(self, kite):
+        self._kite = kite
+
+    def __getattr__(self, name):
+        if name not in READ_ONLY_CALLS:
+            raise PermissionError(f"the Zerodha account view is read-only: '{name}' is not allowed")
+        return getattr(self._kite, name)
+
+
+def _kite_client():
+    import data_kite
+    try:
+        return data_kite._client()  # today's login token, no proxy; raises DataError if not logged in
+    except data_kite.DataError as e:
+        text = str(e)
+        if "no Kite login" in text:
+            raise LoginNeeded("Not logged in to Zerodha today. Log in to see your account "
+                              "(logins end around 06:00 each day).")
+        raise LoginNeeded(f"Kite settings problem: {text}")
+
+
+def explain_kite_error(e):
+    """(plain message, whether a fresh login would fix it)"""
+    try:
+        from kiteconnect import exceptions as kex
+    except ImportError:  # pragma: no cover
+        kex = None
+    import requests
+    if kex and isinstance(e, kex.TokenException):
+        return "Your Zerodha session has expired or was logged out. Log in again.", True
+    if kex and isinstance(e, kex.PermissionException):
+        return f"Zerodha refused access ({e}).", False
+    if kex and isinstance(e, kex.NetworkException):
+        return f"Zerodha's servers didn't respond ({e}). It will try again.", False
+    if isinstance(e, (requests.ConnectionError, requests.Timeout)):
+        return "Can't reach Zerodha (is the internet down?). It will try again.", False
+    if kex and isinstance(e, kex.KiteException):
+        return f"Zerodha returned an error: {e}", False
+    return f"Unexpected error while reading the Zerodha account: {e!r}", False
+
+
+def _num(x):
+    try:
+        return float(x or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def summarise_zerodha(m, p):
+    """Kite margins('equity') + positions() -> the dashboard's account figures."""
+    avail, used = m.get("available") or {}, m.get("utilised") or {}
+    rows = []
+    for x in (p or {}).get("net") or []:
+        qty = int(x.get("quantity") or 0)
+        rows.append({"symbol": x.get("tradingsymbol"), "exchange": x.get("exchange"), "product": x.get("product"),
+                     "qty": qty, "avg": _num(x.get("average_price")), "price": _num(x.get("last_price")),
+                     "realised": _num(x.get("realised")), "unrealised": _num(x.get("unrealised")),
+                     "pnl": _num(x.get("pnl"))})
+    open_rows = [r for r in rows if r["qty"]]
+    realised = sum(r["realised"] for r in rows)
+    unrealised = sum(r["unrealised"] for r in rows)
+    opening = _num(avail.get("opening_balance"))
+    return {"opening": opening, "available": _num(m.get("net")), "cash": _num(avail.get("live_balance")),
+            "margin_used": _num(used.get("debits")),
+            "invested": sum(abs(r["qty"]) * r["avg"] for r in open_rows),
+            "realised": realised, "unrealised": unrealised, "pnl": realised + unrealised,
+            "equity": opening + realised + unrealised,
+            "positions": sorted(rows, key=lambda r: (r["qty"] == 0, r["symbol"] or ""))}
+
+
+def zerodha_account(now=None, client=None):
+    """The real account, or a dict with 'error' (and 'login_needed') saying what's wrong.
+    A failed refresh keeps showing the last good values, marked with when they were fetched."""
+    now = now or now_ist()
+    with _cache_lock:
+        cached = _cache["data"]
+        if client is None and cached and (now - _cache["at"]).total_seconds() < ZERODHA_CACHE_SEC:
+            return dict(cached, now=now.isoformat())
+    out = {"kind": "zerodha", "now": now.isoformat(), "warnings": [], "positions": []}
+    try:
+        kite = ReadOnlyKite(client if client is not None else _kite_client())
+        summary = summarise_zerodha(kite.margins("equity"), kite.positions())
+    except LoginNeeded as e:
+        out.update(error=str(e), login_needed=True)
+        return out
+    except Exception as e:  # noqa: BLE001 - every failure is shown on the card, never raised
+        msg, login = explain_kite_error(e)
+        if cached and not login:
+            stale = dict(cached, now=now.isoformat())
+            stale["warnings"] = [f"Refresh failed at {now:%H:%M:%S}: {msg} "
+                                 f"Showing the values from {cached['fetched_at'][11:19]}."]
+            return stale
+        out.update(error=msg, login_needed=login)
+        return out
+    out.update(summary, fetched_at=now.isoformat())
+    out["warnings"] = []
+    with _cache_lock:
+        _cache.update(at=now, data=dict(out))
+    return out
+
+
+def clear_zerodha_cache():
+    with _cache_lock:
+        _cache.update(at=None, data=None)

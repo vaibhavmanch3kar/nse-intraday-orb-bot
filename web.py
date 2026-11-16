@@ -257,15 +257,47 @@ def view_banner(view):
     return "<div class='viewbar paper'>PAPER ACCOUNT · virtual money</div>"
 
 
-def zerodha_card(acct=None):
-    return (f"<h2>{T.name('live')} · Zerodha Account <span class='tag dn'>real money</span></h2>"
-            "<div class='muted'>Zerodha account details are not available yet.</div>")
+def zerodha_card(acct):
+    """The real Zerodha account (read-only), from accounts.zerodha_account()."""
+    import accounts
+    title = f"{T.name('live')} · Zerodha Account <span class='tag dn'>real money · read-only</span>"
+    if acct.get("error"):
+        btn = ""
+        if acct.get("login_needed"):
+            url = login_url()
+            btn = (f"<div><a class='btn' href='{html.escape(url)}'>Log in to Zerodha</a></div>" if url else
+                   "<div class='muted'>Kite settings are missing, so the login button isn't available.</div>")
+        return (f"<h2>{title}</h2><div class='warn'>⚠ {html.escape(acct['error'])}</div>{btn}"
+                f"<div class='muted' style='margin-top:6px'>Checked {_clock(acct.get('now'))} IST · "
+                f"tries again every {ACCOUNT_REFRESH_SEC} s</div>")
+    k = [("Opening balance (start of day)", f"<b>{_inr(acct['opening'])}</b>"),
+         ("Account value", f"<b>{_inr(acct['equity'])}</b>"),
+         ("Available funds", f"<b>{_inr(acct['available'])}</b>"),
+         ("Margin used", f"<b>{_inr(acct['margin_used'])}</b>"),
+         ("Invested (open positions)", f"<b>{_inr(acct['invested'])}</b>"),
+         ("Realised P&amp;L today", _pl(acct["realised"])),
+         ("Unrealised P&amp;L", _pl(acct["unrealised"])),
+         ("Total P&amp;L today", _pl(acct["pnl"]))]
+    kpis = "".join(f"<div>{label}{val}</div>" for label, val in k)
+    warn = "".join(f"<div class='warn'>⚠ {html.escape(w)}</div>" for w in acct.get("warnings", []))
+    rows = "".join(
+        f"<tr><td><b>{_fmt(r['symbol'])}</b> <span class='muted'>{_fmt(r['exchange'])}</span></td><td>{_fmt(r['product'])}</td>"
+        f"<td class='{'up' if r['qty'] > 0 else 'dn' if r['qty'] < 0 else 'muted'}'>{r['qty'] if r['qty'] else 'closed'}</td>"
+        f"<td>{_fmt(r['avg'])}</td><td>{_fmt(r['price'])}</td><td>{_pl(r['realised'])}</td><td>{_pl(r['unrealised'])}</td></tr>"
+        for r in acct.get("positions", [])) or "<tr><td colspan=7 class='muted'>No positions today</td></tr>"
+    return (f"<h2>{title}</h2><div class='kpis'>{kpis}</div>{warn}"
+            f"<table style='margin-top:10px'><tr><th>Position</th><th>Product</th><th>Qty</th><th>Avg price</th>"
+            f"<th>Last price</th><th>Realised</th><th>Unrealised</th></tr>{rows}</table>"
+            f"<div class='muted' style='margin-top:6px'>From Zerodha at {_clock(acct.get('fetched_at'))} IST · "
+            f"checked {_clock(acct.get('now'))} · refreshes every {ACCOUNT_REFRESH_SEC} s "
+            f"(Zerodha is asked at most every {accounts.ZERODHA_CACHE_SEC} s) · account value = opening balance + "
+            f"today's P&amp;L · Zerodha's P&amp;L is before charges · delivery holdings are not included</div>")
 
 
 def account_card_html(view, status=None):
     import accounts
     if view == "zerodha":
-        return zerodha_card()
+        return zerodha_card(accounts.zerodha_account())
     return paper_card(accounts.paper_account(), status)
 
 
