@@ -39,17 +39,84 @@ def now_ist():
     return dt.datetime.now(IST)
 
 
+class DailyFileHandler(logging.Handler):
+    """One log file per day: data/logs/bot_YYYY-MM-DD.log (India date), switching at midnight."""
+
+    def __init__(self, folder):
+        super().__init__()
+        self.folder, self.day, self.stream = folder, None, None
+
+    def emit(self, record):
+        try:
+            day = dt.datetime.fromtimestamp(record.created, IST).date().isoformat()
+            if day != self.day:
+                self.close_stream()
+                os.makedirs(self.folder, exist_ok=True)
+                self.stream = open(os.path.join(self.folder, f"bot_{day}.log"), "a", encoding="utf-8")
+                self.day = day
+            self.stream.write(self.format(record) + "\n")
+            self.stream.flush()
+        except Exception:  # noqa: BLE001
+            self.handleError(record)
+
+    def close_stream(self):
+        if self.stream:
+            self.stream.close()
+        self.stream, self.day = None, None
+
+    def close(self):
+        self.close_stream()
+        super().close()
+
+
+def split_old_log(data_dir):
+    """Once: split the old single data/bot.log into data/logs/bot_<date>.log files by the date on each
+    line (lines without a date, like error tracebacks, stay with the line before). The original is
+    kept as data/logs/bot_until_<last date>.log. Returns the dates written ([] if nothing to do)."""
+    old = os.path.join(data_dir, "bot.log")
+    if not os.path.exists(old):
+        return []
+    folder = os.path.join(data_dir, "logs")
+    os.makedirs(folder, exist_ok=True)
+    by_day, day = {}, None
+    with open(old, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            if len(line) > 10 and line[4] == "-" and line[7] == "-" and line[:4].isdigit():
+                day = line[:10]
+            if day:
+                by_day.setdefault(day, []).append(line)
+    # move the original first: if that fails nothing has changed, and a later start can't split twice
+    keep = os.path.join(folder, f"bot_until_{max(by_day) if by_day else 'start'}.log")
+    os.replace(old, keep)
+    for d, lines in by_day.items():
+        path = os.path.join(folder, f"bot_{d}.log")
+        existing = open(path, encoding="utf-8").read() if os.path.exists(path) else ""
+        with open(path + ".tmp", "w", encoding="utf-8") as f:
+            f.write("".join(lines) + existing)
+        os.replace(path + ".tmp", path)
+    return sorted(by_day)
+
+
 def setup_logging():
     os.makedirs(C.DATA_DIR, exist_ok=True)
     fmt = logging.Formatter("%(asctime)s %(levelname)-7s %(name)s: %(message)s", "%Y-%m-%d %H:%M:%S")
     root = logging.getLogger()
     root.setLevel(logging.INFO)
-    fh = logging.FileHandler(os.path.join(C.DATA_DIR, "bot.log"), encoding="utf-8")
+    try:
+        split = split_old_log(C.DATA_DIR)
+    except OSError as e:   # e.g. the old log is open in an editor: try again at the next start
+        split = f"not yet ({e})"
+    fh = DailyFileHandler(os.path.join(C.DATA_DIR, "logs"))
     fh.setFormatter(fmt)
     sh = logging.StreamHandler(sys.stdout)
     sh.setFormatter(fmt)
     root.handlers[:] = [fh, sh]
     logging.getLogger("urllib3").setLevel(logging.WARNING)
+    if isinstance(split, str):
+        log.warning(f"the old data\\bot.log was not split into data\\logs {split}")
+    elif split:
+        log.info(f"the old data\\bot.log is now one file per day in data\\logs ({len(split)} days, "
+                 f"{split[0]} to {split[-1]}); the original is kept there as bot_until_{split[-1]}.log")
 
 
 TRADE_COLS = ["closed", "symbol", "direction", "qty", "entry", "exit", "stop", "target",
