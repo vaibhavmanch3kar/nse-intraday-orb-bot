@@ -6,6 +6,22 @@ Every version is on the [Releases page](https://github.com/vaibhavmanch3kar/nse-
 with a ZIP you can download. To go back to an older version, download that version's ZIP.
 Your settings (Windows user environment variables) and your `data` folder are not part of the ZIP, so keep them.
 
+## v1.5.0 (16 Nov 2026): choose the paper account's opening balance
+
+The paper account no longer has to start at ₹1,00,000. See the README section "Paper opening balance".
+
+- **Opening Balance · Paper Account** card on the Live page (Paper Account view): ₹10,000, ₹25,000, ₹50,000,
+  ₹1,00,000, ₹5,00,000 or a custom amount (whole rupees, ₹10,000 to ₹1 crore). Saving asks for confirmation;
+  the dashboard only accepts the change from its own page with that confirmation.
+- The choice is saved permanently (`data\paper_capital.json`) as **pending**, and the paper bot applies it at
+  its next start, before any trade. It waits while paper positions are open, and you can cancel it until then.
+- Cash moves by the difference between the old and new opening balance; past trades, realised P&L and charges
+  are never changed. Each change is recorded and shown on the account card; the Trades page's equity curve
+  uses the opening balance in force.
+- **Paper only:** live trading and the Zerodha account never read this setting. Backtest and advisor stay at
+  ₹1,00,000. Strategy and risk rules are unchanged; trade sizes follow equity as before.
+- 156 tests pass (14 new). Backtest unchanged (same 82 trades on the same data).
+
 ## v1.4.0 (16 Nov 2026): Paper Account | Zerodha Account dashboard views
 
 A **View: Paper Account | Zerodha Account** switch on the Live and Trades pages. It only changes what the

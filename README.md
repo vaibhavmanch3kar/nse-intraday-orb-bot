@@ -87,6 +87,21 @@ To undo it, double-click `5-UNSCHEDULE.bat`.
 | 🚩 **Hanuman's Watch · Swing scanner** | Nifty 50 stocks with a multi-day setup on the last daily candle (20-day breakout, bull flag, 20-day average reclaim, oversold, oversold bounce), with a suggested stop, target and quantity. **Research only: the bot doesn't trade these** |
 | 📜 **Rajkosh · Trades** | An **equity curve** (with drawdowns shaded), a **profit/loss bar per trade**, breakdowns **by exit reason, long vs short and stock**, every trade with a **chart** link (the day's candles with entry, exit, stop and trail drawn on), the last backtest shown the same way, and the **30-trade edge check**: after 30 trades it tells you whether the average result per trade is positive, and to stop if it isn't |
 
+### Paper opening balance
+
+The paper account starts at ₹1,00,000 unless you choose another amount. On the Live page (Paper Account
+view), the **Opening Balance · Paper Account** card offers ₹10,000, ₹25,000, ₹50,000, ₹1,00,000, ₹5,00,000 or
+a custom amount (whole rupees, ₹10,000 to ₹1 crore). After you confirm:
+
+- The choice is saved as **pending** in `data\paper_capital.json`. The bot applies it at its **next start**
+  (normally 9:00), before any trade, and waits if paper positions are still open. You can cancel it until then.
+- Cash moves by the difference, so equity = new opening balance + realised P&L + open P&L. Past trades,
+  realised P&L and charges stay exactly as recorded, and each change is listed on the account card.
+- Trade sizes follow the new equity (0.5% risk per trade). Below ₹50,000, trades are small and stocks priced
+  above 25% of the balance are skipped.
+- **Paper only:** live trading and your Zerodha account never read this setting. The backtest and the
+  advisor report stay at ₹1,00,000 so their results remain comparable.
+
 ### Paper Account | Zerodha Account
 
 The Live and Trades pages have a **View: Paper Account | Zerodha Account** switch. It only changes what you
