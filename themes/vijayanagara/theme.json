@@ -1,0 +1,13 @@
+{
+  "id": "vijayanagara",
+  "name": "Vijayanagara",
+  "description": "The great bazaars of Hampi, where gems were traded by weight: pink granite boulders, gopuram towers and sunset gold. Sarafa, the gem-trader's scale, weighs every price.",
+  "author": "kite-trader project",
+  "art": "Original SVG made for this project: a gem-trader's scale (Sarafa), a Hampi boulder-and-gopuram strip and page icons.",
+  "bot_name": "Sarafa",
+  "assets": {
+    "avatar": "assets/avatar.svg",
+    "scene": "assets/scene.svg",
+    "skin_css": "assets/skin.css"
+  }
+}

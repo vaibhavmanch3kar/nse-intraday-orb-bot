@@ -1,0 +1,62 @@
+/* Vijayanagara theme tokens. Original palette; all text colours meet WCAG AA (4.5:1) on bg, surface and
+   surface-2 (checked by tests/test_themes.py). Profit/loss always also shows a sign and an arrow. */
+
+/* colours, dark mode */
+:root[data-mode=dark] {
+  --bg: #1e1416;
+  --surface: #2a1d1f;
+  --surface-2: #36262a;
+  --border: #5a4045;
+  --text: #f7ebe6;
+  --muted: #d3bdb6;
+  --accent: #e98fae;
+  --accent-ink: #2a0a16;
+  --gold: #f0c27b;
+  --up: #6fd39a;
+  --dn: #ff8080;
+  --warn: #fbbf24;
+  --info: #9cc8ff;
+  --trail: #c9a7ff;
+  --live: #dc2626;
+  --up-bg: rgba(111,211,154,.12);
+  --dn-bg: rgba(255,128,128,.13);
+  --warn-bg: rgba(251,191,36,.12);
+  --banner-bg: #40242c;
+  --banner-fg: #ffe1ea;
+  --shadow: 0 4px 14px rgba(0,0,0,.4);
+}
+
+/* colours, light mode */
+:root[data-mode=light] {
+  --bg: #f6e9e1;
+  --surface: #fffaf6;
+  --surface-2: #efdcd1;
+  --border: #cfae9f;
+  --text: #2a1a1c;
+  --muted: #5c4146;
+  --accent: #9b2c55;
+  --accent-ink: #ffffff;
+  --gold: #7a4a0a;
+  --up: #166534;
+  --dn: #b91c1c;
+  --warn: #7a4600;
+  --info: #1e40af;
+  --trail: #6d28d9;
+  --live: #b91c1c;
+  --up-bg: #e2f2e6;
+  --dn-bg: #fbe6e6;
+  --warn-bg: #f8ecca;
+  --banner-bg: #f8e1e8;
+  --banner-fg: #5a1230;
+  --shadow: 0 3px 10px rgba(42,26,28,.12);
+}
+
+/* shape and type (both modes) */
+:root[data-mode=any] {
+  --radius: 12px;
+  --font: system-ui,'Segoe UI',Roboto,'Noto Sans',sans-serif;
+  --serif: Constantia,Cambria,Georgia,serif;
+  --btn-radius: 999px;
+  --btn-bg: linear-gradient(180deg,var(--gold),var(--accent));
+  --card-border-width: 1px;
+}
