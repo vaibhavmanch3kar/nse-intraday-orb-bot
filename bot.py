@@ -209,7 +209,10 @@ class Bot:
         # paper, whoever starts the bot (the 9:00 task, a restart, or by hand).
         self.live, self.live_note = livemode.bot_mode(C.is_live())
         self.mode = "live" if self.live else "paper"
-        self.state = risk.State(os.path.join(C.DATA_DIR, f"state_{self.mode}.json"), C.PAPER_START_INR)
+        # A new REAL MONEY record starts at ₹0, never a made-up amount: it trades only after reading the real
+        # Zerodha balance (sync_live_balance). Paper keeps its virtual opening balance.
+        self.state = risk.State(os.path.join(C.DATA_DIR, f"state_{self.mode}.json"),
+                                0.0 if self.live else C.PAPER_START_INR)
         self.broker = PaperBroker()
         self.kite = None
         self.last_bar = {}      # symbol -> start time of last processed closed bar
@@ -229,6 +232,9 @@ class Bot:
         self.restart_hold = False   # Apply Now is waiting for a safe moment: no new entries meanwhile (PAPER)
         self.switch = None          # Paper | Real Money change waiting: "to_paper" / "to_live" (livemode.py)
         self.switch_noted = None    # last "switch waiting" message (said once per reason)
+        self.balance_ok = not self.live   # REAL MONEY: no new trades until today's Zerodha balance is read
+        self.balance_problem = None       # why the balance could not be used (shown on the dashboard)
+        self.balance_tried = None         # monotonic time of the last read attempt (retry once a minute)
         self.launcher_gone = lambda: False   # main() sets this when run_bot.ps1 passes --launcher-pid
         try:                    # what this bot runs: version and file/setting hashes, for the dashboard
             self.build = buildinfo.snapshot("bot")
@@ -252,7 +258,50 @@ class Bot:
         self.kite = kite_proxy.get_kite()
         self.broker = LiveBroker(self.kite)
         self.reconcile()
+        self.sync_live_balance(now_ist())
         return True
+
+    def sync_live_balance(self, now):
+        """REAL MONEY only: size trades from the actual Zerodha balance, not the bot's own record. Reads the equity
+        balance (read-only) and uses the smaller of today's opening cash and the cash available now; pledged
+        shares (collateral) don't count. It becomes today's cash, and the daily loss limit follows from it.
+        With positions open (a restart mid-trade) the record is kept: Zerodha's figure then has margin blocked.
+        If the balance can't be read, or is zero or less, no new trades open (open ones are still managed);
+        it never falls back to a made-up amount."""
+        if not self.live or self.kite is None:
+            return
+        import time as _t
+        self.balance_tried = _t.monotonic()
+        today = now.date().isoformat()
+        if self.state.positions:
+            self.balance_ok = self.state.d.get("balance_day") == today
+            self.balance_problem = (None if self.balance_ok else
+                                    "positions are open and today's Zerodha balance was not read before them")
+            return
+        try:
+            avail = (self.kite.margins("equity") or {}).get("available") or {}
+            vals = [float(avail[k]) for k in ("opening_balance", "live_balance") if avail.get(k) is not None]
+            bal = min(vals) if vals else None
+        except Exception as e:  # noqa: BLE001 - network, proxy or Zerodha error: no new trades
+            bal, err = None, type(e).__name__
+        else:
+            err = None if bal is not None else "no balance in Zerodha's answer"
+        if bal is None or bal <= 0:
+            why = f"could not read your Zerodha balance ({err})" if bal is None else f"Zerodha balance is ₹{bal:,.2f}"
+            if self.balance_problem != why:
+                self.note(f"REAL MONEY: no new trades - {why}. Open positions are still managed.", logging.ERROR)
+                livemode.log("balance", "NOT USABLE", why)
+            self.balance_ok, self.balance_problem = False, why
+            return
+        d = self.state.d
+        d["cash"] = bal
+        if d.get("day") != today or d.get("balance_day") != today:
+            d["day_start_equity"] = bal       # the 2% daily loss limit is of the real balance
+        d.update(balance_day=today, balance_inr=bal, balance_at=now.isoformat(timespec="seconds"))
+        self.state.save()
+        self.balance_ok, self.balance_problem = True, None
+        self.note(f"REAL MONEY: balance from Zerodha ₹{bal:,.2f} - trades are sized from it")
+        livemode.log("balance", "read", f"₹{bal:,.2f}")
 
     def apply_paper_capital(self):
         """At start-up, before any trade: apply an opening-balance change chosen on the dashboard.
@@ -352,6 +401,10 @@ class Bot:
     def cycle(self):
         now = now_ist()
         today = now.date()
+        if self.live and not self.balance_ok:      # retry reading the Zerodha balance, once a minute
+            import time as _t
+            if self.balance_tried is None or _t.monotonic() - self.balance_tried >= 60:
+                self.sync_live_balance(now)
         self.state.new_day_if_needed(today)
 
         # stale positions from an earlier day (paper mode after a crash)
@@ -466,6 +519,9 @@ class Bot:
             if paused:
                 row["reason"] += " (paused)"
                 continue
+            if not self.balance_ok:
+                row["reason"] += f" - skip: {self.balance_problem or 'Zerodha balance not read yet'}"
+                continue
             ok, why = self.state.can_enter(sym, today, self.prices)
             if not ok:
                 row["reason"] += f" - skip: {why}"
@@ -521,6 +577,10 @@ class Bot:
             # Paper | Real Money (livemode.py): a switch waiting, whether this bot's own environment has both live
             # settings, and whether real money is armed today. Read by the dashboard; never changes the mode.
             "switch": self.switch, "live_env": C.is_live(), "armed": livemode.arm_valid(now)[0],
+            # REAL MONEY: the Zerodha balance trades are sized from (None in paper)
+            "balance": ({"ok": self.balance_ok, "inr": self.state.d.get("balance_inr"),
+                         "at": self.state.d.get("balance_at"), "problem": self.balance_problem}
+                        if self.live else None),
         }
         tmp = os.path.join(C.DATA_DIR, "status.json.tmp")
         with open(tmp, "w", encoding="utf-8") as f:

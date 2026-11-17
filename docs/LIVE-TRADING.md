@@ -86,6 +86,10 @@ login to manage and close them. Every mode change, arming and refusal is logged 
 
 ## What the bot does with real orders
 
+- **Size:** from your real Zerodha balance, read (read-only) after the day's login and before any trade: the
+  smaller of today's opening cash and the cash available now; pledged shares don't count. Risk per trade,
+  the 25% per-stock cap and the 2% daily loss limit are all of that amount, shown on the Live page as
+  "Balance from Zerodha". If it can't be read, or is zero, the bot opens no new trades and says why.
 - **Entry:** a marketable LIMIT order (±0.2%). It is cancelled after 30 seconds if not filled; partial fills are kept.
 - **Stop:** an SL order at the exchange for the filled quantity, so the stop works even if your PC or the bot crashes.
   If the stop order is rejected, the position is closed immediately.

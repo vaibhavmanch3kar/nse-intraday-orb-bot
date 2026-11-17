@@ -6,6 +6,16 @@ Every version is on the [Releases page](https://github.com/vaibhavmanch3kar/nse-
 with a ZIP you can download. To go back to an older version, download that version's ZIP.
 Your settings (Windows user environment variables) and your `data` folder are not part of the ZIP, so keep them.
 
+## Unreleased (branch fix/live-balance-sizing): real-money trades sized from your real Zerodha balance
+
+- **Fixed:** in REAL MONEY mode the bot sized trades from its own record, which on a first live start was the
+  default ₹1,00,000 whatever was in Zerodha (with ₹5,000 in Zerodha that meant about ₹500 risk per trade and a ₹2,000
+  daily loss limit). Now a new real-money record starts at ₹0 and the bot reads the balance from Zerodha
+  (read-only) before any trade: the smaller of today's opening cash and the cash available now, without
+  pledged shares. If it can't, or the balance is zero, it opens no new trades and says why. A restart with
+  positions open keeps the record. Shown on the Live page as "Balance from Zerodha". Paper and the backtest
+  are unchanged.
+
 ## Unreleased (branch feature/indian-themes): six India-inspired dashboard themes
 
 Look only: colours, names, pictures and page icons. Trading, the bot, its settings, the mode, orders and data are

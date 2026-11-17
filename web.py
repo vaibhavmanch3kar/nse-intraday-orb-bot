@@ -735,9 +735,23 @@ def live_events(s):
             f"</summary><ul class='list'>{body}</ul></details>")
 
 
+def balance_notice(s):
+    """REAL MONEY: the Zerodha balance the bot sizes trades from, or why it opens no new trades."""
+    b = (s or {}).get("balance") if (s or {}).get("mode") == "live" else None
+    if not b:
+        return ""
+    if b.get("ok") and b.get("inr") is not None:
+        at = (b.get("at") or "")[11:16]
+        return (f"<div class='banner' role='status'>Balance from Zerodha: <b>₹{b['inr']:,.2f}</b>"
+                f"{' (read ' + html.escape(at) + ')' if at else ''}. Trades are sized from it.</div>")
+    why = b.get("problem") or "Zerodha balance not read yet"
+    return (f"<div class='banner' role='alert'><b>REAL MONEY: no new trades.</b> {html.escape(why)}. "
+            f"Open positions are still managed.</div>")
+
+
 def live_notice(s, running):
     if running:
-        return ""
+        return balance_notice(s)
     when = (s.get("time") or "")
     return (f"<div class='banner'><b>Bot is not running</b> ({T.name('not_running')}: markets closed, weekend, or stopped). "
             f"Showing the last saved state{' from ' + html.escape(when[:16].replace('T', ' ')) if when else ''}. "

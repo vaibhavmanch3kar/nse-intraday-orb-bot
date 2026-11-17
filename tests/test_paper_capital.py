@@ -107,7 +107,7 @@ def test_live_bot_never_reads_the_paper_setting(monkeypatch):
     b = bot.Bot()
     assert b.live and b.state.path.endswith("state_live.json")
     b.apply_paper_capital()
-    assert b.state.d["cash"] == C.PAPER_START_INR                              # live state untouched
+    assert b.state.d["cash"] == 0.0             # live state untouched (it starts at ₹0 until Zerodha is read)
     assert capital.load()["pending"]["amount"] == 25000                         # still waiting for paper
     assert not os.path.exists(capital.paper_state_path())
 

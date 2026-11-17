@@ -107,6 +107,8 @@ def test_back_to_paper_keeps_managing_and_switches_when_flat(market, monkeypatch
     livemode.arm(login_at=market["now"])
     b = bot.Bot()
     assert b.live
+    b.kite = FakeKite(funds=50000.0)                   # read-only balance; PaperBroker places the "orders"
+    b.sync_live_balance(market["now"])
     b.cycle()                                          # PaperBroker stands in for Zerodha: no real order
     assert "SBIN" in b.state.positions
     livemode.request_paper()
