@@ -6,17 +6,23 @@ Every version is on the [Releases page](https://github.com/vaibhavmanch3kar/nse-
 with a ZIP you can download. To go back to an older version, download that version's ZIP.
 Your settings (Windows user environment variables) and your `data` folder are not part of the ZIP, so keep them.
 
-## Unreleased (branch fix/live-balance-sizing): real-money trades sized from your real Zerodha balance
+## v1.9.0 (17 Nov 2026): Paper | Real Money control, Zerodha logout, fast Review and Scanner, six Indian themes
+
+The strategy, risk limits, entry and exit rules and the backtest are unchanged: on frozen data the backtest is
+identical to v1.8.0 (84 trades, −3.03%, PF 0.47). Live trading stays off unless you set it up yourself
+([docs/LIVE-TRADING.md](docs/LIVE-TRADING.md)).
+
+### Real-money trades sized from your real Zerodha balance
 
 - **Fixed:** in REAL MONEY mode the bot sized trades from its own record, which on a first live start was the
-  default ₹1,00,000 whatever was in Zerodha (with ₹5,000 in Zerodha that meant about ₹500 risk per trade and a ₹2,000
-  daily loss limit). Now a new real-money record starts at ₹0 and the bot reads the balance from Zerodha
+  default ₹1,00,000 whatever was in Zerodha (with ₹5,000 in Zerodha that meant about ₹500 risk per trade and
+  a ₹2,000 daily loss limit). Now a new real-money record starts at ₹0 and the bot reads the balance from Zerodha
   (read-only) before any trade: the smaller of today's opening cash and the cash available now, without
   pledged shares. If it can't, or the balance is zero, it opens no new trades and says why. A restart with
   positions open keeps the record. Shown on the Live page as "Balance from Zerodha". Paper and the backtest
   are unchanged.
 
-## Unreleased (branch feature/indian-themes): six India-inspired dashboard themes
+### Six India-inspired dashboard themes
 
 Look only: colours, names, pictures and page icons. Trading, the bot, its settings, the mode, orders and data are
 unchanged; the frozen backtest is identical (84 trades, −3.03%, PF 0.47).
@@ -30,7 +36,7 @@ unchanged; the frozen backtest is identical (84 trades, −3.03%, PF 0.47).
 - Every theme passes the theme tests (all names present, WCAG AA contrast in both modes, under 100 KB, no
   animation, nothing loaded from the internet, the same numbers on every page) and fits a 375 px phone screen.
 
-## Unreleased (branch feature/zerodha-logout-mode): Zerodha logout, real trading mode on every page, Paper | Real Money control
+### Zerodha logout, real trading mode on every page, Paper | Real Money control
 
 The strategy, risk limits, entry and exit rules, orders and the backtest are unchanged (frozen backtest identical:
 84 trades, −3.03%, PF 0.47). Live trading stays off unless you set it up as below.
@@ -52,7 +58,7 @@ The strategy, risk limits, entry and exit rules, orders and the backtest are unc
 - **Buttons accept only the dashboard's own page:** exact Origin/Host checks and a secret code made at each
   dashboard start (other websites and programs can't press them).
 
-## Unreleased (branch feature/review-scanner-jobs): fast Review and Scanner pages, safe updates and restarts
+### Fast Review and Scanner pages, safe updates and restarts
 
 The strategy, risk limits, entry and exit rules, orders and the backtest are unchanged: on frozen data every
 Review, History check and backtest trade is identical to v1.8.0 (84 trades, −3.03%, PF 0.47). Full report:
