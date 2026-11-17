@@ -182,8 +182,12 @@ def request_close_all(now=None):
     log("close all positions", "requested")
 
 
-def take_close_all():
-    """The bot takes the request (once). True only for a well-formed request."""
+CLOSE_ALL_FRESH_MIN = 10
+
+
+def take_close_all(now=None):
+    """The bot takes the request (once). True only for a well-formed request from the last CLOSE_ALL_FRESH_MIN
+    minutes: an old one (made after the close, say) is dropped, so it can never close the next day's trades."""
     raw = _read(close_all_path())
     if raw is None:
         return False
@@ -191,20 +195,27 @@ def take_close_all():
     if not _valid_request(raw):
         log("close all positions", "refused", "malformed request file")
         return False
+    age = ((now or _now()) - dt.datetime.fromisoformat(raw["requested_at"])).total_seconds()
+    if not 0 <= age <= CLOSE_ALL_FRESH_MIN * 60 + 60:
+        log("close all positions", "dropped", f"request too old ({int(age // 60)} min)")
+        return False
     log("close all positions", "taken by the bot")
     return True
 
 
-def switch_message(s):
-    """One plain line for the header badge when a mode change is waiting, from the bot's status."""
+def switch_message(s, short=False):
+    """A mode change waiting, from the bot's status, in plain words. short: the header badge's form (the full
+    sentence is its tooltip and is on Settings > Trading mode)."""
     s = s or {}
     sw = s.get("switch")
     n = len(s.get("positions") or [])
     if sw == "to_paper":
+        if short:
+            return f"→ PAPER when {n} close{'s' if n == 1 else ''}" if n else "→ PAPER now"
         return (f"Switching to PAPER when {n} position{'s' if n != 1 else ''} close{'s' if n == 1 else ''}"
                 if n else "Switching to PAPER now")
     if sw == "to_live":
-        return "Switching to REAL MONEY at the next safe moment"
+        return "→ REAL MONEY soon" if short else "Switching to REAL MONEY at the next safe moment"
     return ""
 
 
@@ -228,9 +239,12 @@ def readiness(probe):
     st = probe.get("settings", {})
     on = lambda n, v: (st.get(n) or "").strip().lower() == v.lower()  # noqa: E731
     checks = []
-    live_set = on("DRY_RUN", "false") and on("CONFIRM_LIVE", "YES")
-    checks.append(("Live settings saved in Windows", live_set,
-                   "DRY_RUN=false and CONFIRM_LIVE=YES are set" if live_set else "not set (the bot trades paper)",
+    saved = on("DRY_RUN", "false") and on("CONFIRM_LIVE", "YES")
+    live_set = saved or bool(probe.get("bot_env_live"))
+    checks.append(("Live settings on", live_set,
+                   ("DRY_RUN=false and CONFIRM_LIVE=YES are saved in Windows" if saved else
+                    "DRY_RUN=false and CONFIRM_LIVE=YES are set for the running bot" if live_set else
+                    "not set (the bot trades paper)"),
                    "Set them yourself in Windows: Start > 'Edit environment variables for your account' > New: "
                    "DRY_RUN = false and CONFIRM_LIVE = YES. The dashboard can never set them."))
     active = on("KITE_ACCOUNT_ACTIVE", "YES")

@@ -227,6 +227,8 @@ class Bot:
         self.journal_warned = set()
         self.restart_noted = None   # last "restart requested - waiting" message (said once)
         self.restart_hold = False   # Apply Now is waiting for a safe moment: no new entries meanwhile (PAPER)
+        self.switch = None          # Paper | Real Money change waiting: "to_paper" / "to_live" (livemode.py)
+        self.switch_noted = None    # last "switch waiting" message (said once per reason)
         self.launcher_gone = lambda: False   # main() sets this when run_bot.ps1 passes --launcher-pid
         try:                    # what this bot runs: version and file/setting hashes, for the dashboard
             self.build = buildinfo.snapshot("bot")
@@ -403,7 +405,10 @@ class Bot:
 
         square_off_time = at(C.SQUARE_OFF, today)
 
-        # 1) manage open positions
+        # 1) manage open positions ("Close all positions now" on the dashboard closes them all, once)
+        close_all = livemode.take_close_all(now)
+        if close_all:
+            self.note(f"Close all positions requested on the dashboard: closing {len(self.state.positions)}")
         for sym, pos in list(self.state.positions.items()):
             px = self.prices.get(sym, pos["entry"])
             pos["last_price"] = px
@@ -413,6 +418,9 @@ class Bot:
                 row["reason"] = "exchange stop"
                 log_trade(row, self.mode)
                 self.note(f"{T.EXIT_LOSS} EXIT {sym} by exchange stop ({T.name('stop')}) @ {filled_stop:.2f} net ₹{row['net']:.2f}")
+                continue
+            if close_all:
+                self.close_position(sym, px, "closed from dashboard", now)
                 continue
             if now >= square_off_time:
                 self.close_position(sym, px, "square-off", now)
@@ -435,7 +443,8 @@ class Bot:
         self.state.save()
 
         # 2) entries
-        paused = os.path.exists(C.PAUSE_FILE) or self.restart_hold   # Apply Now waiting: no new entries
+        # Apply Now or a Paper | Real Money switch waiting: no new entries (open positions are still managed above)
+        paused = os.path.exists(C.PAUSE_FILE) or self.restart_hold or self.switch is not None
         candidates = []
         for sym, closed in bars_by_sym.items():
             last = closed[-1]
@@ -509,6 +518,9 @@ class Bot:
             "loss_streak": self.state.d["loss_streak"], "cooldown_until": self.state.d["cooldown_until"],
             "positions": positions, "rows": self.rows, "events": self.events,
             "build": self.build,
+            # Paper | Real Money (livemode.py): a switch waiting, whether this bot's own environment has both live
+            # settings, and whether real money is armed today. Read by the dashboard; never changes the mode.
+            "switch": self.switch, "live_env": C.is_live(), "armed": livemode.arm_valid(now)[0],
         }
         tmp = os.path.join(C.DATA_DIR, "status.json.tmp")
         with open(tmp, "w", encoding="utf-8") as f:
@@ -580,6 +592,55 @@ class Bot:
         self.write_status(now)
         restart.begin(req, self.mode, list(self.state.positions), self.state.d["trades_today"], self.state.d["cash"],
                       self._balance(), os.getpid(), (self.build or {}).get("version"), now)
+        return restart.EXIT_RESTART
+
+    def switch_mode_if_requested(self, now):
+        """Paper | Real Money (livemode.py). The mode is fixed while the bot runs, so a switch is a restart.
+        To paper: no new real-money trades at once; the open ones are managed as usual (stop orders, trailing stop,
+        15:10 close); the restart waits until all of them have closed. To real money: only with both Windows
+        settings in this bot's own environment AND today's arming; it waits for no open paper position and holds
+        new paper entries meanwhile. Returns restart.EXIT_RESTART when it is time (run_bot.ps1 starts the bot again
+        with the same settings, and livemode.bot_mode decides the new mode). After the close it never restarts:
+        the day ends in the mode it traded, and the next start decides the mode."""
+        today = now.date()
+        if now >= at(C.MARKET_CLOSE, today):
+            return None
+        if self.live:
+            if not livemode.paper_requested():
+                self.switch = self.switch_noted = None
+                return None
+            self.switch, target = "to_paper", "paper"
+            n = len(self.state.positions)
+            if n:
+                if self.switch_noted != n:
+                    self.note(f"Switch to PAPER requested: no new real-money trades; managing {n} open position"
+                              f"{'s' if n > 1 else ''} until {'they close' if n > 1 else 'it closes'}")
+                    self.switch_noted = n
+                return None
+        else:
+            livemode.clear_paper_request()      # already paper: nothing to wait for
+            if not (C.is_live() and livemode.arm_valid(now)[0]):
+                self.switch = self.switch_noted = None
+                return None
+            self.switch, target = "to_live", "live"
+            import data_kite
+            ok, why = restart.is_safe(False, len(self.state.positions), now, at(C.MARKET_OPEN, today),
+                                      at(C.MARKET_CLOSE, today), data_kite.candle_hold(now))
+            if not ok:
+                if self.switch_noted != why:
+                    self.note(f"Real money armed: switching at the next safe moment ({why}); no new paper entries "
+                              "meanwhile")
+                    self.switch_noted = why
+                return None
+        label = "REAL MONEY" if target == "live" else "PAPER"
+        if self.journal is not None:
+            self.journal_warn(self.journal.save())
+        self.state.save()
+        self.note(f"Switching to {label}: restarting")
+        livemode.log("switch", f"restarting in {label}", f"from {self.mode}")
+        self.write_status(now)
+        restart.begin(None, self.mode, list(self.state.positions), self.state.d["trades_today"], self.state.d["cash"],
+                      self._balance(), os.getpid(), (self.build or {}).get("version"), now, to_mode=target)
         return restart.EXIT_RESTART
 
     def check_changes_at_close(self, now):
@@ -685,7 +746,7 @@ class Bot:
                           "(open positions stay protected by exchange stops in live mode)")
                 self.journal_finish(now_ist(), "stopped")
                 break
-            rc = self.apply_if_requested(now_ist())
+            rc = self.apply_if_requested(now_ist()) or self.switch_mode_if_requested(now_ist())
             if rc:
                 return rc
             now = now_ist()

@@ -209,15 +209,23 @@ def take_request():
     return raw, None
 
 
-def begin(req, mode, positions, trades_today, cash, balance, pid, version, now=None):
-    """Record what the bot had, just before it exits to restart."""
-    _write(state_path(), {"stage": "restarting", "at": (now or _now()).isoformat(timespec="seconds"),
-                          "nonce": req.get("nonce") if req else None,
-                          "before": {"mode": mode, "positions": sorted(positions), "trades_today": trades_today,
-                                     "cash": round(float(cash), 2), "balance": round(float(balance), 2),
-                                     "pid": pid, "version": version}})
-    _remove(request_path())
-    log("apply now", "restarting", f"version before {version}")
+def begin(req, mode, positions, trades_today, cash, balance, pid, version, now=None, to_mode=None):
+    """Record what the bot had, just before it exits to restart. to_mode: a Paper | Real Money switch
+    (livemode.py, no Apply-Now request); the new bot then keeps a different book, so verify() checks the new
+    mode and a clean start instead of the same positions and cash."""
+    before = {"mode": mode, "positions": sorted(positions), "trades_today": trades_today,
+              "cash": round(float(cash), 2), "balance": round(float(balance), 2), "pid": pid, "version": version}
+    if to_mode:
+        before["to_mode"] = to_mode
+    st = {"stage": "restarting", "at": (now or _now()).isoformat(timespec="seconds"),
+          "nonce": req.get("nonce") if req else None, "before": before}
+    if to_mode:
+        st["reason"] = f"switching to {'REAL MONEY' if to_mode == 'live' else 'PAPER'}"
+    _write(state_path(), st)
+    if req:
+        _remove(request_path())
+    log("mode switch" if to_mode else "apply now", "restarting",
+        f"version before {version}" + (f", to {to_mode}" if to_mode else ""))
 
 
 def verify(mode, positions, trades_today, cash, balance, pid, version, disk_version=None, now=None):
@@ -237,12 +245,19 @@ def verify(mode, positions, trades_today, cash, balance, pid, version, disk_vers
         "new process": pid != before.get("pid"),
         f"back within {COME_BACK_SEC} s": took is not None and took <= COME_BACK_SEC,
         "running the code in the folder": disk_version is None or version == disk_version,
-        "same mode": mode == before.get("mode"),
-        "same open positions": sorted(positions) == before.get("positions"),
-        "same trades today": trades_today == before.get("trades_today"),
-        "same cash": round(float(cash), 2) == before.get("cash"),
-        "same opening balance": round(float(balance), 2) == before.get("balance"),
     }
+    to_mode = before.get("to_mode")
+    if to_mode:     # Paper | Real Money switch: a different book, so check the new mode and a clean start
+        checks[f"now trading {'REAL MONEY' if to_mode == 'live' else 'PAPER'}"] = mode == to_mode
+        checks["no position carried across"] = not positions
+    else:
+        checks.update({
+            "same mode": mode == before.get("mode"),
+            "same open positions": sorted(positions) == before.get("positions"),
+            "same trades today": trades_today == before.get("trades_today"),
+            "same cash": round(float(cash), 2) == before.get("cash"),
+            "same opening balance": round(float(balance), 2) == before.get("balance"),
+        })
     ok = all(checks.values())
     _write(state_path(), {"stage": "running" if ok else "failed", "ok": ok, "checks": checks,
                           "at": now.isoformat(timespec="seconds"), "took_sec": took, "before": before,

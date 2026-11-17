@@ -134,11 +134,15 @@ def mode_badge(s):
     live = mode == "live"
     word, sub = ("REAL MONEY", " · Zerodha") if live else ("PAPER", " · virtual money")
     paused = " · new entries paused" if s.get("paused") else ""
+    import livemode
+    full = livemode.switch_message(s)
+    sw = (f"<span class='mswitch' title='{html.escape(full)}'> · {html.escape(livemode.switch_message(s, short=True))}"
+          f"<span class='sr'> ({html.escape(full)})</span></span>" if full else "")
     icon = "⏸" if paused else ("●" if live else "◐")
     return (f"<span class='mbadge {'live' if live else 'paper'}' title='The bot is trading {word}{sub}{paused}. "
             f"Set in its own settings; the account view does not change it.'>"
             f"<span aria-hidden='true'>{icon}</span><span class='lbl'>Bot trading:</span> <b>{word}</b>"
-            f"<span class='long'>{sub}{paused}</span></span>")
+            f"<span class='long'>{sub}{paused}</span>{sw}</span>")
 
 
 def mode_chips(status, extra=""):
@@ -855,6 +859,230 @@ def live_login(ok, login_msg, s=None):
             f"<div class='{'up' if ok else 'warn'}'>{html.escape(login_msg)}</div>{login_btn}{logout}"
             f"<div class='muted small'>{T.term('paper')} mode doesn't need a login, except for {T.name('kite_data')} (Kite) "
             f"price data. {T.term('live')} mode needs one every day (tokens expire ~06:00 IST).</div></section>")
+
+
+# ---------------------------------------------------------------- Paper | Real Money (livemode.py)
+_READY = {"at": None, "checks": None}     # last readiness check (it calls Zerodha, so only when asked)
+
+
+def _short_err(e):
+    """An error's kind only: messages can carry a proxy address or account details."""
+    return f"could not check ({type(e).__name__})"
+
+
+def readiness_probe():
+    """Read-only answers for livemode.readiness(): saved Windows settings, the running bot's own settings, today's
+    login, Zerodha profile and funds (read-only calls), and that Kite traffic leaves from the whitelisted IP. Never
+    places an order and never shows a token, an address or a password."""
+    import livemode
+    s = read_status()
+    probe = {"settings": {n: livemode.windows_setting(n) for n in
+                          ("DRY_RUN", "CONFIRM_LIVE", "KITE_ACCOUNT_ACTIVE", "KITE_ORDER_PERMISSION")},
+             "bot_env_live": bool(s.get("live_env")) and bot_running(s)}
+    try:
+        kp = _kite_proxy()
+    except (Exception, SystemExit) as e:
+        probe.update(account_err=_short_err(e), egress_err="Kite settings missing: run setup_kite_proxy.ps1",
+                     funds_err=_short_err(e))
+        return probe
+    try:
+        import requests
+        egress = requests.get("https://api64.ipify.org", proxies=kp.proxies(), timeout=10).text.strip()
+        want = kp.env("EXPECTED_EGRESS_IP")
+        probe["egress_ok"] = bool(egress) and egress == want
+        if not probe["egress_ok"]:
+            probe["egress_err"] = "Kite traffic does NOT leave from the whitelisted IP"
+    except (Exception, SystemExit) as e:
+        probe["egress_err"] = f"proxy check failed ({type(e).__name__})"
+    tok = None
+    try:
+        tok = kp.load_token()
+    except (Exception, SystemExit):
+        pass
+    probe["logged_in"] = bool(tok)
+    if not tok:
+        probe.update(account_err="log in to Zerodha first", funds_err="log in to Zerodha first")
+        return probe
+    try:
+        kite = kp.make_kite(tok)
+    except (Exception, SystemExit) as e:
+        probe.update(account_err=_short_err(e), funds_err=_short_err(e))
+        return probe
+    try:
+        kite.profile()
+        probe["account_ok"] = True
+    except (Exception, SystemExit) as e:
+        probe["account_err"] = f"Zerodha refused ({type(e).__name__})"
+    try:
+        m = kite.margins("equity") or {}
+        bal = (m.get("available") or {}).get("live_balance", m.get("net"))
+        probe["funds"] = float(bal)
+    except (Exception, SystemExit) as e:
+        probe["funds_err"] = _short_err(e)
+    return probe
+
+
+def check_readiness():
+    import livemode
+    import datetime as dt
+    probe = readiness_probe()
+    checks = livemode.readiness(probe)
+    _READY.update(at=dt.datetime.now(livemode.IST), checks=checks, funds=probe.get("funds"))
+    livemode.log("readiness check", "all passed" if livemode.all_ready(checks) else "LOCKED",
+                 ", ".join(n for n, ok, _, _ in checks if not ok))
+    return checks
+
+
+def login_age_min():
+    """Minutes since today's Zerodha login (None if not logged in). Reads only the time, never the token."""
+    import livemode
+    import datetime as dt
+    try:
+        kp = _kite_proxy()
+        if not kp.load_token():
+            return None
+        created = dt.datetime.fromisoformat(json.loads(kp.TOKEN_FILE.read_text())["created"])
+        return (dt.datetime.now(livemode.IST) - created).total_seconds() / 60, created
+    except (Exception, SystemExit):
+        return None
+
+
+def arm_real_money(form):
+    """Arm REAL MONEY for today. Only with: the typed words, every readiness check passing right now, a Zerodha
+    login from the last livemode.LOGIN_FRESH_MIN minutes, and the bot not already trading real money. Writes only
+    today's arming file; it can't set DRY_RUN / CONFIRM_LIVE, and the bot still needs both of them."""
+    import livemode
+    words = (form.get("words") or [""])[0].strip()
+    if words != livemode.CONFIRM_WORDS:
+        livemode.log("arm real money", "refused", "confirmation words not typed")
+        return False, f"Not armed: type {livemode.CONFIRM_WORDS} exactly to confirm."
+    s = read_status()
+    if s.get("mode") == "live" and bot_running(s):
+        return False, "The bot is already trading REAL MONEY."
+    age = login_age_min()
+    if age is None or age[0] > livemode.LOGIN_FRESH_MIN or age[0] < -1:
+        livemode.log("arm real money", "refused", "no Zerodha login in the last 10 minutes")
+        return False, (f"Not armed: the switch needs a Zerodha login from the last {livemode.LOGIN_FRESH_MIN} minutes "
+                       "(Zerodha's own two-step login). Log out, log in again, then arm.")
+    checks = check_readiness()
+    if not livemode.all_ready(checks):
+        missing = ", ".join(n for n, ok, _, _ in checks if not ok)
+        livemode.log("arm real money", "refused", f"locked: {missing}")
+        return False, f"Not armed: Live Trading is locked ({missing})."
+    livemode.arm(login_at=age[1])
+    running = bot_running(s)
+    if running and s.get("live_env"):
+        return True, ("REAL MONEY armed for today. The bot switches at the next safe moment (no open paper "
+                      "position); until then it opens no new paper trades.")
+    if running:
+        return True, ("REAL MONEY armed for today, but the running bot was started without DRY_RUN=false and "
+                      "CONFIRM_LIVE=YES, so it stays in PAPER. Real money starts only if it starts again today "
+                      "with both settings.")
+    return True, "REAL MONEY armed for today: the next start today trades real money. The arming ends at midnight."
+
+
+def switch_to_paper():
+    """Back to paper: the arming goes at once; a live bot opens no new trades and switches when its positions
+    have closed (it keeps managing them)."""
+    import livemode
+    s = read_status()
+    livemode.request_paper()
+    if s.get("mode") == "live" and bot_running(s):
+        n = live_positions_held(s)
+        if n:
+            return (f"Switching to PAPER: no new real-money trades from now. The bot keeps managing its {n} open "
+                    f"position(s) (stop orders, trailing stop, 15:10 close) and switches when they have closed.")
+        return "Switching to PAPER: the bot restarts in paper within a minute."
+    return "Real money is not armed any more: the bot trades PAPER."
+
+
+def close_all_positions(form):
+    import livemode
+    if (form.get("confirm") or [""])[0] != "yes":
+        return "Nothing closed: closing all positions needs your confirmation."
+    s = read_status()
+    if not bot_running(s):
+        return "Nothing closed: the bot is not running."
+    n = len(s.get("positions") or [])
+    if not n:
+        return "There are no open positions to close."
+    livemode.request_close_all()
+    kind = "real-money" if s.get("mode") == "live" else "paper"
+    return f"Closing all {n} {kind} position(s) at the market: the bot does it at its next check (within a minute)."
+
+
+def trading_mode_card(s):
+    """Settings > Trading mode: Paper | Real Money. Shows what the bot actually trades, the audit warning, the
+    readiness checks (Live Trading Locked when any fails), the arming form, and Switch back to Paper."""
+    import livemode
+    s = s or {}
+    running = bot_running(s)
+    live = s.get("mode") == "live" and running
+    armed = livemode.arm_valid()[0]
+    out = [f"<section class='card' id='mode'><div class='hd'>Trading mode: Paper | Real Money</div>",
+           f"<p>Now: {mode_badge(s)}</p>",
+           f"<div class='banner' role='note'>⚠ {html.escape(livemode.AUDIT_VERDICT)}</div>"]
+    if live or armed:
+        sw = livemode.switch_message(s) if running else ""
+        what = ("The bot is trading <b>REAL MONEY</b> today." if live else
+                "<b>REAL MONEY is armed for today.</b> " + ("The bot switches at the next safe moment."
+                                                           if running and s.get("live_env") else
+                                                           "It applies only to a start today with both live settings."))
+        out.append(f"<p>{what}</p>")
+        if sw:
+            out.append(f"<p class='warn'>{html.escape(sw)}</p>")
+        if s.get("switch") != "to_paper":
+            ask = ("Switch back to PAPER?\\n\\nNo new real-money trades from now. Open positions are still managed "
+                   "(stop orders, trailing stop, 15:10 close); the bot switches when they have closed.")
+            out.append(f"<form method='post' action='/mode/paper' onsubmit=\"return confirm('{ask}')\">{csrf_field()}"
+                       f"<button class='wide'>◐ Switch back to Paper</button></form>")
+        n = len(s.get("positions") or []) if live else 0
+        if n:
+            ask = (f"Close ALL {n} real-money position(s) now at the market price?\\n\\nThis sells/buys at once at "
+                   f"whatever the price is. It cannot be undone.")
+            out.append(f"<form method='post' action='/positions/close-all' "
+                       f"onsubmit=\"if(!confirm('{ask}'))return false;this.confirm.value='yes'\">"
+                       f"<input type='hidden' name='confirm' value=''>{csrf_field()}"
+                       f"<button class='red wide'>✖ Close all positions now</button></form>"
+                       f"<p class='muted small'>Separate from the switch: use it only if you want out at once.</p>")
+        out.append("</section>")
+        return "".join(out)
+    checks, at = _READY["checks"], _READY["at"]
+    if checks is None:
+        out.append("<p>The bot trades <b>PAPER</b>. Real money stays locked until every check below passes. "
+                   "Checking asks Zerodha for your profile and funds (read only: nothing is ever ordered).</p>")
+    else:
+        rows = "".join(f"<li class='{'up' if ok else 'dn'}'>{'✔' if ok else '✖'} <b>{html.escape(n)}</b>: "
+                       f"{html.escape(d)}{'' if ok else '<br><span class=muted>' + html.escape(fix) + '</span>'}</li>"
+                       for n, ok, d, fix in checks)
+        ready = livemode.all_ready(checks)
+        head = ("<p class='up'><b>All checks passed.</b></p>" if ready else
+                "<p class='dn'><b>🔒 Live Trading Locked.</b> What's missing and how to fix it:</p>")
+        out.append(f"{head}<ul class='checks'>{rows}</ul><p class='muted small'>Checked at {at:%H:%M:%S}.</p>")
+    out.append(f"<form method='post' action='/mode/check'>{csrf_field()}<button>Check readiness</button></form>")
+    if checks is not None and livemode.all_ready(checks):
+        funds = next((d for n, _, d, _ in checks if n == "Enough funds"), "")
+        probe_funds = _READY.get("funds")
+        risk = (f"Risk per trade: {C.RISK_PER_TRADE_PCT}% of equity" +
+                (f" = about ₹{probe_funds * C.RISK_PER_TRADE_PCT / 100:,.0f}" if probe_funds else "") +
+                f". Daily loss limit: {C.MAX_DAILY_LOSS_PCT}% of equity" +
+                (f" = about ₹{probe_funds * C.MAX_DAILY_LOSS_PCT / 100:,.0f}" if probe_funds else "") +
+                f". Up to {C.MAX_TRADES_PER_DAY} trades a day. Funds: {funds}.")
+        age = login_age_min()
+        fresh = age is not None and age[0] <= livemode.LOGIN_FRESH_MIN
+        out.append(f"<div class='banner' role='note'>{html.escape(risk)}</div>")
+        if not fresh:
+            out.append(f"<p class='warn'>Arming needs a Zerodha login from the last {livemode.LOGIN_FRESH_MIN} minutes. "
+                       "Log out of Zerodha and log in again on the Live page, then come back.</p>")
+        out.append(f"<form method='post' action='/mode/real'>{csrf_field()}"
+                   f"<label>Type <b>{livemode.CONFIRM_WORDS}</b> to arm real money for today only: "
+                   f"<input name='words' autocomplete='off' spellcheck='false' required></label> "
+                   f"<button class='red'{'' if fresh else ' disabled'}>● Arm REAL MONEY for today</button></form>"
+                   f"<p class='muted small'>It takes effect only at a safe moment (no open paper position) and only "
+                   f"if the bot runs with DRY_RUN=false and CONFIRM_LIVE=YES. It ends at midnight. Every change is "
+                   f"logged in data/logs/mode_changes.log.</p>")
+    out.append("</section>")
+    return "".join(out)
 
 
 LIVE_REFRESH_SEC = ACCOUNT_REFRESH_SEC
@@ -1674,6 +1902,11 @@ def edge_card(rows, label, compact=False):
 
 
 SETTINGS_CSS = """
+ul.checks{list-style:none;margin:8px 0;padding:0;display:grid;gap:8px}
+ul.checks li{padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-2)}
+ul.checks li span.muted{font-size:12.5px}
+#mode form{margin:10px 0}
+#mode input[name=words]{background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:6px 8px;font:inherit;min-height:36px;max-width:100%}
 .tpicks{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px;border:0;margin:0 0 12px;padding:0}
 .tpick{display:flex;flex-direction:column;gap:8px;padding:12px;border:1px solid var(--border);border-radius:var(--radius);
  background:var(--surface-2);cursor:pointer}
@@ -1713,8 +1946,8 @@ def _theme_preview(t):
             f"</span></span>")
 
 
-def render_settings(saved=False):
-    """Settings: the dashboard theme (look only, saved in this browser)."""
+def render_settings(saved=False, msg=""):
+    """Settings: the dashboard theme (look only, saved in this browser), the trading mode, waiting updates."""
     cur = T.theme_id()
     if not T._ui:
         body = (f"<div class='page-head'><h1>{T.GEAR} {T.ui('settings_page')}</h1></div>"
@@ -1731,6 +1964,8 @@ def render_settings(saved=False):
                      f"<span class='td'>{html.escape(t.description)}</span>{_theme_preview(t)}</label>")
     note = ("<div class='banner' role='status'>Theme saved for this browser. The bot, its settings and your "
             "accounts are unchanged.</div>" if saved else "")
+    if msg:
+        note += f"<div class='banner' role='status'>{html.escape(msg)}</div>"
     body = f"""<style>{SETTINGS_CSS}{previews}</style>
 <div class="page-head"><h1>{T.GEAR} {html.escape(T.ui('settings_page'))}</h1><span class="sub">Dashboard look · saved in this browser only</span></div>
 {note}
@@ -1749,6 +1984,7 @@ same in every theme.</p>
 </section>
 <script>(function(){{var f=document.getElementById('themeForm');if(!f)return;
 f.addEventListener('change',function(e){{if(e.target&&e.target.name==='ui_theme')f.submit();}});}})();</script>
+{trading_mode_card(read_status())}
 {updates_section(read_status())}"""
     return page(T.ui("settings_page"), "/settings", body)
 
@@ -2088,7 +2324,7 @@ class Handler(BaseHTTPRequestHandler):
         (look only: never the bot's settings, mode or accounts) and shows the page again."""
         want = q.get("ui_theme", [None])[0]
         if want is None or not T._ui:
-            self._send(render_settings(saved="saved" in q))
+            self._send(render_settings(saved="saved" in q, msg=q.get("msg", [""])[0]))
             return
         tid = want if want in T._ui.THEMES else T._ui.DEFAULT
         self.send_response(303)
@@ -2285,6 +2521,21 @@ class Handler(BaseHTTPRequestHandler):
         if self.path in ("/bot/apply-now", "/bot/apply-after-close", "/bot/restart-cancel", "/bot/restart-dismiss",
                          "/bot/go-back", "/dashboard/restart"):
             self._restart(form)
+            return
+        if self.path in ("/mode/check", "/mode/real", "/mode/paper", "/positions/close-all"):
+            from urllib.parse import quote
+            if self.path == "/mode/check":
+                import livemode
+                checks = check_readiness()
+                msg = ("All live-trading checks passed." if livemode.all_ready(checks) else
+                       "Live Trading is locked: see what's missing below.")
+            elif self.path == "/mode/real":
+                msg = arm_real_money(form)[1]
+            elif self.path == "/mode/paper":
+                msg = switch_to_paper()
+            else:
+                msg = close_all_positions(form)
+            self._redirect("/settings?msg=" + quote(msg) + "#mode")
             return
         if self.path == "/zerodha/logout":
             from urllib.parse import quote

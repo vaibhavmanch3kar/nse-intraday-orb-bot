@@ -178,6 +178,7 @@ button[disabled]{opacity:.55;cursor:not-allowed;filter:none}
 .mbadge b{font-weight:800;letter-spacing:.3px}
 .mbadge.paper{border-color:var(--gold);color:var(--gold)}
 .mbadge.live{border:2px solid var(--live);color:var(--dn)}
+.mbadge .mswitch{color:var(--text);font-weight:700}
 .opts{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 8px}
 .opt{display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border:1px solid var(--border);border-radius:9px;background:var(--surface-2);
  cursor:pointer;min-height:40px} .opt:has(input:checked){border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
@@ -211,6 +212,8 @@ input[type=number],input[type=search],select{background:var(--surface);color:var
   .phone-seg .seg{display:flex;width:100%} .phone-seg .seg a{flex:1;min-height:42px}
   button.wide{width:100%;min-height:44px}
   .mbadge .long,.mbadge .lbl{display:none} .mbadge{padding:4px 9px;font-size:12px}
+  .mbadge:has(.mswitch){white-space:normal;max-width:62vw}
+  .mbadge .mswitch{font-size:11.5px}
   .wrap{padding:12px 14px calc(84px + env(safe-area-inset-bottom))}
   h1{font-size:19px}
   .chips{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin-left:-14px;margin-right:-14px;padding:0 14px 2px}
