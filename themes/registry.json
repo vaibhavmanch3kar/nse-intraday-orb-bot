@@ -5,6 +5,7 @@
     {"id": "default", "name": "Default", "dir": "default", "group": "Original"},
     {"id": "mahabharata", "name": "Kurukshetra", "dir": "mahabharata", "group": "Indian heritage"},
     {"id": "swarajya", "name": "Swarajya", "dir": "swarajya", "group": "Indian heritage"},
+    {"id": "takshashila", "name": "Takshashila", "dir": "takshashila", "group": "Indian heritage"},
     {"id": "roblox_inspired", "name": "Playground", "dir": "roblox_inspired", "group": "Game styles"},
     {"id": "minecraft_inspired", "name": "Sandbox", "dir": "minecraft_inspired", "group": "Game styles"}
   ]

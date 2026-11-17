@@ -24,7 +24,7 @@ import uitheme as U
 import web
 import webui
 
-HERITAGE = ["mahabharata", "swarajya"]
+HERITAGE = ["mahabharata", "swarajya", "takshashila"]
 IDS = ["default", *HERITAGE, "roblox_inspired", "minecraft_inspired"]
 ALL_NAMES = {"default": "Default", "mahabharata": "Kurukshetra", "swarajya": "Swarajya", "takshashila": "Takshashila",
              "antariksh": "Antariksh", "vijayanagara": "Vijayanagara", "chola_samudra": "Chola Samudra",

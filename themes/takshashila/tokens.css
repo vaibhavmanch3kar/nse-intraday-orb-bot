@@ -1,0 +1,62 @@
+/* Takshashila theme tokens. Original palette; all text colours meet WCAG AA (4.5:1) on bg, surface and
+   surface-2 (checked by tests/test_themes.py). Profit/loss always also shows a sign and an arrow. */
+
+/* colours, dark mode */
+:root[data-mode=dark] {
+  --bg: #1b140e;
+  --surface: #261c13;
+  --surface-2: #31251a;
+  --border: #54412d;
+  --text: #f3e9d8;
+  --muted: #c8b597;
+  --accent: #d98a52;
+  --accent-ink: #1e0f04;
+  --gold: #e0b15e;
+  --up: #6fd39a;
+  --dn: #ff8f80;
+  --warn: #f5c451;
+  --info: #9fc4ee;
+  --trail: #c9a7ff;
+  --live: #dc2626;
+  --up-bg: rgba(111,211,154,.12);
+  --dn-bg: rgba(255,143,128,.13);
+  --warn-bg: rgba(245,196,81,.12);
+  --banner-bg: #3a2814;
+  --banner-fg: #f8e3bd;
+  --shadow: 0 3px 10px rgba(0,0,0,.4);
+}
+
+/* colours, light mode */
+:root[data-mode=light] {
+  --bg: #f2e3c2;
+  --surface: #fbf3e1;
+  --surface-2: #ead6ad;
+  --border: #c4a675;
+  --text: #2b1f12;
+  --muted: #56411f;
+  --accent: #8a3d14;
+  --accent-ink: #ffffff;
+  --gold: #6e3d12;
+  --up: #14532d;
+  --dn: #a61b1b;
+  --warn: #6e4100;
+  --info: #1e3a8a;
+  --trail: #6d28d9;
+  --live: #b91c1c;
+  --up-bg: #e3efd9;
+  --dn-bg: #f8e1dc;
+  --warn-bg: #f6e6c0;
+  --banner-bg: #f8ead0;
+  --banner-fg: #4a2c08;
+  --shadow: 0 2px 8px rgba(43,31,18,.14);
+}
+
+/* shape and type (both modes) */
+:root[data-mode=any] {
+  --radius: 10px;
+  --font: system-ui,'Segoe UI',Roboto,'Noto Sans',sans-serif;
+  --serif: 'Palatino Linotype','Book Antiqua',Palatino,Georgia,serif;
+  --btn-radius: 18px;
+  --btn-bg: var(--accent);
+  --card-border-width: 1px;
+}
