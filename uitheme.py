@@ -195,6 +195,11 @@ def ids():
     return [e["id"] for e in REGISTRY["themes"]]
 
 
+def group(tid):
+    """The Settings heading a theme is listed under (registry 'group'; '' if none)."""
+    return next((e.get("group", "") for e in REGISTRY["themes"] if e["id"] == tid), "")
+
+
 def get(tid):
     return THEMES.get(tid) or THEMES[DEFAULT]
 

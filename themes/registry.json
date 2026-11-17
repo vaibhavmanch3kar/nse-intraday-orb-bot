@@ -1,9 +1,15 @@
 {
-  "_comment": "Dashboard themes (look only). 'id' is stored in the browser cookie ayodhya-ui-theme; 'dir' is the theme folder; 'name' is shown in Settings. An unknown or missing id falls back to 'default'.",
+  "_comment": "Dashboard themes (look only). 'id' is stored in the browser cookie ayodhya-ui-theme; 'dir' is the theme folder; 'name' is shown in Settings; 'group' sorts the Settings list. An unknown or missing id falls back to 'default'.",
   "default": "default",
   "themes": [
-    {"id": "default", "name": "Default", "dir": "default"},
-    {"id": "roblox_inspired", "name": "Playground", "dir": "roblox_inspired"},
-    {"id": "minecraft_inspired", "name": "Sandbox", "dir": "minecraft_inspired"}
+    {"id": "default", "name": "Default", "dir": "default", "group": "Original"},
+    {"id": "mahabharata", "name": "Kurukshetra", "dir": "mahabharata", "group": "Indian heritage"},
+    {"id": "swarajya", "name": "Swarajya", "dir": "swarajya", "group": "Indian heritage"},
+    {"id": "takshashila", "name": "Takshashila", "dir": "takshashila", "group": "Indian heritage"},
+    {"id": "antariksh", "name": "Antariksh", "dir": "antariksh", "group": "Indian heritage"},
+    {"id": "vijayanagara", "name": "Vijayanagara", "dir": "vijayanagara", "group": "Indian heritage"},
+    {"id": "chola_samudra", "name": "Chola Samudra", "dir": "chola_samudra", "group": "Indian heritage"},
+    {"id": "roblox_inspired", "name": "Playground", "dir": "roblox_inspired", "group": "Game styles"},
+    {"id": "minecraft_inspired", "name": "Sandbox", "dir": "minecraft_inspired", "group": "Game styles"}
   ]
 }

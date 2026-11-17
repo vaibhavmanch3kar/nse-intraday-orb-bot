@@ -1,0 +1,62 @@
+/* Kurukshetra theme tokens. Original palette; all text colours meet WCAG AA (4.5:1) on bg, surface and
+   surface-2 (checked by tests/test_themes.py). Profit/loss always also shows a sign and an arrow. */
+
+/* colours, dark mode */
+:root[data-mode=dark] {
+  --bg: #0e1024;
+  --surface: #171a35;
+  --surface-2: #20244a;
+  --border: #3a3f72;
+  --text: #eef0ff;
+  --muted: #b3b7dc;
+  --accent: #e0a050;
+  --accent-ink: #1a1206;
+  --gold: #e9c46a;
+  --up: #5fd38d;
+  --dn: #ff8a8a;
+  --warn: #fbbf24;
+  --info: #8fb0ff;
+  --trail: #c4a1ff;
+  --live: #dc2626;
+  --up-bg: rgba(95,211,141,.13);
+  --dn-bg: rgba(255,138,138,.13);
+  --warn-bg: rgba(251,191,36,.12);
+  --banner-bg: #2a2350;
+  --banner-fg: #f7e3b0;
+  --shadow: 0 4px 14px rgba(0,0,0,.45);
+}
+
+/* colours, light mode */
+:root[data-mode=light] {
+  --bg: #f3eee2;
+  --surface: #fffaf0;
+  --surface-2: #ece4d2;
+  --border: #cdbf9f;
+  --text: #1d1a33;
+  --muted: #4a4566;
+  --accent: #7a3f0c;
+  --accent-ink: #ffffff;
+  --gold: #6b4a00;
+  --up: #166534;
+  --dn: #b91c1c;
+  --warn: #7a4600;
+  --info: #1e3a8a;
+  --trail: #6d28d9;
+  --live: #b91c1c;
+  --up-bg: #e2f2e6;
+  --dn-bg: #fbe6e6;
+  --warn-bg: #f8ecca;
+  --banner-bg: #e8e3f7;
+  --banner-fg: #2a2160;
+  --shadow: 0 3px 10px rgba(29,26,51,.12);
+}
+
+/* shape and type (both modes) */
+:root[data-mode=any] {
+  --radius: 6px;
+  --font: system-ui,'Segoe UI',Roboto,'Noto Sans',sans-serif;
+  --serif: Georgia,Cambria,'Times New Roman',serif;
+  --btn-radius: 4px;
+  --btn-bg: linear-gradient(180deg,var(--gold),var(--accent));
+  --card-border-width: 1px;
+}

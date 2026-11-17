@@ -1,4 +1,4 @@
-"""Dashboard themes (Default, Playground, Sandbox): look only.
+"""Dashboard themes (Default, six Indian-heritage themes, Playground, Sandbox): look only.
 
 Checks: the registry and folders; every key in every theme (with fallback to Default); Default equals the
 original built-in values; the same data renders the same numbers, signs, currency, times and status words in
@@ -24,8 +24,12 @@ import uitheme as U
 import web
 import webui
 
-IDS = ["default", "roblox_inspired", "minecraft_inspired"]
-NAMES = {"default": "Default", "roblox_inspired": "Playground", "minecraft_inspired": "Sandbox"}
+HERITAGE = ["mahabharata", "swarajya", "takshashila", "antariksh", "vijayanagara", "chola_samudra"]
+IDS = ["default", *HERITAGE, "roblox_inspired", "minecraft_inspired"]
+ALL_NAMES = {"default": "Default", "mahabharata": "Kurukshetra", "swarajya": "Swarajya", "takshashila": "Takshashila",
+             "antariksh": "Antariksh", "vijayanagara": "Vijayanagara", "chola_samudra": "Chola Samudra",
+             "roblox_inspired": "Playground", "minecraft_inspired": "Sandbox"}
+NAMES = {k: v for k, v in ALL_NAMES.items() if k in IDS}
 
 
 # ── registry, folders, keys ─────────────────────────────────────────────────
@@ -123,7 +127,7 @@ def test_themed_names_always_keep_the_plain_term(tid):
 
 def test_game_names_never_dress_up_live_trading_or_losses():
     banned = re.compile(r"\b(win|won|victory|level up|bonus|loot|reward|score|play|game|xp|coins?)\b", re.I)
-    for tid in ("roblox_inspired", "minecraft_inspired"):
+    for tid in ("roblox_inspired", "minecraft_inspired", *HERITAGE):
         t = U.THEMES[tid]
         for key in ("live", "paper", "stop", "target", "daily_loss", "cooldown", "positions", "login"):
             assert not banned.search(t.strings["terms"][key]), (tid, key, t.strings["terms"][key])
@@ -370,11 +374,15 @@ def snapshot():
     return out
 
 
-def test_settings_shows_three_themes_with_previews(server):
+def test_settings_shows_every_theme_with_previews_in_groups(server):
     page = fetch(server + "/settings")[1]
     for tid, name in NAMES.items():
         assert f"value='{tid}'" in page and f">{name}" in page and f"pv-{tid}" in page
-    assert page.count("type='radio' name='ui_theme'") == 3 and "checked" in page
+    assert page.count("type='radio' name='ui_theme'") == len(IDS) and "checked" in page
+    heads = re.findall(r"<p class='tgroup'>([^<]+)</p>", page)
+    assert heads == ["Original", "Indian heritage", "Game styles"]
+    order = [page.index(f"value='{tid}'") for tid in IDS]
+    assert order == sorted(order)
     assert "Light or dark" in page and U.COOKIE in page
 
 
@@ -405,3 +413,24 @@ def test_settings_page_is_keyboard_friendly(server):
     assert '<legend class="sr">Dashboard theme</legend>' in page
     assert "aria-label='Settings (dashboard theme)'" in page and "aria-current='page'" in page
     assert "<button type=\"submit\">Apply theme</button>" in page
+
+
+# ── Indian-heritage themes ──────────────────────────────────────────────────
+@pytest.mark.parametrize("tid", HERITAGE)
+def test_heritage_themes_are_complete_and_their_own(tid):
+    t = U.THEMES[tid]
+    assert U.group(tid) == "Indian heritage"
+    assert t.avatar.startswith("<svg") and t.scene.startswith("<svg") and "{{scene}}" not in t.skin_css
+    for key, value in t.strings["icons"].items():           # every page icon is this theme's own SVG
+        assert value == f"file:assets/icons/{key}.svg" and "<svg" not in t.icon_markup[key]
+        assert os.path.isfile(os.path.join(t.folder, "assets", "icons", f"{key}.svg"))
+    others = [U.THEMES[o] for o in IDS if o != tid]
+    assert all(t.tokens["dark"]["bg"] != o.tokens["dark"]["bg"] for o in others)      # visually distinct
+    assert t.strings["terms"]["trades"] not in {o.strings["terms"]["trades"] for o in others}
+    assert t.meta.get("bot_name") and t.strings["terms"]["live"] == "Real Money"
+
+
+def test_heritage_names_appear_next_to_the_plain_terms(server):
+    for tid in HERITAGE:
+        page = fetch(server + "/trades", tid)[1]
+        assert f"{U.THEMES[tid].strings['terms']['trades']} · Trades" in page, tid

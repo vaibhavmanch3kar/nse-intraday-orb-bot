@@ -1,0 +1,12 @@
+/* Kurukshetra skin: brass-edged cards and chariot-wheel logo. Decorative only. */
+.logo{background:none}
+.logo svg{display:block;width:34px;height:34px}
+.ribbon{height:22px;opacity:1;background:url("{{scene}}") repeat-x left bottom/240px 22px}
+.card,.kpi,.chip,.seg,.icon-btn,.opt{border-width:var(--card-border-width)}
+.card{border-top:2px solid color-mix(in srgb,var(--accent) 70%,transparent)}
+.btn,button{background:var(--btn-bg);border-radius:var(--btn-radius)}
+button.ghost,.btn.ghost{background:transparent}
+.ptabs button,.ptabs a,.icon-btn{box-shadow:none}
+.tabs a.on{box-shadow:inset 0 -2px 0 var(--gold)}
+.empty{display:flex;align-items:center;gap:12px}
+.empty-art svg{display:block;width:40px;height:40px}

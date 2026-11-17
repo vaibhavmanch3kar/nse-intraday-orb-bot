@@ -1,0 +1,13 @@
+{
+  "id": "swarajya",
+  "name": "Swarajya",
+  "description": "Maratha hill forts: basalt walls, bhagwa saffron and monsoon green on the Sahyadri ridges. The Killedar (fort keeper) keeps watch from the bastion.",
+  "author": "kite-trader project",
+  "art": "Original SVG made for this project: a fort bastion with a saffron flag, a Sahyadri ridge strip and page icons. No portraits of historical figures.",
+  "bot_name": "Killedar",
+  "assets": {
+    "avatar": "assets/avatar.svg",
+    "scene": "assets/scene.svg",
+    "skin_css": "assets/skin.css"
+  }
+}

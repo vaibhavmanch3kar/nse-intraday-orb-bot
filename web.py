@@ -1913,6 +1913,7 @@ ul.checks li span.muted{font-size:12.5px}
 .tpick:has(input:checked){border-color:var(--accent);box-shadow:inset 0 0 0 2px var(--accent)}
 .tpick .tn{display:flex;align-items:center;gap:8px;font-weight:700} .tpick .td{color:var(--muted);font-size:12.5px}
 .tpick input{width:18px;height:18px;margin:0;accent-color:var(--accent)}
+.tgroup{grid-column:1/-1;margin:8px 0 -4px;font:600 13px var(--serif);color:var(--gold);letter-spacing:.3px}
 .pv{display:block;border-radius:var(--radius);overflow:hidden;background:var(--bg);color:var(--text);
  border:var(--card-border-width) solid var(--border);font:13px/1.4 var(--font)}
 .pv-top{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--border)}
@@ -1954,9 +1955,13 @@ def render_settings(saved=False, msg=""):
                 "<div class='banner'>Themes could not be loaded, so the dashboard uses its built-in look.</div>")
         return page(T.ui("settings_page"), "/settings", body)
     previews = "".join(T._ui.preview_css(t, f".pv-{t.id}") for t in T._ui.THEMES.values())
-    picks = []
+    picks, last_group = [], None
     for tid in T._ui.ids():
         t = T._ui.THEMES[tid]
+        grp = T._ui.group(tid)
+        if grp and grp != last_group:
+            picks.append(f"<p class='tgroup'>{html.escape(grp)}</p>")
+        last_group = grp
         checked = (" checked" + (" autofocus" if saved else "")) if tid == cur else ""  # keyboard focus returns here
         in_use = " <span class='tag'>in use</span>" if tid == cur else ""
         picks.append(f"<label class='tpick'><span class='tn'><input type='radio' name='ui_theme' value='{tid}'{checked}>"
