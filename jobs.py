@@ -22,6 +22,26 @@ IST = dt.timezone(dt.timedelta(hours=5, minutes=30))
 
 ENABLED = True   # tests switch background jobs off unless they test them
 
+_bg = threading.local()
+
+
+def in_background():
+    """True inside a dashboard job (its data requests give way to the bot's: see data_kite.Pacer)."""
+    return getattr(_bg, "on", False)
+
+
+class background:
+    """`with jobs.background(flag):` marks this thread's work as a dashboard job (or not). Worker threads
+    a job starts (download pools) use it to keep the mark."""
+    def __init__(self, on=True):
+        self.on = on
+
+    def __enter__(self):
+        self.prev, _bg.on = in_background(), self.on
+
+    def __exit__(self, *exc):
+        _bg.on = self.prev
+
 
 class TimeLimit(Exception):
     """Raised inside a job once its time limit has passed."""
@@ -66,7 +86,8 @@ class Job:
 
     def _run(self, target):
         try:
-            self.fn(target, self)
+            with background(True):
+                self.fn(target, self)
             ok, err = True, ""
         except Exception as e:  # a failed build must never take the dashboard down
             ok, err = False, f"{type(e).__name__}: {e}" if not str(e) else str(e)

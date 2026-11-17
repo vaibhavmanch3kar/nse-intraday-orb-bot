@@ -36,13 +36,15 @@ def _cache_path(day):
 def fetch_all(symbols, range_="60d", job=jobs.NO_JOB):  # 60 days: also feeds the Time Machine history
     """job: progress (one step per symbol) and the time limit (symbols not started yet are skipped)."""
     now = dt.datetime.now(data_yahoo.IST)
+    bg = jobs.in_background()   # pool threads keep the dashboard-job mark (so Kite lets the bot go first)
 
     def one(sym):
         if job.over_time():
             job.note_skipped()
             return sym, [], data_yahoo.SKIPPED
         try:
-            bars, _, _ = marketdata.fetch(sym, C.INTERVAL_MIN, range_)
+            with jobs.background(bg):
+                bars, _, _ = marketdata.fetch(sym, C.INTERVAL_MIN, range_)
             return sym, data_yahoo.closed_bars(bars, now, C.INTERVAL_MIN), None
         except data_yahoo.DataError as e:
             return sym, [], str(e)

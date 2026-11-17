@@ -34,11 +34,76 @@ MAX_DAYS = {"minute": 60, "3minute": 100, "5minute": 100, "10minute": 100, "15mi
             "30minute": 200, "60minute": 400, "day": 2000}
 HIST_PER_SEC = 3            # Kite allows 3 historical requests per second
 
+BOT_BUSY_SEC = 2.0         # a dashboard job waits this long after the bot's last request
+CANDLE_HOLD_SEC = 90        # ...and the first 90 s after each 15-min candle closes, when the bot fetches
+
 _kite = None
 _kite_token = None
 _tokens = None              # tradingsymbol -> instrument_token
-_lock = threading.Lock()
-_calls = deque()
+
+
+def candle_hold(now=None):
+    """Seconds left in the bot's fetch window right after a 15-min candle closes (0 outside it),
+    on weekdays between the open and 5 minutes after the close."""
+    now = (now or dt.datetime.now(IST)).astimezone(IST)
+    if now.weekday() >= 5:
+        return 0.0
+    oh, om = map(int, C.MARKET_OPEN.split(":"))
+    ch, cm = map(int, C.MARKET_CLOSE.split(":"))
+    open_t = now.replace(hour=oh, minute=om, second=0, microsecond=0)
+    if not (open_t <= now <= now.replace(hour=ch, minute=cm, second=0, microsecond=0) + dt.timedelta(minutes=5)):
+        return 0.0
+    into = (now - open_t).total_seconds() % (C.INTERVAL_MIN * 60)
+    return max(0.0, CANDLE_HOLD_SEC - into) if (now - open_t).total_seconds() >= C.INTERVAL_MIN * 60 else 0.0
+
+
+class Pacer:
+    """Kite allows HIST_PER_SEC historical requests a second. Every request books a time slot, and the
+    slots are spaced so no second ever holds more than that. The bot comes first:
+
+    - a request from a dashboard job (Review, Scanner) books at most HIST_PER_SEC - 1 a second, so there
+      is always room for the bot, and waits while the bot is fetching (BOT_BUSY_SEC after its last
+      request) and during the first CANDLE_HOLD_SEC after each candle close;
+    - waiting happens outside the lock, so a sleeping request never holds anyone else up (v1.8.0 slept
+      while holding it, so the bot could queue behind a 50-stock scan)."""
+
+    def __init__(self, clock=time.monotonic, sleep=time.sleep, hold=candle_hold):
+        self.clock, self.sleep, self.hold = clock, sleep, hold
+        self._lock = threading.Lock()
+        self._slots = deque()          # booked start times, ascending
+        self._bot_busy_until = 0.0
+
+    def wait_turn(self, background=False):
+        while True:
+            with self._lock:
+                now = self.clock()
+                while self._slots and self._slots[0] < now - 1.0:
+                    self._slots.popleft()
+                if background:
+                    wait = max(self._bot_busy_until - now, self.hold())
+                    if wait > 0:
+                        slot = None
+                    else:
+                        slot = self._book(now, max(1, HIST_PER_SEC - 1))
+                else:
+                    self._bot_busy_until = now + BOT_BUSY_SEC
+                    slot = self._book(now, HIST_PER_SEC)
+            if slot is None:
+                self.sleep(min(wait, 1.0))
+                continue
+            if slot > now:
+                self.sleep(slot - now)
+            return slot
+
+    def _book(self, now, limit):   # caller holds the lock
+        slot = max(now, self._slots[-1] if self._slots else now)
+        if len(self._slots) >= limit:
+            slot = max(slot, self._slots[-limit] + 1.0 + 0.02)
+        self._slots.append(slot)
+        return slot
+
+
+_pacer = Pacer()
 
 
 class PlanError(DataError):
@@ -71,13 +136,8 @@ def _call(fn, *args, historical=False, **kwargs):
     """Run a Kite call, pacing historical requests to 3 per second and translating errors."""
     from kiteconnect import exceptions as kex
     if historical:
-        with _lock:
-            now = time.monotonic()
-            while _calls and now - _calls[0] > 1.0:
-                _calls.popleft()
-            if len(_calls) >= HIST_PER_SEC:
-                time.sleep(max(0.0, 1.0 - (now - _calls[0])) + 0.02)
-            _calls.append(time.monotonic())
+        import jobs
+        _pacer.wait_turn(background=jobs.in_background())
     try:
         return fn(*args, **kwargs)
     except kex.PermissionException as e:
