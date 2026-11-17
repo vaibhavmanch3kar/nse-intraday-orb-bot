@@ -6,6 +6,20 @@ Every version is on the [Releases page](https://github.com/vaibhavmanch3kar/nse-
 with a ZIP you can download. To go back to an older version, download that version's ZIP.
 Your settings (Windows user environment variables) and your `data` folder are not part of the ZIP, so keep them.
 
+## Unreleased (branch feature/indian-themes): six India-inspired dashboard themes
+
+Look only: colours, names, pictures and page icons. Trading, the bot, its settings, the mode, orders and data are
+unchanged; the frozen backtest is identical (84 trades, −3.03%, PF 0.47).
+
+- **Six new themes** under Settings > Indian heritage: **Kurukshetra** (Mahabharata), **Swarajya** (Maratha forts),
+  **Takshashila** (Arthashastra), **Antariksh** (mission control), **Vijayanagara** (Hampi bazaar) and
+  **Chola Samudra** (sea trade). Each has its own palette (light and dark), shapes, header scene, mascot, eight
+  page icons, themed names next to the plain terms, and an Indian-script brand line.
+- Settings groups the nine themes: Original, Indian heritage, Game styles. Default, Playground and Sandbox are
+  unchanged.
+- Every theme passes the theme tests (all names present, WCAG AA contrast in both modes, under 100 KB, no
+  animation, nothing loaded from the internet, the same numbers on every page) and fits a 375 px phone screen.
+
 ## Unreleased (branch feature/review-scanner-jobs): fast Review and Scanner pages, safe updates and restarts
 
 The strategy, risk limits, entry and exit rules, orders and the backtest are unchanged: on frozen data every

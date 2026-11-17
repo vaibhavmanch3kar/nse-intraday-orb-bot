@@ -8,6 +8,7 @@
     {"id": "takshashila", "name": "Takshashila", "dir": "takshashila", "group": "Indian heritage"},
     {"id": "antariksh", "name": "Antariksh", "dir": "antariksh", "group": "Indian heritage"},
     {"id": "vijayanagara", "name": "Vijayanagara", "dir": "vijayanagara", "group": "Indian heritage"},
+    {"id": "chola_samudra", "name": "Chola Samudra", "dir": "chola_samudra", "group": "Indian heritage"},
     {"id": "roblox_inspired", "name": "Playground", "dir": "roblox_inspired", "group": "Game styles"},
     {"id": "minecraft_inspired", "name": "Sandbox", "dir": "minecraft_inspired", "group": "Game styles"}
   ]

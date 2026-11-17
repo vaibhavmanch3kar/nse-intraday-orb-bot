@@ -1,0 +1,62 @@
+/* Chola Samudra theme tokens. Original palette; all text colours meet WCAG AA (4.5:1) on bg, surface and
+   surface-2 (checked by tests/test_themes.py). Profit/loss always also shows a sign and an arrow. */
+
+/* colours, dark mode */
+:root[data-mode=dark] {
+  --bg: #04161a;
+  --surface: #0a2329;
+  --surface-2: #113038;
+  --border: #24525b;
+  --text: #e6f5f3;
+  --muted: #a7cbc6;
+  --accent: #3cc4b6;
+  --accent-ink: #021614;
+  --gold: #e2b26a;
+  --up: #7be38f;
+  --dn: #ff8a7a;
+  --warn: #fbbf24;
+  --info: #8ec5ff;
+  --trail: #c4a1ff;
+  --live: #dc2626;
+  --up-bg: rgba(123,227,143,.12);
+  --dn-bg: rgba(255,138,122,.13);
+  --warn-bg: rgba(251,191,36,.12);
+  --banner-bg: #0f3a40;
+  --banner-fg: #d7f5f0;
+  --shadow: 0 4px 14px rgba(0,0,0,.45);
+}
+
+/* colours, light mode */
+:root[data-mode=light] {
+  --bg: #e8f4f1;
+  --surface: #fbfefd;
+  --surface-2: #d8ebe6;
+  --border: #9fc4bc;
+  --text: #0b2a2e;
+  --muted: #2f5a5e;
+  --accent: #0f6b63;
+  --accent-ink: #ffffff;
+  --gold: #7a4a10;
+  --up: #166534;
+  --dn: #b42318;
+  --warn: #7a4600;
+  --info: #1e40af;
+  --trail: #6d28d9;
+  --live: #b91c1c;
+  --up-bg: #dff2e4;
+  --dn-bg: #fbe4e1;
+  --warn-bg: #f8ecca;
+  --banner-bg: #d5efe9;
+  --banner-fg: #0b3a35;
+  --shadow: 0 3px 10px rgba(11,42,46,.12);
+}
+
+/* shape and type (both modes) */
+:root[data-mode=any] {
+  --radius: 14px;
+  --font: system-ui,'Segoe UI',Roboto,'Noto Sans',sans-serif;
+  --serif: 'Gill Sans','Gill Sans MT',Calibri,'Segoe UI',sans-serif;
+  --btn-radius: 14px;
+  --btn-bg: var(--accent);
+  --card-border-width: 1px;
+}

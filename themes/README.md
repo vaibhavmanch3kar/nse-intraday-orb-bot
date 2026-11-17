@@ -9,14 +9,25 @@ is saved in this browser only, as a cookie named `ayodhya-ui-theme`, and applies
 restart. An unknown or missing theme id falls back to **Default**. Light and dark mode (the ☀ / ☾ button) work
 with every theme.
 
-| Display name | Internal id | Style |
-|---|---|---|
-| Default | `default` | The original Ayodhya ORB look (night sky, saffron and gold, Ramayana names). |
-| Playground | `roblox_inspired` | Bright, rounded, game-lobby style with a robot helper, Bolt. |
-| Sandbox | `minecraft_inspired` | Square, pixel-block style with a block robot, Cubit, and a pixel landscape. |
+| Display name | Internal id | Group | Style |
+|---|---|---|---|
+| Default | `default` | Original | The original Ayodhya ORB look (night sky, saffron and gold, Ramayana names). |
+| Kurukshetra | `mahabharata` | Indian heritage | Mahabharata: night indigo and brass, chariot wheels; Sanjaya's all-seeing eye watches the market. |
+| Swarajya | `swarajya` | Indian heritage | Maratha hill forts: basalt, bhagwa saffron and monsoon green; the Killedar keeps watch. |
+| Takshashila | `takshashila` | Indian heritage | The ancient university and the Arthashastra: palm leaf, ink and terracotta; the Acharya owl. |
+| Antariksh | `antariksh` | Indian heritage | Futuristic Indian mission control: deep space, launch orange, telemetry cyan; the probe Tara. |
+| Vijayanagara | `vijayanagara` | Indian heritage | The gem bazaars of Hampi: pink granite, gopurams, sunset gold; Sarafa, the trader's scale. |
+| Chola Samudra | `chola_samudra` | Indian heritage | Chola sea trade: deep teal, bronze sails, monsoon winds; Maalumi the navigator. |
+| Playground | `roblox_inspired` | Game styles | Bright, rounded, game-lobby style with a robot helper, Bolt. |
+| Sandbox | `minecraft_inspired` | Game styles | Square, pixel-block style with a block robot, Cubit, and a pixel landscape. |
 
-The internal ids name the *kind* of game the style is inspired by. No theme uses a game's names, logos,
-characters, textures or art. Everything in `assets/` is original SVG made for this project.
+Settings lists the themes under their `group` from `registry.json`.
+
+The game-style ids name the *kind* of game the style is inspired by. No theme uses a game's names, logos,
+characters, textures or art. The Indian-heritage themes use symbols (a chariot wheel, a fort flag, an owl, a
+scale, a ship) and never portraits of deities or of real historical people; they use no real agency names or
+logos. Real money is always written plainly as "Real Money" in every theme. Everything in `assets/` is original
+SVG made for this project.
 
 ## Folder layout
 
