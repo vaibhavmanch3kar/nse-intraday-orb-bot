@@ -1,0 +1,13 @@
+{
+  "id": "mahabharata",
+  "name": "Kurukshetra",
+  "description": "Mahabharata: a dusk battlefield in night indigo and brass, chariot wheels and conches. Sanjaya, who saw the whole battle from afar and told it, watches the market for you.",
+  "author": "kite-trader project",
+  "art": "Original SVG made for this project: a chariot wheel with an all-seeing eye (Sanjaya), a dusk battlefield strip and page icons. No portraits of deities or epic heroes.",
+  "bot_name": "Sanjaya",
+  "assets": {
+    "avatar": "assets/avatar.svg",
+    "scene": "assets/scene.svg",
+    "skin_css": "assets/skin.css"
+  }
+}
