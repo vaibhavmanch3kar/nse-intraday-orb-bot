@@ -5,7 +5,8 @@ Kite NSE intraday opening-range-breakout bot.
     .venv\\Scripts\\python.exe bot.py          # PAPER mode (default); the dashboard is web.py (3-DASHBOARD.bat)
     New-Item STOP                             # graceful stop (or the dashboard's Stop button)
 
-Live trading needs DRY_RUN=false AND CONFIRM_LIVE=YES, plus today's Kite login.
+Live trading needs DRY_RUN=false AND CONFIRM_LIVE=YES, AND real money armed today on the dashboard
+(livemode.py), plus today's Kite login. Without today's arming it trades PAPER.
 """
 
 import csv
@@ -26,6 +27,7 @@ import data_yahoo
 import marketdata
 import holidays
 import journal
+import livemode
 import reports
 import restart
 import risk
@@ -203,7 +205,9 @@ def data_problem(err) -> str:
 
 class Bot:
     def __init__(self):
-        self.live = C.is_live()
+        # Real money needs both Windows settings AND today's arming on the dashboard (livemode.py); otherwise
+        # paper, whoever starts the bot (the 9:00 task, a restart, or by hand).
+        self.live, self.live_note = livemode.bot_mode(C.is_live())
         self.mode = "live" if self.live else "paper"
         self.state = risk.State(os.path.join(C.DATA_DIR, f"state_{self.mode}.json"), C.PAPER_START_INR)
         self.broker = PaperBroker()
@@ -657,8 +661,13 @@ class Bot:
                       "(using the NIFTY-data fallback meanwhile)", logging.WARNING)
         print(T.banner(f"{T.mode_label(self.mode)} mode"), flush=True)
         self.note(f"{T.BOW} {T.APP} started in {T.mode_label(self.mode)} mode, watching {len(C.WATCHLIST)} stocks")
-        if C.DRY_RUN is False and not self.live:
+        if C.DRY_RUN is False and C.CONFIRM_LIVE != "YES":
             self.note("DRY_RUN=false but CONFIRM_LIVE is not YES - staying in PAPER mode", logging.WARNING)
+        if self.live_note:
+            self.note(self.live_note, logging.WARNING)
+            livemode.log("bot start", "PAPER (not armed today)")
+        elif self.live:
+            livemode.log("bot start", "REAL MONEY (settings on and armed today)")
         self.apply_paper_capital()
         self.write_status(now_ist())
         self.check_restarted()

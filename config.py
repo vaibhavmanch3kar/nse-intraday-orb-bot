@@ -56,10 +56,13 @@ def _env(name, default, cast=str):
 
 
 # ── Mode ───────────────────────────────────────────────────────────────────
-# Paper trading is the default. Live trading needs BOTH DRY_RUN=false and CONFIRM_LIVE=YES.
+# Paper trading is the default. Live trading needs BOTH DRY_RUN=false and CONFIRM_LIVE=YES, AND the real-money
+# arming done on the dashboard that same day (livemode.py); without the arming the bot trades paper.
 DRY_RUN = _env("DRY_RUN", True, bool)
 CONFIRM_LIVE = _env("CONFIRM_LIVE", "")
 PAPER_START_INR = _env("PAPER_START_INR", 100000.0, float)
+# Readiness check only (Live Trading panel): the Zerodha equity balance needed before real money can be armed.
+LIVE_MIN_FUNDS_INR = _env("LIVE_MIN_FUNDS_INR", 10000.0, float)
 
 # ── Markets ────────────────────────────────────────────────────────────────
 # Nifty 50 constituents (Nov 2026). Kite trading symbols = Yahoo symbols without ".NS".

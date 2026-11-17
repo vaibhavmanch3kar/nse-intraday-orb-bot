@@ -1,6 +1,7 @@
 #Requires -Version 5.1
 <#
-  Starts the ORB bot (paper mode unless DRY_RUN=false and CONFIRM_LIVE=YES are set)
+  Starts the ORB bot: PAPER unless DRY_RUN=false and CONFIRM_LIVE=YES are set AND real money was armed today
+  on the dashboard (livemode.py); the 9:00 scheduled task therefore trades paper on any day you didn't arm it
   and the dashboard, which is its own program (web.py): it keeps running when the bot stops,
   and it can be restarted for a dashboard update without touching the bot.
   Used by Task Scheduler (register_task.ps1) or by hand:

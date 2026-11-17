@@ -56,7 +56,9 @@ Run it again with `-ResetSecrets` to change anything.
 3. Start small, for example with `$env:WATCHLIST = "SBIN,INFY"` and `$env:RISK_PER_TRADE_PCT = "0.25"`
    set before starting.
 
-The scheduled task (`4-SCHEDULE.bat`) **always runs in paper mode**, because it doesn't set the switches.
+**Both switches are not enough on their own.** Real money also needs the day's arming on the dashboard
+(Settings > Trading mode). Without it the bot trades paper, however it was started: by hand, by a restart,
+or by the scheduled task (`4-SCHEDULE.bat`). The arming lasts only until midnight.
 
 ## What the bot does with real orders
 

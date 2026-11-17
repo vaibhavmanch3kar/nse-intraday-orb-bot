@@ -100,6 +100,9 @@ def test_paper_bot_applies_at_start(monkeypatch):
 def test_live_bot_never_reads_the_paper_setting(monkeypatch):
     monkeypatch.setattr(C, "DRY_RUN", False)
     monkeypatch.setattr(C, "CONFIRM_LIVE", "YES")
+    import datetime as _dt
+    import livemode
+    livemode.arm(login_at=_dt.datetime.now(livemode.IST))      # real money also needs today's arming
     capital.request(25000, now=NOW)
     b = bot.Bot()
     assert b.live and b.state.path.endswith("state_live.json")
