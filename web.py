@@ -114,10 +114,31 @@ VIEW_PAGES = webui.VIEW_PAGES  # pages with the Paper Account | Zerodha Account 
 
 
 def page(title, active, body, refresh=None, view=None):
-    """Wrap a page body in the dashboard frame (header, page tabs, account switch, theme switch)."""
-    switch = view_switch(active, view, read_status()) if view and active in VIEW_PAGES else ""
+    """Wrap a page body in the dashboard frame (header with the bot's real trading mode, page tabs, account
+    switch, theme switch)."""
+    s = read_status()
+    switch = view_switch(active, view, s) if view and active in VIEW_PAGES else ""
     meta = f'<meta http-equiv="refresh" content="{refresh}">' if refresh else ""
-    return webui.shell(title, active, body, view=view, switch=switch, extra_head=meta)
+    return webui.shell(title, active, body, view=view, switch=switch, extra_head=meta, mode=mode_badge(s))
+
+
+def mode_badge(s):
+    """The mode the bot is ACTUALLY trading in, from the running bot's own status (never from the Paper | Zerodha
+    view switch). Shown in every page header, in plain words in every theme, never by colour alone."""
+    s = s or {}
+    mode = s.get("mode")
+    if not bot_running(s):
+        last = f" · last run: {'REAL MONEY' if mode == 'live' else 'PAPER'}" if mode else ""
+        return (f"<span class='mbadge off' title='The bot is not running{last}'>"
+                f"<span aria-hidden='true'>○</span><b>Bot not running</b><span class='long'>{last}</span></span>")
+    live = mode == "live"
+    word, sub = ("REAL MONEY", " · Zerodha") if live else ("PAPER", " · virtual money")
+    paused = " · new entries paused" if s.get("paused") else ""
+    icon = "⏸" if paused else ("●" if live else "◐")
+    return (f"<span class='mbadge {'live' if live else 'paper'}' title='The bot is trading {word}{sub}{paused}. "
+            f"Set in its own settings; the account view does not change it.'>"
+            f"<span aria-hidden='true'>{icon}</span><span class='lbl'>Bot trading:</span> <b>{word}</b>"
+            f"<span class='long'>{sub}{paused}</span></span>")
 
 
 def mode_chips(status, extra=""):
@@ -849,7 +870,7 @@ def live_regions(view, s):
             "zpositions": zerodha_positions() if view == "zerodha" else "",
             "positions": live_positions(s, view), "watchlist": live_watchlist(s),
             "controls": live_controls(s, running), "login": live_login(ok, login_msg, s),
-            "events": live_events(s), "limits": live_limits(s)}
+            "events": live_events(s), "limits": live_limits(s), "modebadge": mode_badge(s)}
 
 
 LIVE_JS = """
@@ -2238,15 +2259,21 @@ class Handler(BaseHTTPRequestHandler):
         # Other websites can't read the dashboard, but a page could try to send it a form: only forms from the
         # dashboard's own pages are accepted (exact Origin/Referer, Host, and the per-start CSRF_TOKEN).
         port = self.server.server_address[1]
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            length = -1
+        if not 0 <= length <= 10_000:
+            self.close_connection = True
+            self._send("too large", 413, "text/plain")
+            return
+        # read the form before any answer: replying with unread data makes Windows reset the connection,
+        # and the browser would show a network error instead of the reason
+        form = parse_qs(self.rfile.read(length).decode("utf-8", "replace"))
         origin = self.headers.get("Origin") or self.headers.get("Referer") or ""
         if not host_ok(self.headers.get("Host"), port) or not origin_ok(origin, port):
             self._send("forbidden: use the buttons on the dashboard page", 403, "text/plain")
             return
-        length = int(self.headers.get("Content-Length") or 0)
-        if length > 10_000:
-            self._send("too large", 413, "text/plain")
-            return
-        form = parse_qs(self.rfile.read(length).decode("utf-8", "replace"))
         if not csrf_ok(form):
             self._send("forbidden: this page is out of date (the dashboard restarted). Reload it and try again.",
                        403, "text/plain")

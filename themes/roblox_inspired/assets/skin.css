@@ -4,7 +4,7 @@
 .logo{background:none}
 .logo svg{display:block;width:34px;height:34px}
 .ribbon{height:22px;opacity:1;background:url("{{scene}}") repeat-x left bottom/240px 22px}
-.card,.kpi,.chip,.seg,.icon-btn,.opt{border-width:var(--card-border-width)}
+.card,.kpi,.chip,.mbadge,.seg,.icon-btn,.opt{border-width:var(--card-border-width)}
 .btn,button{background:var(--btn-bg);border-radius:var(--btn-radius);box-shadow:0 3px 0 color-mix(in srgb,var(--accent) 55%,#000)}
 .btn:active,button:active{transform:translateY(2px);box-shadow:0 1px 0 color-mix(in srgb,var(--accent) 55%,#000)}
 button.ghost,.btn.ghost{box-shadow:0 3px 0 var(--border)}

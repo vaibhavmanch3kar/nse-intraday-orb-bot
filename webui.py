@@ -172,6 +172,12 @@ button.red,.btn.red{background:var(--dn-bg);color:var(--dn);border:1px solid col
 button.small,.btn.small{min-height:30px;padding:4px 10px;font-size:12.5px}
 button[disabled]{opacity:.55;cursor:not-allowed;filter:none}
 .logout{margin:10px 0 4px}
+/* the mode the bot really trades in (header, every page) */
+.mbadge{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:999px;white-space:nowrap;
+ border:1px solid var(--border);background:var(--surface);color:var(--muted);font-size:12.5px;font-weight:600}
+.mbadge b{font-weight:800;letter-spacing:.3px}
+.mbadge.paper{border-color:var(--gold);color:var(--gold)}
+.mbadge.live{border:2px solid var(--live);color:var(--dn)}
 .opts{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 8px}
 .opt{display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border:1px solid var(--border);border-radius:9px;background:var(--surface-2);
  cursor:pointer;min-height:40px} .opt:has(input:checked){border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
@@ -204,6 +210,7 @@ input[type=number],input[type=search],select{background:var(--surface);color:var
   .phone-seg{display:block;padding:10px 14px 0}
   .phone-seg .seg{display:flex;width:100%} .phone-seg .seg a{flex:1;min-height:42px}
   button.wide{width:100%;min-height:44px}
+  .mbadge .long,.mbadge .lbl{display:none} .mbadge{padding:4px 9px;font-size:12px}
   .wrap{padding:12px 14px calc(84px + env(safe-area-inset-bottom))}
   h1{font-size:19px}
   .chips{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin-left:-14px;margin-right:-14px;padding:0 14px 2px}
@@ -297,14 +304,14 @@ def nav_links(active, view, cls):
     return "".join(out)
 
 
-def shell(title, active, body, view=None, switch="", extra_head=""):
+def shell(title, active, body, view=None, switch="", extra_head="", mode=""):
     """The whole page: header with brand, page tabs, account switch and theme switch; the body;
     footer; and the phone's bottom navigation."""
     head = (f"<header class='top'><div class='top-in'>"
             f"<a class='brand' href='/' aria-label='{T.APP} home'><span class='logo' aria-hidden='true'>{T.avatar() or T.BOW}</span>"
             f"<span><b>{T.APP}</b><small>{html.escape(T.ui('brand_sub'), quote=False)}</small></span></a>"
             f"<nav class='tabs' aria-label='Pages'>{nav_links(active, view, 'tabs')}</nav>"
-            f"<div class='right'>{switch}"
+            f"<div class='right'><span class='mode-slot' data-region='modebadge'>{mode}</span>{switch}"
             f"<a class='icon-btn' href='/settings' aria-label='Settings (dashboard theme)' title='Settings (dashboard theme)'"
             f"{' aria-current=' + chr(39) + 'page' + chr(39) if active == '/settings' else ''}>{T.GEAR}</a>"
             f"<button type='button' class='icon-btn' id='themeBtn' aria-label='Switch theme'>☀</button></div>"
