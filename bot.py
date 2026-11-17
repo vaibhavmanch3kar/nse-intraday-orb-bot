@@ -18,6 +18,7 @@ import time
 
 import archive
 import backup
+import buildinfo
 import capital
 import config as C
 import costs
@@ -26,6 +27,7 @@ import marketdata
 import holidays
 import journal
 import reports
+import restart
 import risk
 import strategy
 import theme as T
@@ -219,6 +221,11 @@ class Bot:
         self.started_at = now_ist()
         self.journal = None     # today's journal.DayJournal (recording only - never read by trading code)
         self.journal_warned = set()
+        self.restart_noted = None   # last "restart requested - waiting" message (said once)
+        try:                    # what this bot runs: version and file/setting hashes, for the dashboard
+            self.build = buildinfo.snapshot("bot")
+        except Exception:  # noqa: BLE001 - never stops the bot
+            self.build = None
 
     # -- helpers
     def note(self, msg, level=logging.INFO):
@@ -495,11 +502,46 @@ class Bot:
             "charges_paid": self.state.d["charges_paid"], "trades_today": self.state.d["trades_today"],
             "loss_streak": self.state.d["loss_streak"], "cooldown_until": self.state.d["cooldown_until"],
             "positions": positions, "rows": self.rows, "events": self.events,
+            "build": self.build,
         }
         tmp = os.path.join(C.DATA_DIR, "status.json.tmp")
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(status, f, default=str, indent=1)
         os.replace(tmp, os.path.join(C.DATA_DIR, "status.json"))
+
+    def check_restarted(self):
+        """After a "restart when safe": check this start against what the previous bot had (restart.py)."""
+        checks = restart.verify(self.mode, list(self.state.positions), self.state.d["trades_today"], os.getpid())
+        if checks is None:
+            return
+        failed = [k for k, ok in checks.items() if not ok]
+        if failed:
+            self.note(f"Restart check FAILED: {', '.join(failed)} - look at the dashboard", logging.ERROR)
+        else:
+            self.note("Restarted to load the update - all checks passed")
+
+    def restart_if_requested(self, now):
+        """A "restart when safe" request from the dashboard: restart only in PAPER mode, before the open or
+        with no open position (restart.is_safe). Returns restart.EXIT_RESTART to restart, else None."""
+        if not restart.pending_request():
+            self.restart_noted = None
+            return None
+        if self.live:
+            restart.cancel()
+            self.note("Restart request ignored: in LIVE mode the bot is never restarted automatically. "
+                      "Stop it and start it again yourself when no position is open.", logging.WARNING)
+            return None
+        ok, why = restart.is_safe(self.live, len(self.state.positions), now, at(C.MARKET_OPEN, now.date()))
+        if not ok:
+            if self.restart_noted != why:
+                self.note(f"Restart requested - {why}")
+                self.restart_noted = why
+            return None
+        self.note(f"Restarting to load the update ({why})")
+        self.write_status(now)
+        restart.begin(self.mode, list(self.state.positions), self.state.d["trades_today"], os.getpid(),
+                      (self.build or {}).get("version"), now)
+        return restart.EXIT_RESTART
 
     def unlisted_holiday(self, now):
         """Fallback when the holiday file has no list for this year: after 09:45, no NIFTY bar
@@ -560,6 +602,8 @@ class Bot:
         if C.DRY_RUN is False and not self.live:
             self.note("DRY_RUN=false but CONFIRM_LIVE is not YES - staying in PAPER mode", logging.WARNING)
         self.apply_paper_capital()
+        self.write_status(now_ist())
+        self.check_restarted()
         waiting_login_logged = False
         while True:
             if os.path.exists(C.STOP_FILE):
@@ -567,6 +611,9 @@ class Bot:
                 self.journal_finish(now_ist(), "stopped")
                 os.remove(C.STOP_FILE)
                 break
+            rc = self.restart_if_requested(now_ist())
+            if rc:
+                return rc
             now = now_ist()
             today = now.date()
             if now.weekday() >= 5:
@@ -647,7 +694,9 @@ def main():
     if not dashboard_listening():
         log.info(f"Dashboard not running - double-click 3-DASHBOARD.bat to open it "
                  f"(http://{C.WEB_HOST}:{C.WEB_PORT}); the bot trades the same without it")
-    Bot().run()
+    rc = Bot().run()
+    if rc:
+        sys.exit(rc)   # restart.EXIT_RESTART: run_bot.ps1 starts the bot again
 
 
 def dashboard_listening(timeout=0.5):

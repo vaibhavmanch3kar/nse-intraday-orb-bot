@@ -32,7 +32,19 @@ if ($running) {
 
 Start-Dashboard
 Start-Job -ScriptBlock { Start-Sleep 4; Start-Process "http://127.0.0.1:5000" } | Out-Null
-& $py bot.py
+# Exit code 3 = the bot restarted itself to load an update, after "Restart when safe" on the dashboard
+# (PAPER only, before the open or with no open position; see restart.py). Start it again, at most 3 times.
+$restarts = 0
+while ($true) {
+    & $py bot.py
+    if ($LASTEXITCODE -eq 3 -and $restarts -lt 3) {
+        $restarts++
+        Write-Host "[i] Restarting Ayodhya ORB to load the update ($restarts)..."
+        Start-Sleep -Seconds 2
+        continue
+    }
+    break
+}
 Write-Host ""
 Write-Host "Ayodhya ORB stopped (it rests by itself after 3:35 PM, on weekends and on NSE holidays)." -ForegroundColor Yellow
 Write-Host "The dashboard keeps running in its own window; to open it again, double-click 3-DASHBOARD.bat"

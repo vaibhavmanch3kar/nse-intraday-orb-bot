@@ -22,6 +22,12 @@ import jobs
 import theme as T
 import webui
 
+try:   # what this dashboard runs (version and file hashes), to tell when a dashboard update is waiting
+    import buildinfo
+    DASH_BUILD = buildinfo.snapshot("dashboard", with_settings=False)
+except Exception:  # noqa: BLE001 - never stops the dashboard
+    buildinfo, DASH_BUILD = None, None
+
 STATUS_FILE = os.path.join(C.DATA_DIR, "status.json")
 
 
@@ -783,6 +789,7 @@ def render(msg="", q=None):
 <div class="banner" id="offline" role="status" hidden>⚠ Can't reach the dashboard server: the figures below may be old. It keeps trying.</div>
 {R('notice')}
 {note}
+{update_banner(s)}
 {R('acct')}
 <div class="grid" style="margin-top:16px">
 <div>{R('equity')}{R('zpositions')}{R('positions')}{R('watchlist')}</div>
@@ -1609,8 +1616,190 @@ pictures and the extra names shown next to the plain terms. It never changes the
 same in every theme.</p>
 </section>
 <script>(function(){{var f=document.getElementById('themeForm');if(!f)return;
-f.addEventListener('change',function(e){{if(e.target&&e.target.name==='ui_theme')f.submit();}});}})();</script>"""
+f.addEventListener('change',function(e){{if(e.target&&e.target.name==='ui_theme')f.submit();}});}})();</script>
+{updates_section(read_status())}"""
     return page(T.ui("settings_page"), "/settings", body)
+
+
+# ---------------------------------------------------------------- version, waiting updates, restart when safe
+_pending_cache = {"t": 0.0, "key": None, "val": None}
+_settings_cache = {"t": 0.0, "val": None}
+
+
+def pending_updates(s, with_settings=False):
+    """What is on disk but not running yet (buildinfo.pending), cached for 30 s. Settings are only worked
+    out on the Settings page (it starts a small Python to read them), cached for 2 minutes."""
+    import time as _t
+    if not buildinfo:
+        return {"bot_files": [], "settings": [], "dashboard_files": []}
+    settings_now = None
+    if with_settings:
+        if _t.monotonic() - _settings_cache["t"] > 120 or _settings_cache["val"] is None:
+            _settings_cache.update(t=_t.monotonic(), val=buildinfo.settings_on_next_start())
+        settings_now = _settings_cache["val"]
+    bot_build = (s or {}).get("build")
+    key = (json.dumps(bot_build, sort_keys=True) if bot_build else "", with_settings)
+    if _t.monotonic() - _pending_cache["t"] > 30 or _pending_cache["key"] != key:
+        _pending_cache.update(t=_t.monotonic(), key=key,
+                              val=buildinfo.pending(bot_build, DASH_BUILD, settings_now=settings_now))
+    return _pending_cache["val"]
+
+
+def next_start_text(now=None):
+    """When the scheduled task next starts the bot (09:00 on the next trading day)."""
+    import datetime as _dt
+    import holidays
+    now = now or _dt.datetime.now(_dt.timezone(_dt.timedelta(hours=5, minutes=30)))
+    d = now.date()
+    if not (holidays.is_trading_day(d) and now.time() < _dt.time(9, 0)):
+        d = holidays.next_trading_day(d)
+    return "today at 09:00" if d == now.date() else f"{d:%a %d %b} at 09:00"
+
+
+def update_banner(s):
+    """Live page: a red banner if the last "restart when safe" went wrong, else one line when an update is
+    waiting (details and buttons on the Settings page)."""
+    import restart
+    try:
+        st_time = _dt_parse((s or {}).get("time"))
+        bad = restart.problem(st_time)
+    except Exception:  # noqa: BLE001
+        bad = None
+    if bad:
+        return f"<div class='banner' role='alert' style='border-color:var(--dn)'><b>⚠ Restart problem.</b> {html.escape(bad)}</div>"
+    p = pending_updates(s)
+    parts = []
+    if p["dashboard_files"]:
+        parts.append("a dashboard update (applies when the dashboard restarts; the bot keeps trading)")
+    if p["bot_files"]:
+        parts.append(f"a bot update (active at the bot's next start, {next_start_text()})")
+    if not parts:
+        return ""
+    return (f"<div class='banner' role='status'><b>Update waiting:</b> {html.escape(' and '.join(parts))}. "
+            f"<a href='/settings#updates'>Details</a></div>")
+
+
+def _dt_parse(v):
+    import datetime as _dt
+    try:
+        return _dt.datetime.fromisoformat(v) if v else None
+    except (TypeError, ValueError):
+        return None
+
+
+def updates_section(s):
+    """Settings page: running versions, waiting updates, when they become active, and the safe-restart
+    buttons. Restarting the dashboard never touches the bot; the bot restarts only when safe (restart.py)."""
+    import restart
+    s = s or {}
+    bot_build = s.get("build")
+    running = bool(s.get("time")) and (lambda t: t is not None and
+                                       (_now_ist() - t).total_seconds() < 300)(_dt_parse(s.get("time")))
+    live = (s.get("mode") == "live")
+    rows = []
+    if bot_build and running:
+        rows.append(f"<li><b>Bot</b>: {html.escape(str(bot_build.get('version')))} · started "
+                    f"{html.escape(str(bot_build.get('started', ''))[11:16])} · {T.mode_label(s.get('mode') or 'paper')}</li>")
+    else:
+        rows.append("<li><b>Bot</b>: not running" + (f" (last ran {html.escape(str(bot_build.get('version')))})"
+                                                       if bot_build else "") + "</li>")
+    if DASH_BUILD:
+        rows.append(f"<li><b>Dashboard</b>: {html.escape(str(DASH_BUILD.get('version')))} · started "
+                    f"{html.escape(str(DASH_BUILD.get('started', ''))[11:16])}</li>")
+    if buildinfo:
+        rows.append(f"<li><b>On disk</b>: {html.escape(buildinfo.version())}</li>")
+    p = pending_updates(s, with_settings=True)
+    items = []
+
+    def btn(action, label, ask, cls="ghost"):
+        return (f"<form method='post' action='{action}' style='display:inline' "
+                f"onsubmit=\"if(!confirm('{ask}'))return false;this.confirm.value='yes'\">"
+                f"<input type='hidden' name='confirm' value=''><button class='{cls} small'>{label}</button></form>")
+    if p["dashboard_files"]:
+        items.append(f"<li><b>Dashboard update waiting</b> ({html.escape(', '.join(p['dashboard_files']))}). "
+                     "It applies when the dashboard restarts; the bot is not touched and keeps trading. "
+                     + btn("/dashboard/restart", "↻ Restart the dashboard now",
+                           "Restart the dashboard to load the update? The bot keeps trading; this page reloads.") + "</li>")
+    bot_wait = p["bot_files"] or p["settings"]
+    if bot_wait:
+        what = ", ".join(p["bot_files"] + [f"setting {k}" for k in p["settings"]])
+        line = (f"<li><b>Bot update waiting</b> ({html.escape(what)}). Active at the bot's next start: "
+                f"{next_start_text()}.")
+        req = restart.pending_request()
+        if live:
+            line += (" In LIVE mode the bot is never restarted automatically: stop it and start it again yourself "
+                     "when no position is open.")
+        elif req:
+            line += (f" <b>Restart requested</b> at {html.escape(str(req.get('requested_at', ''))[11:16])}: the bot "
+                     "restarts as soon as it is safe (before 09:15 or with no open position). "
+                     + btn("/bot/restart-cancel", "Cancel the restart", "Cancel the restart request?"))
+        elif running:
+            line += (" Or restart it when safe: PAPER only, before 09:15 or with no open position; it checks itself "
+                     "after the restart. " + btn("/bot/restart-when-safe", "↻ Restart the bot when safe",
+                                                 "Restart the bot to load the update as soon as it is safe (PAPER only, "
+                                                 "before the open or with no open position)?"))
+        items.append(line + "</li>")
+    if not items:
+        items.append("<li>Nothing waiting: everything on disk is running.</li>")
+    st = restart.state()
+    last = ""
+    if st and st.get("phase") == "verified":
+        res = "all checks passed" if st.get("ok") else "checks FAILED: " + ", ".join(
+            k for k, v in (st.get("checks") or {}).items() if not v)
+        last = (f"<p class='muted small'>Last bot restart: {html.escape(str(st.get('at', ''))[:16].replace('T', ' '))}"
+                f", {html.escape(res)}.</p>")
+    return (f"<section class='card' id='updates'><div class='hd'>Version and updates</div>"
+            f"<ul style='margin:0 0 8px;padding-left:18px'>{''.join(rows)}</ul>"
+            f"<ul style='margin:0;padding-left:18px'>{''.join(items)}</ul>{last}"
+            "<p class='muted small'>Theme files apply by themselves. Strategy, risk and other bot changes, and "
+            "settings, apply only when the bot starts. Only hashes are compared, never secret settings.</p></section>")
+
+
+def _now_ist():
+    import datetime as _dt
+    return _dt.datetime.now(_dt.timezone(_dt.timedelta(hours=5, minutes=30)))
+
+
+_SERVER = None
+
+
+def restart_dashboard():
+    """Start a fresh dashboard program and stop this one (to load a dashboard update). The bot is a
+    separate program and is not touched."""
+    import subprocess
+    import threading
+    import time as _t
+
+    def go():
+        _t.sleep(0.5)                       # let the "restarting" page reach the browser
+        args = [sys.executable, os.path.abspath(__file__), "--no-browser", "--wait-port"]
+        kw = {}
+        if os.name == "nt":
+            si = subprocess.STARTUPINFO()
+            si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            si.wShowWindow = 7              # minimized, without taking focus
+            kw = {"creationflags": subprocess.CREATE_NEW_CONSOLE, "startupinfo": si}
+        log = os.path.join(C.DATA_DIR, "logs", "dashboard_restart.log")
+        try:
+            # start the new dashboard FIRST (it waits for the port): once this server stops, the main
+            # thread ends and Python exits, so nothing after shutdown() is sure to run
+            new = subprocess.Popen(args, cwd=os.path.dirname(os.path.abspath(__file__)), **kw)
+            note = f"started the new dashboard (process {new.pid})"
+        except OSError as e:
+            note = f"could NOT start a new dashboard ({e}); this one keeps running"
+        try:
+            os.makedirs(os.path.dirname(log), exist_ok=True)
+            with open(log, "a", encoding="utf-8") as f:
+                f.write(f"{_now_ist():%Y-%m-%d %H:%M:%S} dashboard {os.getpid()}: {note}\n")
+        except OSError:
+            pass
+        if "NOT" in note:
+            return
+        if _SERVER:
+            _SERVER.shutdown()
+            _SERVER.server_close()          # frees port 5000 for the new dashboard
+        os._exit(0)
+    threading.Thread(target=go, daemon=True).start()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -1724,6 +1913,13 @@ class Handler(BaseHTTPRequestHandler):
         elif u.path == "/api/jobs":
             # read-only: progress of the Review and Scanner background builds
             self._send(json.dumps(jobs.snapshot_all()), ctype="application/json; charset=utf-8")
+        elif u.path == "/api/version":
+            # read-only: which version the dashboard and the bot run (no file lists, no settings)
+            keep = ("program", "version", "started", "pid")
+            bot_b = read_status().get("build") or {}
+            self._send(json.dumps({"dashboard": {k: (DASH_BUILD or {}).get(k) for k in keep},
+                                   "bot": {k: bot_b.get(k) for k in keep}}),
+                       ctype="application/json; charset=utf-8")
         elif u.path == "/api/live":
             # read-only: the Live page's changing parts as JSON, for in-place updates
             s = read_status()
@@ -1778,6 +1974,34 @@ class Handler(BaseHTTPRequestHandler):
                 msg = f"Not changed: {e}"
         self._redirect("/?view=paper&msg=" + quote(msg))
 
+    def _restart(self, origin):
+        """Restart requests from the Settings page. They need the page's own Origin and the confirmation
+        it adds after you click OK. The bot is never stopped from here: it restarts itself when safe."""
+        import restart
+        if not origin:
+            self._send("forbidden: use the Settings page", 403, "text/plain")
+            return
+        length = int(self.headers.get("Content-Length") or 0)
+        form = parse_qs(self.rfile.read(min(length, 10_000)).decode("utf-8", "replace"))
+        if form.get("confirm", [""])[0] != "yes":
+            self._redirect("/settings#updates")    # nothing done without the confirmation
+            return
+        if self.path == "/dashboard/restart":
+            self._send(page("Restarting", "/settings",
+                            "<meta http-equiv='refresh' content='5;url=/settings#updates'>"
+                            "<div class='banner' role='status'>Restarting the dashboard to load the update. "
+                            "The bot keeps trading. This page reloads in a few seconds.</div>"))
+            restart_dashboard()
+            return
+        if self.path == "/bot/restart-cancel":
+            restart.cancel()
+        elif read_status().get("mode") == "live":
+            self._redirect("/settings#updates")   # never automatic in LIVE mode
+            return
+        else:
+            restart.request()
+        self._redirect("/settings#updates")
+
     def do_POST(self):
         # Browsers on other sites can't read the response, but they can POST: only accept same-origin.
         origin = self.headers.get("Origin") or self.headers.get("Referer") or ""
@@ -1787,6 +2011,9 @@ class Handler(BaseHTTPRequestHandler):
         os.makedirs(C.DATA_DIR, exist_ok=True)
         if self.path in ("/paper-capital", "/paper-capital/cancel"):
             self._paper_capital(origin)
+            return
+        if self.path in ("/bot/restart-when-safe", "/bot/restart-cancel", "/dashboard/restart"):
+            self._restart(origin)
             return
         if self.path == "/pause":
             open(C.PAUSE_FILE, "w").close()
@@ -1798,8 +2025,21 @@ class Handler(BaseHTTPRequestHandler):
         self._redirect("/")
 
 
-def serve():
-    srv = ThreadingHTTPServer((C.WEB_HOST, C.WEB_PORT), Handler)
+def serve(wait_port=0):
+    """Serve the dashboard. wait_port: seconds to keep trying while port 5000 is still held by the
+    dashboard this one replaces (restart_dashboard)."""
+    global _SERVER
+    import time as _t
+    deadline = _t.monotonic() + wait_port
+    while True:
+        try:
+            srv = ThreadingHTTPServer((C.WEB_HOST, C.WEB_PORT), Handler)
+            break
+        except OSError:
+            if _t.monotonic() >= deadline:
+                raise
+            _t.sleep(0.5)
+    _SERVER = srv
     srv.serve_forever()
 
 
@@ -1811,7 +2051,7 @@ if __name__ == "__main__":
     if "--no-browser" not in sys.argv:
         webbrowser.open(f"http://{C.WEB_HOST}:{C.WEB_PORT}")
     try:
-        serve()
+        serve(wait_port=20 if "--wait-port" in sys.argv else 0)
     except KeyboardInterrupt:
         pass
     except OSError as e:   # port 5000 taken: another dashboard (or an older bot that still serves it)
