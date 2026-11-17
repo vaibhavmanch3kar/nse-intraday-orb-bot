@@ -857,7 +857,8 @@ def render_review(day=None, refresh=False):
     import review
     h1 = f"<h1>{T.LAMP} {T.term('review')}</h1>"
     r = review.cached(day) if day else review.latest()
-    if refresh or r is None or (not day and review.is_stale(r)):
+    fresh = review.status(r, latest=not day)
+    if refresh or fresh["stale"]:
         jobs.start("review", day)
     note = job_note("review")
     if not r or not r.get("day"):
@@ -897,6 +898,9 @@ def render_review(day=None, refresh=False):
                     f"{'-' if chg is None else ('▲ ' if chg >= 0 else '▼ ') + f'{chg:+.2f}%'}</td>"
                     f"<td data-label='Signal → outcome' class='block' style='white-space:normal;text-align:left'>{outcome}</td>"
                     f"<td data-label='Result' class='r'>{r_cell}</td></tr>")
+    progress_note = (f"<div class='banner' role='note'><b>Session in progress</b>: as of "
+                     f"{html.escape(str(fresh['as_of'] or '-'))}, updated after each 15-minute candle. "
+                     "Not final until the market closes.</div>" if fresh["in_progress"] else "")
     st = r.get("settings", {})
     settings = " · ".join(f"{k}={v}" for k, v in st.items())
     total = r.get("total_r", 0.0)
@@ -911,7 +915,7 @@ built {built} from 15-min data</span></div>
 <input type="hidden" name="refresh" value="1"><button class="ghost small">↻ Refresh</button></form></div>
 <div class="kgrid k4">{_kpi("Signals", f"{r.get('signals', 0)}")}{_kpi("Winners", f"{r.get('wins', 0)}")}
 {_kpi("Total", f"{total:+.2f}R", "after slippage and charges", _cls(total))}
-{_kpi("At 0.5% risk on ₹1L", _signed(at_risk), "about", _cls(at_risk))}</div>{note}
+{_kpi("At 0.5% risk on ₹1L", _signed(at_risk), "about", _cls(at_risk))}</div>{note}{progress_note}
 <section class="card flush"><div class="hd">Stocks <span class="end"><span class="tag">chart = 15-min closes ·
 {T.ui('band_colour')} band = opening range</span></span></div><table class="rt">
 <tr><th>Stock</th><th>Day</th><th class="r">Opening range</th><th class="r">Day %</th><th>Signal → outcome</th>

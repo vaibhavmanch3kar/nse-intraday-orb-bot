@@ -28,6 +28,8 @@ import jobs
 import marketdata
 
 SETUPS = ["20-day high breakout", "Bull flag", "20-day MA reclaim", "Oversold", "Oversold bounce"]
+# the settings a scan depends on (saved with it: a scan made with other values is out of date)
+SETTING_KEYS = ("SCAN_LIST", "RISK_PER_TRADE_PCT", "PAPER_START_INR", "MAX_POSITION_PCT")
 
 
 def sma(vals, n):
@@ -151,7 +153,8 @@ def scan(symbols=None, refresh=False, now=None, job=jobs.NO_JOB):
             rows[s] = r
     day = max((r["date"] for r in rows.values()), default=None)
     res = {"day": day, "built": now.isoformat(timespec="seconds"), "rows": rows, "errors": errors,
-           "counts": {k: sum(1 for r in rows.values() if k in r["setups"]) for k in SETUPS}}
+           "counts": {k: sum(1 for r in rows.values() if k in r["setups"]) for k in SETUPS},
+           "settings": {k: list(v) if isinstance(v := getattr(C, k), (list, tuple)) else v for k in SETTING_KEYS}}
     skipped = sorted(s for s, e in errors.items() if data_yahoo.SKIPPED in e)
     if skipped:   # only when the time limit cut the scan short (a normal scan has no such key)
         res["partial"] = {"skipped": skipped, "why": data_yahoo.SKIPPED}
@@ -174,12 +177,29 @@ def latest():
         return None
 
 
-def is_stale(c, max_age_min=30):
-    try:
-        age = dt.datetime.now(data_yahoo.IST) - dt.datetime.fromisoformat(c["built"])
-    except (KeyError, TypeError, ValueError):
-        return True
-    return age.total_seconds() >= max_age_min * 60
+def status(c, now=None):
+    """Is the saved scan `c` up to date? {"stale", "why"}. Daily candles change once a day, so a scan stays
+    valid until the next trading day's candle is final (15:30 + 15 min), not for 30 minutes."""
+    import freshness
+    now = now or dt.datetime.now(data_yahoo.IST)
+    if not c:
+        return {"stale": True, "why": "no saved scan"}
+    built = freshness.built_at(c)
+    if built is None:
+        return {"stale": True, "why": "the saved scan has no build time"}
+    changed = freshness.changed_settings(c.get("settings"), SETTING_KEYS)
+    if changed:
+        return {"stale": True, "why": f"settings changed since the scan ({', '.join(changed)})"}
+    if c.get("partial") and (now - built).total_seconds() >= freshness.PARTIAL_RETRY_MIN * 60:
+        return {"stale": True, "why": "some stocks were skipped last time (time limit)"}
+    d = freshness.settled_since(built, now)
+    if d:
+        return {"stale": True, "why": f"the {d:%d %b} daily candle is now final"}
+    return {"stale": False, "why": ""}
+
+
+def is_stale(c, now=None):
+    return status(c, now)["stale"]
 
 
 if __name__ == "__main__":

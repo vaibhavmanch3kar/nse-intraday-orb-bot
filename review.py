@@ -19,9 +19,14 @@ from concurrent.futures import ThreadPoolExecutor
 import config as C
 import costs
 import data_yahoo
+import freshness
 import jobs
 import marketdata
 import strategy
+
+# the settings a Review depends on (saved with it: a Review built with other values is out of date)
+SETTING_KEYS = ("OR_MINUTES", "MIN_OR_PCT", "MAX_OR_PCT", "VOLUME_MULT", "USE_VWAP_FILTER", "TARGET_R",
+                "LAST_ENTRY", "SQUARE_OFF", "ALLOW_SHORT", "TRAIL_EMA", "TIME_STOP_BARS", "INDEX_FILTER")
 
 
 def _cache_path(day):
@@ -224,11 +229,13 @@ def build(day=None, symbols=None, refresh=False, job=jobs.NO_JOB):
         "rows": rows, "signals": len(trades),
         "wins": sum(1 for r in trades if r["r"] > 0),
         "total_r": sum(r["r"] for r in trades),
-        "settings": {k: getattr(C, k) for k in ("OR_MINUTES", "MIN_OR_PCT", "MAX_OR_PCT", "VOLUME_MULT",
-                                                "USE_VWAP_FILTER", "TARGET_R", "LAST_ENTRY", "SQUARE_OFF",
-                                                "ALLOW_SHORT", "TRAIL_EMA", "TIME_STOP_BARS",
-                                                "INDEX_FILTER")},
+        "settings": {k: getattr(C, k) for k in SETTING_KEYS},
     }
+    now = dt.datetime.now(data_yahoo.IST)
+    if freshness.in_session(target, now):   # today's session, still running: say so, and up to when
+        last = max((b["t"] for bars, _ in data.values() for b in bars if b["t"].date() == target), default=None)
+        res["in_progress"] = True
+        res["as_of"] = (last + dt.timedelta(minutes=C.INTERVAL_MIN)).strftime("%H:%M") if last else None
     skipped = sorted(s for s, r in rows.items() if data_yahoo.SKIPPED in str(r.get("note", ""))
                      or data_yahoo.SKIPPED in str((r.get("time_machine") or {}).get("error", "")))
     if skipped:   # only when the time limit cut the build short (a normal build has no such key)
@@ -260,17 +267,46 @@ def cached(day):
     return _read(_cache_path(day))
 
 
-def age_min(c):
-    """Minutes since a saved result was built (None if unknown)."""
-    try:
-        return (dt.datetime.now(data_yahoo.IST) - dt.datetime.fromisoformat(c["built"])).total_seconds() / 60
-    except (KeyError, TypeError, ValueError):
-        return None
+def status(c, now=None, latest=False):
+    """Is the saved Review `c` up to date? {"stale", "why", "in_progress", "as_of"}.
+
+    A past session's Review is final and kept for good. Today's, while the market is open, is "in progress"
+    and out of date once the next 15-minute candle has closed. With latest=True (the page without a day),
+    a newer session that has started also makes it out of date. Other settings -> out of date."""
+    now = now or dt.datetime.now(data_yahoo.IST)
+    out = {"stale": False, "why": "", "in_progress": bool(c and c.get("in_progress")),
+           "as_of": c.get("as_of") if c else None}
+
+    def stale(why):
+        out.update(stale=True, why=why)
+        return out
+    if not c or not c.get("day"):
+        return stale("no saved review")
+    built = freshness.built_at(c)
+    if built is None:
+        return stale("the saved review has no build time")
+    changed = freshness.changed_settings(c.get("settings"), SETTING_KEYS)
+    if changed:
+        return stale(f"settings changed since it was built ({', '.join(changed)})")
+    day = dt.date.fromisoformat(c["day"])
+    lag = dt.timedelta(minutes=freshness.CANDLE_LAG_MIN)
+    lc = freshness.last_candle_close(now)
+    # built before that session's candles were final = in progress, even if saved by v1.8.0 without the mark
+    out["in_progress"] = out["in_progress"] or (built < freshness.settle_time(day) and built.date() == day)
+    if out["in_progress"]:
+        if now >= freshness.settle_time(day):
+            return stale("the session has ended: the final review is due")
+        if lc and built < lc + lag:
+            return stale(f"the {lc:%H:%M} candle has closed since")
+    if c.get("partial") and (now - built).total_seconds() >= freshness.PARTIAL_RETRY_MIN * 60:
+        return stale("some stocks were skipped last time (time limit)")
+    if latest and lc and day < lc.date() and built < lc + lag:
+        return stale("a newer session has started")
+    return out
 
 
-def is_stale(c, max_age_min=15):
-    a = age_min(c) if c else None
-    return a is None or a >= max_age_min
+def is_stale(c, now=None, latest=True):
+    return status(c, now, latest)["stale"]
 
 
 def latest():
