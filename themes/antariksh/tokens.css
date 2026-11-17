@@ -1,0 +1,62 @@
+/* Antariksh theme tokens. Original palette; all text colours meet WCAG AA (4.5:1) on bg, surface and
+   surface-2 (checked by tests/test_themes.py). Profit/loss always also shows a sign and an arrow. */
+
+/* colours, dark mode */
+:root[data-mode=dark] {
+  --bg: #050b18;
+  --surface: #0b1730;
+  --surface-2: #11213f;
+  --border: #24406b;
+  --text: #e6f1ff;
+  --muted: #a9bdd9;
+  --accent: #ff8a33;
+  --accent-ink: #1a0a00;
+  --gold: #38e1ff;
+  --up: #4ee6a0;
+  --dn: #ff7d7d;
+  --warn: #ffd166;
+  --info: #8ec5ff;
+  --trail: #c4a1ff;
+  --live: #dc2626;
+  --up-bg: rgba(78,230,160,.12);
+  --dn-bg: rgba(255,125,125,.13);
+  --warn-bg: rgba(255,209,102,.12);
+  --banner-bg: #0f2a4a;
+  --banner-fg: #cfe8ff;
+  --shadow: 0 6px 18px rgba(0,0,0,.5);
+}
+
+/* colours, light mode */
+:root[data-mode=light] {
+  --bg: #eef3fa;
+  --surface: #ffffff;
+  --surface-2: #e3ebf6;
+  --border: #b6c6dc;
+  --text: #0b1730;
+  --muted: #3d4f6b;
+  --accent: #b8430a;
+  --accent-ink: #ffffff;
+  --gold: #0e5f8a;
+  --up: #116b3c;
+  --dn: #b42318;
+  --warn: #7a4a00;
+  --info: #1d4ed8;
+  --trail: #6d28d9;
+  --live: #b91c1c;
+  --up-bg: #dff3e8;
+  --dn-bg: #fbe4e1;
+  --warn-bg: #f8ecca;
+  --banner-bg: #dcecff;
+  --banner-fg: #0b2a52;
+  --shadow: 0 2px 10px rgba(11,23,48,.10);
+}
+
+/* shape and type (both modes) */
+:root[data-mode=any] {
+  --radius: 4px;
+  --font: system-ui,'Segoe UI',Roboto,'Noto Sans',sans-serif;
+  --serif: ui-monospace,'Cascadia Mono',Consolas,'Courier New',monospace;
+  --btn-radius: 4px;
+  --btn-bg: var(--accent);
+  --card-border-width: 1px;
+}

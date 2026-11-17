@@ -1,0 +1,13 @@
+{
+  "id": "antariksh",
+  "name": "Antariksh",
+  "description": "Futuristic India in space: a mission-control room in deep-space navy, launch orange and telemetry cyan. Tara, a small probe robot, scans the market sky. Uses no real agency names, logos or missions.",
+  "author": "kite-trader project",
+  "art": "Original SVG made for this project: a probe robot (Tara), a launch-pad starfield strip and page icons.",
+  "bot_name": "Tara",
+  "assets": {
+    "avatar": "assets/avatar.svg",
+    "scene": "assets/scene.svg",
+    "skin_css": "assets/skin.css"
+  }
+}

@@ -1,0 +1,11 @@
+/* Antariksh skin: thin HUD lines, square corners, monospace headings. Decorative only. */
+.logo{background:none}
+.logo svg{display:block;width:34px;height:34px}
+.ribbon{height:22px;opacity:1;background:url("{{scene}}") repeat-x left bottom/240px 22px}
+.card,.kpi,.chip,.seg,.icon-btn,.opt{border-width:var(--card-border-width)}
+.card{box-shadow:var(--shadow),inset 0 1px 0 color-mix(in srgb,var(--gold) 35%,transparent)}
+.btn,button{border-radius:var(--btn-radius)}
+.ptabs button,.ptabs a,.icon-btn{box-shadow:none}
+.tabs a.on{box-shadow:inset 0 -2px 0 var(--gold)}
+.empty{display:flex;align-items:center;gap:12px}
+.empty-art svg{display:block;width:40px;height:40px}
