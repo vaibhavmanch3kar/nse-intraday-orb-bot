@@ -85,3 +85,58 @@ def test_stop_script_says_not_running_when_no_bot(tmp_path):
     if "BOT-RUNNING" in out.stdout:
         pytest.skip("the real bot is running on this PC: not touching it")
     assert "not running" in out.stdout and not (tmp_path / "STOP").exists()
+
+
+def test_stop_script_writes_the_file_the_bot_reads():
+    """The STOP file is config.STOP_FILE ("STOP" in the main folder unless set), NOT data\\STOP: the first
+    version of stop_bot.ps1 wrote data\\STOP, which the bot never reads."""
+    import importlib
+    stop = open(os.path.join(ROOT, "stop_bot.ps1"), encoding="utf-8").read()
+    assert 'Join-Path $data "STOP"' not in stop and "$env:STOP_FILE" in stop
+    saved = os.environ.pop("STOP_FILE", None)
+    try:
+        cfg = importlib.reload(importlib.import_module("config"))
+        assert cfg.STOP_FILE == "STOP"                  # relative to the folder the bot runs from
+    finally:
+        if saved is not None:
+            os.environ["STOP_FILE"] = saved
+        importlib.reload(importlib.import_module("config"))
+
+
+FAKE_BOT = r"""
+import ctypes, os, sys, time
+k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+k32.CreateMutexW.restype = ctypes.c_void_p
+h = k32.CreateMutexW(None, False, "Local\\AyodhyaORB_bot")
+if ctypes.get_last_error() == 183:
+    print("REAL-BOT-RUNNING", flush=True); sys.exit(2)
+print("READY", flush=True)
+stop = sys.argv[1]
+for _ in range(600):
+    if os.path.exists(stop):
+        os.remove(stop); print("STOPPED", flush=True); sys.exit(0)
+    time.sleep(0.1)
+sys.exit(3)
+"""
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows mutex")
+def test_stop_script_really_stops_a_running_bot(tmp_path):
+    """End to end: a stand-in bot holds the bot's lock and watches the STOP path the bot uses; stop_bot.ps1
+    must make it stop and report so. Skipped (nothing touched) while the real bot runs."""
+    stop = str(tmp_path / "STOP")
+    fake = subprocess.Popen([sys.executable, "-B", "-c", FAKE_BOT, stop], stdout=subprocess.PIPE, text=True)
+    first = fake.stdout.readline().strip()
+    if first == "REAL-BOT-RUNNING":
+        fake.wait(10)
+        pytest.skip("the real bot is running on this PC: not touching it")
+    assert first == "READY"
+    try:
+        out = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                              os.path.join(ROOT, "stop_bot.ps1")], capture_output=True, text=True, timeout=90,
+                             env=dict(os.environ, STOP_FILE=stop))
+        assert fake.wait(30) == 0 and fake.stdout.read().strip() == "STOPPED"
+        assert "[ok] Ayodhya ORB has stopped" in out.stdout, out.stdout + out.stderr
+    finally:
+        if fake.poll() is None:
+            fake.kill()

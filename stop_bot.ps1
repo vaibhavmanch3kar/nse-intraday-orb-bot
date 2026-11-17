@@ -18,10 +18,12 @@ function Test-BotRunning {
 
 if (-not (Test-BotRunning)) { Write-Host "[i] Ayodhya ORB is not running."; exit 0 }
 
-$data = if ($env:DATA_DIR) { $env:DATA_DIR } else { Join-Path $PSScriptRoot "data" }
-New-Item -ItemType Directory -Force -Path $data | Out-Null
-New-Item -ItemType File -Force -Path (Join-Path $data "STOP") | Out-Null
-Write-Host "[i] Asked Ayodhya ORB to stop (STOP file). Waiting for it to finish..."
+# The same file the bot checks and the dashboard's Stop button writes: config.STOP_FILE, which is the STOP_FILE
+# setting if set, otherwise "STOP" in this folder (the bot runs from here). NOT inside data\.
+$stop = if ($env:STOP_FILE) { $env:STOP_FILE } else { "STOP" }
+if (-not [System.IO.Path]::IsPathRooted($stop)) { $stop = Join-Path $PSScriptRoot $stop }
+New-Item -ItemType File -Force -Path $stop | Out-Null
+Write-Host "[i] Asked Ayodhya ORB to stop ($stop). Waiting for it to finish..."
 
 for ($i = 0; $i -lt 30; $i++) {
     Start-Sleep -Seconds 1
