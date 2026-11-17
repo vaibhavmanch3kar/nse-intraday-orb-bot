@@ -18,6 +18,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 import config as C
+import jobs
 import theme as T
 import webui
 
@@ -813,15 +814,58 @@ def sparkline(closes, or_hi, or_lo, w=160, h=36):
             f"{band}<polyline points='{pts}' fill='none' style='stroke:{col}' stroke-width='1.5'/></svg>")
 
 
+# ---------------------------------------------------------------- background builds (Review, Scanner)
+REVIEW_LIMIT_SEC = 300
+SCAN_LIMIT_SEC = 300
+
+
+def _review_job(target, job):
+    import review
+    res = review.build(target, refresh=True, job=job)
+    if not res.get("day"):
+        raise RuntimeError(res.get("error") or "no price data")
+
+
+def _scan_job(target, job):
+    import scanner
+    res = scanner.scan(job=job)
+    if not res.get("rows") and res.get("errors"):
+        raise RuntimeError(f"no stock could be downloaded ({len(res['errors'])} errors)")
+
+
+jobs.register("review", _review_job, REVIEW_LIMIT_SEC)
+jobs.register("scanner", _scan_job, SCAN_LIMIT_SEC)
+
+
+def job_note(name):
+    """One line about a background build of this page (running / failed); '' when there is nothing to say."""
+    j = jobs.get(name)
+    s = j.snapshot() if j else None
+    if not s or s["state"] not in ("running", "failed"):
+        return ""
+    if s["state"] == "running":
+        txt = (f"Updating in the background: {s['done']} of {s['total'] or '?'} steps · {int(s['elapsed_sec'])} s. "
+               "Reload the page to see the result.")
+    else:
+        txt = f"The last update failed: {s['error']}"
+    return f"<div class='banner' role='status'>{html.escape(txt)}</div>"
+
+
 def render_review(day=None, refresh=False):
+    """Draws straight away from the saved Review; builds in the background when it is missing,
+    out of date or a refresh was asked for. Never waits for price downloads."""
     import review
     h1 = f"<h1>{T.LAMP} {T.term('review')}</h1>"
-    try:
-        r = review.build(day, refresh=refresh) if (day or refresh) else review.latest()
-    except Exception as e:
-        return page("Session review", "/review", f"{h1}<div class='banner'>Could not build the review: {html.escape(str(e))}</div>")
-    if not r.get("day"):
-        return page("Session review", "/review", f"{h1}<div class='banner'>No price data right now - try Refresh later.</div>")
+    r = review.cached(day) if day else review.latest()
+    if refresh or r is None or (not day and review.is_stale(r)):
+        jobs.start("review", day)
+    note = job_note("review")
+    if not r or not r.get("day"):
+        j = jobs.get("review")
+        running = j and j.snapshot()["state"] == "running"
+        msg = ("Building the review in the background. Reload the page in a minute." if running else
+               "No saved review yet and none is being built - try Refresh later.")
+        return page("Session review", "/review", f"{h1}{note}<div class='banner'>{msg}</div>")
     days = "".join(f"<a class='{'on' if d == r['day'] else ''}' href='/review?day={d}'>{d[5:]}</a>"
                    for d in r.get("days", [])[-10:])
     rows = []
@@ -867,7 +911,7 @@ built {built} from 15-min data</span></div>
 <input type="hidden" name="refresh" value="1"><button class="ghost small">↻ Refresh</button></form></div>
 <div class="kgrid k4">{_kpi("Signals", f"{r.get('signals', 0)}")}{_kpi("Winners", f"{r.get('wins', 0)}")}
 {_kpi("Total", f"{total:+.2f}R", "after slippage and charges", _cls(total))}
-{_kpi("At 0.5% risk on ₹1L", _signed(at_risk), "about", _cls(at_risk))}</div>
+{_kpi("At 0.5% risk on ₹1L", _signed(at_risk), "about", _cls(at_risk))}</div>{note}
 <section class="card flush"><div class="hd">Stocks <span class="end"><span class="tag">chart = 15-min closes ·
 {T.ui('band_colour')} band = opening range</span></span></div><table class="rt">
 <tr><th>Stock</th><th>Day</th><th class="r">Opening range</th><th class="r">Day %</th><th>Signal → outcome</th>
@@ -883,11 +927,19 @@ The verdict compares target-first vs stop-first at 1R with break-even (50%): wit
 
 
 def render_scanner(refresh=False):
+    """Draws straight away from the saved scan; scans in the background when it is missing, out of date
+    or a re-scan was asked for. Never waits for price downloads."""
     import scanner
-    try:
-        r = scanner.scan() if refresh else scanner.latest()
-    except Exception as e:
-        return page("Swing scanner", "/scanner", f"<h1>{T.FLAG} {T.term('scanner')}</h1><div class='banner'>Scan failed: {html.escape(str(e))}</div>")
+    r = scanner.latest()
+    if refresh or r is None or scanner.is_stale(r):
+        jobs.start("scanner")
+    note = job_note("scanner")
+    if not r:
+        j = jobs.get("scanner")
+        running = j and j.snapshot()["state"] == "running"
+        msg = ("Scanning in the background. Reload the page in a minute." if running else
+               "No saved scan yet and none is running - try Re-scan later.")
+        return page("Swing scanner", "/scanner", f"<h1>{T.FLAG} {T.term('scanner')}</h1>{note}<div class='banner'>{msg}</div>")
     counts = "".join(_kpi(html.escape(k), f"{v}") for k, v in r.get("counts", {}).items())
     rows = []
     hits = [(s, x) for s, x in r.get("rows", {}).items() if x["setups"]]
@@ -913,7 +965,7 @@ def render_scanner(refresh=False):
 <div class="page-head"><h1>{T.FLAG} {T.term('scanner')} <span class="tag">{html.escape(str(r.get('day')))}</span></h1>
 <span class="sub">Multi-day (CNC) setups on the last closed daily candle · built {built}</span></div>
 <div class="banner"><b>Research only</b> - {html.escape(T.ui('scanner_scout'), quote=False)}, the bot does not trade these. Check the chart yourself before acting.</div>
-<div class="kgrid k4">{counts}</div>
+<div class="kgrid k4">{counts}</div>{note}
 <section class="card flush"><div class="hd">Stocks with a setup <span class="end">
 <form method="get" action="/scanner" style="margin:0"><input type="hidden" name="refresh" value="1">
 <button class="ghost small">↻ Re-scan</button></form></span></div>
@@ -1475,7 +1527,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.wfile.write(data)
+        except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+            pass  # the browser left before the page arrived (tab closed, clicked elsewhere): nothing to do
 
     def _redirect(self, to="/"):
         self.send_response(303)
@@ -1518,7 +1573,11 @@ class Handler(BaseHTTPRequestHandler):
                     dt.date.fromisoformat(day)
                 except ValueError:
                     day = None
-            self._send(render_review(day, refresh=q.get("refresh", ["0"])[0] == "1"))
+            if q.get("refresh", ["0"])[0] == "1":   # start the rebuild, then show the page without ?refresh
+                jobs.start("review", day)              # (so reloading the page doesn't start another one)
+                self._redirect("/review" + (f"?day={day}" if day else ""))
+                return
+            self._send(render_review(day))
         elif u.path == "/trades":
             self._send(render_trades(q))
         elif u.path == "/journal.csv":
@@ -1554,7 +1613,14 @@ class Handler(BaseHTTPRequestHandler):
         elif u.path == "/settings":
             self._settings(q)
         elif u.path == "/scanner":
-            self._send(render_scanner(refresh=q.get("refresh", ["0"])[0] == "1"))
+            if q.get("refresh", ["0"])[0] == "1":
+                jobs.start("scanner")
+                self._redirect("/scanner")
+                return
+            self._send(render_scanner())
+        elif u.path == "/api/jobs":
+            # read-only: progress of the Review and Scanner background builds
+            self._send(json.dumps(jobs.snapshot_all()), ctype="application/json; charset=utf-8")
         elif u.path == "/api/live":
             # read-only: the Live page's changing parts as JSON, for in-place updates
             s = read_status()

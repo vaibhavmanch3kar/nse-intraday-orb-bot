@@ -24,6 +24,7 @@ import os
 
 import config as C
 import data_yahoo
+import jobs
 import marketdata
 
 SETUPS = ["20-day high breakout", "Bull flag", "20-day MA reclaim", "Oversold", "Oversold bounce"]
@@ -126,14 +127,19 @@ def scan_symbol(bars):
     }
 
 
-def scan(symbols=None, refresh=False, now=None):
+def scan(symbols=None, refresh=False, now=None, job=jobs.NO_JOB):
+    """job: a jobs.Job when the dashboard scans in the background (progress, time limit)."""
     symbols = symbols or C.SCAN_LIST
     now = now or dt.datetime.now(data_yahoo.IST)
-    got = marketdata.fetch_many(symbols, range_="2y", workers=C.FETCH_WORKERS, interval="1d")
+    job.plan(len(symbols), "daily candles")
+    got = marketdata.fetch_many(symbols, range_="2y", workers=C.FETCH_WORKERS, interval="1d",
+                                on_done=lambda s: job.advance(f"daily candles: {s}"), stop=job.over_time)
     rows, errors = {}, {}
     for s, g in got.items():
         if isinstance(g, Exception):
             errors[s] = str(g)
+            if data_yahoo.SKIPPED in str(g):
+                job.note_skipped()
             continue
         bars = g[0]
         # today's daily bar is still forming during market hours
@@ -146,23 +152,34 @@ def scan(symbols=None, refresh=False, now=None):
     day = max((r["date"] for r in rows.values()), default=None)
     res = {"day": day, "built": now.isoformat(timespec="seconds"), "rows": rows, "errors": errors,
            "counts": {k: sum(1 for r in rows.values() if k in r["setups"]) for k in SETUPS}}
+    skipped = sorted(s for s, e in errors.items() if data_yahoo.SKIPPED in e)
+    if skipped:   # only when the time limit cut the scan short (a normal scan has no such key)
+        res["partial"] = {"skipped": skipped, "why": data_yahoo.SKIPPED}
     os.makedirs(C.DATA_DIR, exist_ok=True)
-    with open(os.path.join(C.DATA_DIR, "scan_latest.json"), "w", encoding="utf-8") as f:
-        json.dump(res, f, indent=1, default=str)
+    import review
+    review.write_json(_path(), res)
     return res
 
 
-def latest(max_age_min=30):
-    p = os.path.join(C.DATA_DIR, "scan_latest.json")
+def _path():
+    return os.path.join(C.DATA_DIR, "scan_latest.json")
+
+
+def latest():
+    """The saved scan, or None. Never scans (the dashboard scans in the background)."""
     try:
-        with open(p, encoding="utf-8") as f:
-            c = json.load(f)
+        with open(_path(), encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def is_stale(c, max_age_min=30):
+    try:
         age = dt.datetime.now(data_yahoo.IST) - dt.datetime.fromisoformat(c["built"])
-        if age.total_seconds() < max_age_min * 60:
-            return c
-    except (OSError, ValueError, KeyError):
-        pass
-    return scan()
+    except (KeyError, TypeError, ValueError):
+        return True
+    return age.total_seconds() >= max_age_min * 60
 
 
 if __name__ == "__main__":

@@ -6,7 +6,8 @@ none), and what that trade would have done: entry at the next bar's open, then s
 target / square-off, in R (multiples of the risk). Portfolio limits (max positions,
 daily loss) are NOT applied here - this is a per-stock view for reviewing the rules.
 
-Results are cached in data/review_<day>.json; the dashboard's Refresh button rebuilds them.
+Results are cached in data/review_<day>.json. The dashboard builds them in the background (jobs.py) and
+shows the saved result meanwhile; its Refresh button starts a rebuild.
 """
 
 import bisect
@@ -18,6 +19,7 @@ from concurrent.futures import ThreadPoolExecutor
 import config as C
 import costs
 import data_yahoo
+import jobs
 import marketdata
 import strategy
 
@@ -26,15 +28,21 @@ def _cache_path(day):
     return os.path.join(C.DATA_DIR, f"review_{day}.json")
 
 
-def fetch_all(symbols, range_="60d"):  # 60 days: also feeds the Time Machine history
+def fetch_all(symbols, range_="60d", job=jobs.NO_JOB):  # 60 days: also feeds the Time Machine history
+    """job: progress (one step per symbol) and the time limit (symbols not started yet are skipped)."""
     now = dt.datetime.now(data_yahoo.IST)
 
     def one(sym):
+        if job.over_time():
+            job.note_skipped()
+            return sym, [], data_yahoo.SKIPPED
         try:
             bars, _, _ = marketdata.fetch(sym, C.INTERVAL_MIN, range_)
             return sym, data_yahoo.closed_bars(bars, now, C.INTERVAL_MIN), None
         except data_yahoo.DataError as e:
             return sym, [], str(e)
+        finally:
+            job.advance(f"15-min candles: {sym}")
 
     with ThreadPoolExecutor(max_workers=4) as ex:
         return {s: (b, err) for s, b, err in ex.map(one, symbols)}
@@ -145,18 +153,24 @@ def _replay_day(bars, day, index_bars=None):
     return out
 
 
-def add_time_machine(rows, n=10000, data=None, index_data=None, day=None):
+def add_time_machine(rows, n=10000, data=None, index_data=None, day=None, job=jobs.NO_JOB):
     """Time Machine odds for every signal in the review (5-min data fetched only for those stocks)."""
     import timemachine
     sig = {s: r for s, r in rows.items() if r.get("direction") and r.get("entry")}
     if not sig:
         return
-    got = marketdata.fetch_many(list(sig), timemachine.STEP_MIN, "60d", C.FETCH_WORKERS)
+    job.plan(job_total(job) + 2 * len(sig), "Time Machine")
+    got = marketdata.fetch_many(list(sig), timemachine.STEP_MIN, "60d", C.FETCH_WORKERS,
+                                on_done=lambda s: job.advance(f"5-min candles: {s}"), stop=job.over_time)
     for s, r in sig.items():
         g = got.get(s)
         if isinstance(g, Exception) or g is None:
             r["time_machine"] = {"n": 0, "error": str(g)}
+            if data_yahoo.SKIPPED in str(g):
+                job.note_skipped()
+            job.advance()
             continue
+        job.advance(f"Time Machine and History: {s}")
         h, m = map(int, r["signal_time"].split(":"))
         start = (dt.datetime(2000, 1, 1, h, m) + dt.timedelta(minutes=C.INTERVAL_MIN)).strftime("%H:%M")
         res = timemachine.replay(timemachine.slot_moves(g[0]), r["direction"], r["entry"], r["stop"],
@@ -176,14 +190,20 @@ def trading_days(data):
     return days
 
 
-def build(day=None, symbols=None, refresh=False):
-    """Review for `day` (date or ISO string). Default = most recent session with data."""
+def job_total(job):
+    return getattr(job, "total", 0)
+
+
+def build(day=None, symbols=None, refresh=False, job=jobs.NO_JOB):
+    """Review for `day` (date or ISO string). Default = most recent session with data.
+    job: a jobs.Job when the dashboard builds it in the background (progress and time limit)."""
     symbols = symbols or C.WATCHLIST
     if day and not refresh and os.path.exists(_cache_path(day)):
         with open(_cache_path(day), encoding="utf-8") as f:
             return json.load(f)
     indices = sorted({strategy.index_for(s) for s in symbols}) if C.INDEX_FILTER else []
-    fetched = fetch_all(list(symbols) + indices)
+    job.plan(len(symbols) + len(indices), "15-min candles")
+    fetched = fetch_all(list(symbols) + indices, job=job)
     index_data = {ix: fetched.pop(ix)[0] for ix in indices}
     data = fetched
     days = trading_days(data)
@@ -196,7 +216,7 @@ def build(day=None, symbols=None, refresh=False):
     for sym, (bars, err) in data.items():
         rows[sym] = ({"note": f"data error: {err}"} if err else
                      replay_day(bars, target, index_data.get(strategy.index_for(sym))))
-    add_time_machine(rows, data=data, index_data=index_data, day=target)
+    add_time_machine(rows, data=data, index_data=index_data, day=target, job=job)
     trades = [r for r in rows.values() if r.get("r") is not None]
     res = {
         "day": target.isoformat(), "days": [d.isoformat() for d in days],
@@ -209,21 +229,53 @@ def build(day=None, symbols=None, refresh=False):
                                                 "ALLOW_SHORT", "TRAIL_EMA", "TIME_STOP_BARS",
                                                 "INDEX_FILTER")},
     }
+    skipped = sorted(s for s, r in rows.items() if data_yahoo.SKIPPED in str(r.get("note", ""))
+                     or data_yahoo.SKIPPED in str((r.get("time_machine") or {}).get("error", "")))
+    if skipped:   # only when the time limit cut the build short (a normal build has no such key)
+        res["partial"] = {"skipped": skipped, "why": data_yahoo.SKIPPED}
     os.makedirs(C.DATA_DIR, exist_ok=True)
     for d in {res["day"], str(day) if day else res["day"]}:
-        with open(_cache_path(d), "w", encoding="utf-8") as f:
-            json.dump(res, f, indent=1, default=str)
+        write_json(_cache_path(d), res)
     return res
 
 
-def latest(max_age_min=15):
-    """Most recent session: reuse the newest cache if it was built recently, else rebuild."""
-    c = latest_cached()
-    if c and c.get("built"):
-        age = dt.datetime.now(data_yahoo.IST) - dt.datetime.fromisoformat(c["built"])
-        if age.total_seconds() < max_age_min * 60:
-            return c
-    return build(refresh=True)
+def write_json(path, obj):
+    """Write via a temporary file and rename, so a page never reads a half-written cache."""
+    tmp = f"{path}.{os.getpid()}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(obj, f, indent=1, default=str)
+    os.replace(tmp, path)
+
+
+def _read(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def cached(day):
+    """The saved Review of `day` (ISO string or date), or None. Never builds."""
+    return _read(_cache_path(day))
+
+
+def age_min(c):
+    """Minutes since a saved result was built (None if unknown)."""
+    try:
+        return (dt.datetime.now(data_yahoo.IST) - dt.datetime.fromisoformat(c["built"])).total_seconds() / 60
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def is_stale(c, max_age_min=15):
+    a = age_min(c) if c else None
+    return a is None or a >= max_age_min
+
+
+def latest():
+    """The newest saved Review, or None. Never builds (the dashboard builds in the background)."""
+    return latest_cached()
 
 
 def latest_cached():
@@ -233,8 +285,7 @@ def latest_cached():
         return None
     if not files:
         return None
-    with open(os.path.join(C.DATA_DIR, files[-1]), encoding="utf-8") as f:
-        return json.load(f)
+    return _read(os.path.join(C.DATA_DIR, files[-1]))
 
 
 if __name__ == "__main__":

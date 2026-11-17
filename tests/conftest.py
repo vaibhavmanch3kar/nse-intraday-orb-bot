@@ -36,6 +36,13 @@ def history(days=5, start=dt.date(2026, 11, 2)):
 
 
 @pytest.fixture(autouse=True)
+def no_background_jobs(monkeypatch):
+    """Pages must not start real Review/Scanner builds (they would download prices) unless a test asks."""
+    import jobs
+    monkeypatch.setattr(jobs, "ENABLED", False)
+
+
+@pytest.fixture(autouse=True)
 def isolated(tmp_path, monkeypatch):
     """Every test gets its own data dir and default strategy settings."""
     monkeypatch.setattr(C, "DATA_DIR", str(tmp_path))

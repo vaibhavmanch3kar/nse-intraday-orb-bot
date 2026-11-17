@@ -189,17 +189,25 @@ def fetch(symbol, interval_min=15, range_="10d", retries=2, interval=None):
     raise DataError(f"{symbol}: {last_err}")
 
 
-def fetch_many(symbols, interval_min=15, range_="10d", workers=3, interval=None):
+def fetch_many(symbols, interval_min=15, range_="10d", workers=3, interval=None, on_done=None, stop=None):
     """Fetch several symbols (paced to Kite's limit), then overwrite each last price with a single
-    batched real-time LTP call. Returns {symbol: (bars, price, time) or DataError}."""
+    batched real-time LTP call. Returns {symbol: (bars, price, time) or DataError}.
+    on_done / stop: as data_yahoo.fetch_many (dashboard jobs only; the bot doesn't pass them)."""
+    from data_yahoo import SKIPPED
     out = {}
     for s in symbols:
+        if stop and stop():
+            out[s] = DataError(f"{s}: {SKIPPED}")
+            continue
         try:
             out[s] = fetch(s, interval_min, range_, interval=interval)
         except PlanError:
             raise
         except DataError as e:
             out[s] = e
+        finally:
+            if on_done:
+                on_done(s)
     ok = [s for s in symbols if not isinstance(out.get(s), Exception)]
     if ok:
         try:

@@ -73,15 +73,25 @@ def _parse(res):
             dt.datetime.fromtimestamp(ptime, IST) if ptime else None)
 
 
-def fetch_many(symbols, interval_min=15, range_="10d", workers=6, interval=None):
-    """Fetch several symbols in parallel. Returns {symbol: (bars, price, ptime) or DataError}."""
+SKIPPED = "skipped: the page's time limit was reached"
+
+
+def fetch_many(symbols, interval_min=15, range_="10d", workers=6, interval=None, on_done=None, stop=None):
+    """Fetch several symbols in parallel. Returns {symbol: (bars, price, ptime) or DataError}.
+    Dashboard jobs only: on_done(symbol) after each symbol (progress); stop() -> True skips the symbols
+    not started yet (time limit). The bot calls this without them, exactly as before."""
     from concurrent.futures import ThreadPoolExecutor
 
     def one(sym):
+        if stop and stop():
+            return sym, DataError(f"{sym}: {SKIPPED}")
         try:
             return sym, fetch(sym, interval_min, range_, interval=interval)
         except DataError as e:
             return sym, e
+        finally:
+            if on_done:
+                on_done(sym)
 
     with ThreadPoolExecutor(max_workers=max(1, workers)) as ex:
         return dict(ex.map(one, symbols))
