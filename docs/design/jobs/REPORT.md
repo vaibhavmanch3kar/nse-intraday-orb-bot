@@ -34,9 +34,12 @@ and only one bot can run.
 | 5 | 0abdcfe | Kite pacing: slots booked outside the lock; page jobs use at most 2 of 3 requests a second, wait while the bot fetches (2 s) and for 90 s after each candle close. |
 | 6 | 634d4a2 | Status strip (Loading / Running / Completed / Failed / Data stale / Partial; words and icon; polls only while running); no automatic retry loop after a failure; errors shown. |
 | 7 | 9cc9a2e | Dashboard as its own program (`run_bot.ps1` starts it minimized); Kite budget shared between programs through a locked file; theme files reloaded when they change. |
-| 8 | 43081ad | `buildinfo.py` and `restart.py`: running version, waiting updates (dashboard files / bot files / settings) and when they become active; Restart the dashboard now; Restart the bot when safe (PAPER only, before 09:15 or flat; checked after; red banner on failure; never automatic in LIVE). |
+| 8 | 43081ad | `buildinfo.py` and `restart.py`: running version, waiting updates (dashboard files / bot files / settings) and when they become active; Restart the dashboard now; a first "restart when safe" (replaced by the approved Apply Changes flow, section 10). |
 | 9 | cc74db1 | Stopping the task stops the bot (`--launcher-pid`); stop requests take effect within a second; `7-STOP-BOT.bat`. |
-| 10 | this commit | This report, screenshots, README, CHANGELOG; a faster first check for waiting updates. |
+| 10 | 376e746 | This report, screenshots, README, CHANGELOG; a faster first check for waiting updates. |
+| + | b4687bd | Cherry-picked from `feature/zerodha-logout-mode` (698e38c): every button needs this dashboard's Host, exact Origin and a per-start CSRF token; the restart buttons use the same checks. |
+| + | 7cbf373 | Approved addition to items 7–9: **Apply Changes & Restart Bot** (section 10). |
+| + | this commit | Docs for the addition. |
 
 ## 3. Same results: before/after on frozen data
 
@@ -98,9 +101,40 @@ JPG); light mode. Dark mode, the Running state and the phone layout were also ch
 
 ## 7. Tests
 
-308 pass, 1 skipped (the stop-script test does nothing while the real bot is running on this PC). v1.8.0 had 248.
+330 pass, 1 skipped (the stop-script test does nothing while the real bot is running on this PC). v1.8.0 had 248.
 New: `test_review_equivalence`, `test_jobs`, `test_freshness`, `test_kite_pacing`, `test_separate_dashboard`,
 `test_restart`, `test_stop`.
+
+## 10. Apply Changes & Restart Bot (approved addition)
+
+The Settings page section **Changes Pending** shows what the bot and the dashboard run (version, commit, edited
+or not) and what is waiting in the folder, split into **dashboard / theme only** (Restart the dashboard now, any
+time; the bot is not touched) and **bot code or settings** (needs a bot restart). Nothing pulls or merges code.
+
+| | Apply After Market Close (recommended) | Apply Now (when safe) |
+|---|---|---|
+| When | the next start (09:00) | as soon as it is safe |
+| PAPER | - | no open position, not within 90 s after a candle close; no new entries while waiting |
+| Real money | - | only before 09:15 or after the close, with no open position |
+| Check of the new code | at the close (15:35), in a separate Python | before stopping, in a separate Python: if it fails, the old bot keeps running |
+| After | - | the new bot checks within 90 s: one copy, new process, code in the folder, same mode, positions, trades today, cash, opening balance |
+
+- **Stages** (shown live, polled from `/api/restart` only while active): Restart Pending – Waiting for Safe
+  Conditions (with the reason, e.g. "1 open position") → checking the new code → stopping (journal and state
+  saved) → restarting (`run_bot.ps1` starts the bot again, same environment) → Changes applied: "Running vX
+  (commit) since HH:MM".
+- **Failure**: a red banner with the reason and **Try again**, **Go back to the previous version** (the last
+  version that started successfully; recorded at every successful start; `git switch --detach`, refused if
+  program files were edited and not committed; asks first) and **Leave it as it is**, with steps.
+- **Safety**: requests are `data/restart_request.json` / `data/apply_after_close.json` holding only a time and a
+  nonce; any other field is refused and logged, so nothing can switch PAPER/LIVE. A second request while one is
+  pending gets 409. Every request and outcome is logged in `data/logs/restart_requests.log`. The buttons use the
+  same Host / Origin / CSRF checks as every other dashboard button. Balances, trade history, journals and
+  settings are never touched.
+- **Tests** (`tests/test_restart.py`, 30): request format and refusals, safety rules for PAPER and real money,
+  waiting with an open position (entries held), broken new code keeping the old bot running (and a real syntax
+  error caught by `preflight.py`), the 90-second checks, Go back, 409, the page in all three themes, and a real
+  dashboard restarting itself. Checked by hand at phone width.
 
 ## 8. Putting it live
 
@@ -114,8 +148,11 @@ New: `test_review_equivalence`, `test_jobs`, `test_freshness`, `test_kite_pacing
 
 ## 9. Limits
 
-- "Restart the bot when safe" relies on `run_bot.ps1` to start the bot again; a bot started by hand stays stopped,
-  and the Live page shows a red banner after 60 s.
+- "Go back to the previous version" leaves the folder on a detached commit; the message says how to return
+  (`git switch <branch>`). It refuses when program files were edited and not committed.
+
+- Apply Now relies on `run_bot.ps1` to start the bot again; a bot started by hand stays stopped, and the Live
+  page shows a red banner after 90 s.
 - The settings check runs a small Python on the Settings page (cached for 2 minutes); the Live page only compares
   files.
 - A Kite outage still makes a rebuild fail after the time limit; the saved result stays on the page with the reason.

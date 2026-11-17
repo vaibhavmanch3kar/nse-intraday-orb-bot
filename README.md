@@ -292,14 +292,19 @@ With Kite you can also backtest further back: `.venv\Scripts\python.exe backtest
 ## Changing settings (optional)
 
 All settings live in `config.py` with comments. Open it in Notepad, change a number, save, and restart the bot.
-The dashboard's **Settings** page (gear button) shows under **Version and updates** which version is running, whether
-a change is waiting and when it becomes active:
+The dashboard's **Settings** page (gear button) shows under **Changes Pending** which version is running and what is
+waiting in the folder (it never downloads or merges code):
 
-- **dashboard changes** apply when the dashboard restarts (**Restart the dashboard now**); the bot keeps trading;
-- **bot, strategy, risk and setting changes** apply at the bot's next start (09:00 on the next trading day with the
-  schedule), or with **Restart the bot when safe**: PAPER only, and only before 9:15 or with no open position; the
-  bot checks itself after the restart and the Live page shows a red banner if anything is off. In LIVE mode the bot
-  is never restarted automatically.
+- **Dashboard / theme only**: **Restart the dashboard now**, any time; the bot keeps trading. Theme files apply by
+  themselves.
+- **Bot code or settings** need a bot restart. Two buttons, both ask first:
+  - **Apply After Market Close** (recommended): the bot finishes the day as usual and starts with the changes at
+    09:00; at the close it checks that the new code can start, so a problem shows that evening.
+  - **Apply Now (when safe)**: PAPER, with no open position and not right after a candle close (no new entries
+    while it waits); real money, only before 9:15 or after the close. It checks the new code first (a broken change
+    never replaces a working bot), restarts, and checks itself: same mode, positions, trades, cash and balance.
+    If anything goes wrong, a red banner offers **Try again**, **Go back to the previous version** or **Leave it as
+    it is**. Balances, trade history, journals and settings are never touched.
 
 Common ones:
 

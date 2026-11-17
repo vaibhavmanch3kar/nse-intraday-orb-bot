@@ -28,14 +28,21 @@ Review, History check and backtest trade is identical to v1.8.0 (84 trades, −3
 - **The dashboard is its own program.** `run_bot.ps1` starts it in a minimized window; it keeps running when the
   bot stops and can be restarted without touching the bot. The Kite request budget is shared by both through a
   small locked file. Edited theme files show without a restart.
-- **Version and updates** on the Settings page: what the bot and the dashboard run, what is waiting on disk
-  (dashboard or bot files, settings) and when it becomes active. **Restart the dashboard now**, and
-  **Restart the bot when safe**: PAPER only, before 9:15 or with no open position, checked after the restart
-  (red banner if not). Never automatic in LIVE mode. Secret settings are never recorded.
+- **Changes Pending and Apply Changes & Restart Bot** on the Settings page: what the bot and the dashboard run
+  (version, commit, edited or not), what is waiting in the folder, split into dashboard/theme only
+  (**Restart the dashboard now**) and bot code or settings. **Apply After Market Close** (recommended; the new
+  code is checked at the close) or **Apply Now (when safe)**: PAPER with no open position and not right after a
+  candle close, no new entries while waiting; real money only before 9:15 or after the close. The new code is
+  checked in a separate process first, the stages show live, and the bot checks itself within 90 s (same mode,
+  positions, trades, cash, balance). Failures: Try again / Go back to the previous version / Leave it as it is.
+  Requests hold only a time and a nonce (anything else is refused), duplicates get 409, every request is logged,
+  and nothing can switch PAPER/LIVE. Secret settings are never recorded. Same request checks (Host, Origin,
+  per-start token) as every other dashboard button.
 - **Stopping really stops.** Stopping the scheduled task now stops the bot too (it used to keep running), a stop
   request takes effect within a second, and the new `7-STOP-BOT.bat` confirms the bot has stopped.
-- **Tests:** 308 pass (v1.8.0 had 248), 1 skipped while the real bot runs on the PC. They include a v1.8.0
-  reference replay, two real programs sharing the Kite budget and a real dashboard restarting itself.
+- **Tests:** 330 pass (v1.8.0 had 248), 1 skipped while the real bot runs on the PC. They include a v1.8.0
+  reference replay, two real programs sharing the Kite budget, a real dashboard restarting itself and a broken
+  code change caught before a restart.
 
 ## v1.8.0 (17 Nov 2026): dashboard themes: Default, Playground and Sandbox
 
