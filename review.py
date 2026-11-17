@@ -9,6 +9,7 @@ daily loss) are NOT applied here - this is a per-stock view for reviewing the ru
 Results are cached in data/review_<day>.json; the dashboard's Refresh button rebuilds them.
 """
 
+import bisect
 import datetime as dt
 import json
 import os
@@ -39,8 +40,50 @@ def fetch_all(symbols, range_="60d"):  # 60 days: also feeds the Time Machine hi
         return {s: (b, err) for s, b, err in ex.map(one, symbols)}
 
 
-def replay_day(bars, day, index_bars=None):
-    """First ORB signal of `day` and its simulated outcome (one trade per stock per day)."""
+def in_time_order(bars):
+    return all(a["t"] <= b["t"] for a, b in zip(bars, bars[1:]))
+
+
+def _window(bars, day, index_bars, in_order=None):
+    """The shortest piece of `bars` that gives exactly the same replay of `day`, or None to use all bars.
+
+    The rules only ever look back at: today's bars, the last VOLUME_LOOKBACK_DAYS earlier sessions (volume
+    average, previous close) and 4 x TRAIL_EMA bars (the EMA trail). So the piece starts at the start of a
+    session at least that far back and ends with `day`; index bars are cut to `day` (the index checks only
+    read the same day). This turns the History check from minutes into seconds without changing a result.
+    Needs bars in time order; anything else uses all bars, as before."""
+    if not (in_time_order(bars) if in_order is None else in_order):
+        return None
+    first = bisect.bisect_left(bars, day, key=lambda b: b["t"].date())
+    if first >= len(bars) or bars[first]["t"].date() != day:
+        return None
+    last = first
+    while last + 1 < len(bars) and bars[last + 1]["t"].date() == day:
+        last += 1
+    start = max(0, first - 4 * max(0, C.TRAIL_EMA))     # EMA trail window of the first bar of the day
+    sessions, k = 0, first                               # ...and VOLUME_LOOKBACK_DAYS whole earlier sessions
+    while k > 0 and sessions < C.VOLUME_LOOKBACK_DAYS:
+        d = bars[k - 1]["t"].date()
+        while k > 0 and bars[k - 1]["t"].date() == d:
+            k -= 1
+        sessions += 1
+    start = min(start, k)
+    while start > 0 and bars[start - 1]["t"].date() == bars[start]["t"].date():
+        start -= 1                                       # begin at the start of a session
+    ix = [b for b in index_bars if b["t"].date() == day] if index_bars else index_bars
+    return bars[start:last + 1], (ix if ix else index_bars)
+
+
+def replay_day(bars, day, index_bars=None, in_order=None):
+    """First ORB signal of `day` and its simulated outcome (one trade per stock per day).
+    in_order: pass True/False when the caller already checked in_time_order(bars) (History does, once)."""
+    w = _window(bars, day, index_bars, in_order)
+    if w:
+        bars, index_bars = w
+    return _replay_day(bars, day, index_bars)
+
+
+def _replay_day(bars, day, index_bars=None):
     idxs = [i for i, b in enumerate(bars) if b["t"].date() == day]
     out = {"bars": len(idxs), "or_high": None, "or_low": None, "open": None, "close": None,
            "day_change_pct": None, "signal_time": None, "direction": None, "entry": None,

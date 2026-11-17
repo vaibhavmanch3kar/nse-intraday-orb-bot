@@ -152,8 +152,9 @@ def history(bars15, day, direction=None, index_bars=None):
     # the first VOLUME_LOOKBACK_DAYS sessions can't fire (no volume history), so they don't count
     days = days[C.VOLUME_LOOKBACK_DAYS:]
     rs, reasons = [], {}
+    in_order = review.in_time_order(bars15)   # checked once here, not once per session
     for d in days:
-        r = review.replay_day(bars15, d, index_bars)
+        r = review.replay_day(bars15, d, index_bars, in_order)
         if r.get("r") is None or (direction and r.get("direction") != direction):
             continue
         rs.append(r["r"])
