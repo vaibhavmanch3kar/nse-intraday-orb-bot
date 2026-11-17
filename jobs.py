@@ -101,6 +101,13 @@ class Job:
             if nxt is not None:
                 self._begin(nxt[0])
 
+    def failed_recently(self, sec):
+        """True if the last build failed less than `sec` seconds ago (pages then don't retry by themselves,
+        so a data outage can't cause a rebuild on every visit; Retry still works)."""
+        with self._lock:
+            return (self.state == "failed" and self.finished is not None
+                    and (dt.datetime.now(IST) - self.finished).total_seconds() < sec)
+
     def wait(self, timeout=None):
         """Wait for the current build (tests and command-line use)."""
         t = self._thread

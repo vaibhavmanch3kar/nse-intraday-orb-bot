@@ -141,3 +141,9 @@ def test_day_link_to_a_stale_in_progress_review_starts_a_rebuild(monkeypatch):
                                    days=[d.isoformat()]))
     page = web.render_review(d.isoformat())
     assert ("review", d.isoformat()) in started and "Session in progress" in page
+
+
+def test_scan_saved_by_v180_is_refreshed_once_with_a_plain_reason():
+    c = {"day": "x", "built": at(WED, "09:29").isoformat(), "rows": {}, "errors": {}}
+    st = scanner.status(c, at(WED, "10:00"))
+    assert st["stale"] and st["why"] == "saved by an older version of the dashboard"

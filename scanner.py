@@ -187,6 +187,8 @@ def status(c, now=None):
     built = freshness.built_at(c)
     if built is None:
         return {"stale": True, "why": "the saved scan has no build time"}
+    if "settings" not in c:
+        return {"stale": True, "why": "saved by an older version of the dashboard"}
     changed = freshness.changed_settings(c.get("settings"), SETTING_KEYS)
     if changed:
         return {"stale": True, "why": f"settings changed since the scan ({', '.join(changed)})"}

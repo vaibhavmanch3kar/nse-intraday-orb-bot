@@ -837,18 +837,98 @@ jobs.register("review", _review_job, REVIEW_LIMIT_SEC)
 jobs.register("scanner", _scan_job, SCAN_LIMIT_SEC)
 
 
-def job_note(name):
-    """One line about a background build of this page (running / failed); '' when there is nothing to say."""
+def auto_start(name, target=None):
+    """Start a background build because the saved result is missing or out of date - but not again within
+    AUTO_RETRY_SEC of a failed build (a Retry click always starts one)."""
     j = jobs.get(name)
-    s = j.snapshot() if j else None
-    if not s or s["state"] not in ("running", "failed"):
+    if j and j.failed_recently(AUTO_RETRY_SEC):
+        return "held"
+    return jobs.start(name, target)
+
+
+AUTO_RETRY_SEC = 300
+
+_JOB_POLL_JS = """<script>(function(){var el=document.querySelector('.jobstrip[data-running]');if(!el)return;
+var name=el.getAttribute('data-job'),unit=el.getAttribute('data-unit'),tail=el.getAttribute('data-tail')||'';
+function mmss(s){s=Math.floor(s||0);var m=Math.floor(s/60),r=s%60;return m+':'+(r<10?'0':'')+r;}
+function tick(){if(document.hidden){setTimeout(tick,3000);return;}
+fetch('/api/jobs',{cache:'no-store'}).then(function(r){return r.json();}).then(function(j){var s=j[name];
+if(!s){return;}if(s.state!=='running'){location.reload();return;}
+el.querySelector('.js-text').textContent=s.done+' of '+(s.total||'?')+' '+unit+' \u00b7 '+mmss(s.elapsed_sec)+
+(s.step?' \u00b7 '+s.step:'')+tail;setTimeout(tick,2000);}).catch(function(){setTimeout(tick,5000);});}
+setTimeout(tick,2000);})();</script>"""
+
+
+def _hm(iso):
+    try:
+        import datetime as _dt
+        t = _dt.datetime.fromisoformat(iso)
+        return t.strftime("%d %b %H:%M") if t.date() != _dt.datetime.now(t.tzinfo).date() else t.strftime("%H:%M")
+    except (TypeError, ValueError):
+        return "-"
+
+
+def _ago(iso):
+    try:
+        import datetime as _dt
+        t = _dt.datetime.fromisoformat(iso)
+        m = int((_dt.datetime.now(t.tzinfo) - t).total_seconds() // 60)
+    except (TypeError, ValueError):
         return ""
+    return "just now" if m < 1 else f"{m} min ago" if m < 120 else f"{m // 60} h ago" if m < 48 * 60 else f"{m // 1440} days ago"
+
+
+def _mmss(sec):
+    sec = int(sec or 0)
+    return f"{sec // 60}:{sec % 60:02d}"
+
+
+def job_strip(name, result, fresh, refresh_url, unit):
+    """The status strip at the top of the Review and Scanner pages: Loading / Running (progress, elapsed),
+    Completed (last update), Failed (reason, Retry), Data stale (why, Refresh), Partial (skipped stocks).
+    Words and an icon, not colour alone; polls /api/jobs only while a build runs."""
+    j = jobs.get(name)
+    s = j.snapshot() if j else {"state": "idle"}
+    built = (result or {}).get("built")
+    saved = f"showing the saved result from {_hm(built)}" if built else ""
+    button, running, tail = "", False, ""
+
+    def btn(label):
+        return (f"<a class='btn ghost small' href='{html.escape(refresh_url)}' "
+                f"aria-label='{label} now'>↻ {label}</a>")
     if s["state"] == "running":
-        txt = (f"Updating in the background: {s['done']} of {s['total'] or '?'} steps · {int(s['elapsed_sec'])} s. "
-               "Reload the page to see the result.")
+        running = True
+        state, icon, cls = ("Running", "⏳", "run") if result else ("Loading", "⏳", "run")
+        tail = f" · {saved}" if saved else ""
+        text = (f"{s['done']} of {s['total'] or '?'} {unit} · {_mmss(s['elapsed_sec'])}"
+                + (f" · {s['step']}" if s.get("step") else "") + tail)
+    elif s["state"] == "failed":
+        state, icon, cls = "Failed", "✕", "bad"
+        text = f"the last update failed: {s['error']}" + (f" · {saved}" if saved else "")
+        button = btn("Retry")
+    elif not result:
+        state, icon, cls = "No data yet", "⚠", "warn"
+        text = "nothing saved yet"
+        button = btn("Refresh")
+    elif fresh.get("stale"):
+        state, icon, cls = "Data stale", "⚠", "warn"
+        text = f"{fresh.get('why') or 'out of date'} · {saved}"
+        button = btn("Refresh")
+    elif result.get("partial"):
+        sk = result["partial"].get("skipped", [])
+        state, icon, cls = "Partial", "⚠", "warn"
+        text = (f"{len(sk)} stock(s) skipped at the time limit ({html.escape(', '.join(sk[:6]))}"
+                f"{'…' if len(sk) > 6 else ''}) · updated {_hm(built)}, {_ago(built)}")
+        button = btn("Retry")
     else:
-        txt = f"The last update failed: {s['error']}"
-    return f"<div class='banner' role='status'>{html.escape(txt)}</div>"
+        state, icon, cls = "Completed", "✓", "ok"
+        text = f"updated {_hm(built)}, {_ago(built)}"
+    data = (f" data-running='1' data-job='{name}' data-unit='{html.escape(unit)}' data-tail='{html.escape(tail)}'"
+            if running else "")
+    return (f"<div class='jobstrip {cls}' role='status' aria-live='polite'{data}>"
+            f"<span class='js-state'><span aria-hidden='true'>{icon}</span> <b>{state}</b></span>"
+            f"<span class='js-text'>{html.escape(text) if state != 'Partial' else text}</span>{button}</div>"
+            + (_JOB_POLL_JS if running else ""))
 
 
 def render_review(day=None, refresh=False):
@@ -857,16 +937,18 @@ def render_review(day=None, refresh=False):
     import review
     h1 = f"<h1>{T.LAMP} {T.term('review')}</h1>"
     r = review.cached(day) if day else review.latest()
+    if r and not r.get("day"):
+        r = None
     fresh = review.status(r, latest=not day)
-    if refresh or fresh["stale"]:
+    if refresh:
         jobs.start("review", day)
-    note = job_note("review")
-    if not r or not r.get("day"):
-        j = jobs.get("review")
-        running = j and j.snapshot()["state"] == "running"
-        msg = ("Building the review in the background. Reload the page in a minute." if running else
-               "No saved review yet and none is being built - try Refresh later.")
-        return page("Session review", "/review", f"{h1}{note}<div class='banner'>{msg}</div>")
+    elif fresh["stale"]:
+        auto_start("review", day)
+    refresh_url = "/review?" + (f"day={day}&" if day else "") + "refresh=1"
+    note = job_strip("review", r, fresh, refresh_url, "steps")
+    if not r:
+        return page("Session review", "/review", f"{h1}{note}<p class='muted'>The review appears here when the "
+                    "build has finished. The page updates by itself.</p>")
     days = "".join(f"<a class='{'on' if d == r['day'] else ''}' href='/review?day={d}'>{d[5:]}</a>"
                    for d in r.get("days", [])[-10:])
     rows = []
@@ -885,6 +967,9 @@ def render_review(day=None, refresh=False):
                 v = tm["verdict"]
                 cls = "dn" if "stop" in v.split(":")[0] else "up" if "target" in v.split(":")[0] else "warn"
                 outcome += f"<br><b class='{cls}'>{html.escape(v)}</b>"
+            if tm.get("error"):
+                outcome += (f"<br><span class='warn'>⚠ {T.term('time_machine')}: no 5-min data "
+                            f"({html.escape(str(tm['error']))})</span>")
             if tm.get("history_text"):
                 outcome += f"<br><span class='muted'>📜 {html.escape(tm['history_text'])}</span>"
             r_cell = f"<b class='{'up' if res > 0 else 'dn'}'>{res:+.2f}R</b>"
@@ -909,13 +994,13 @@ def render_review(day=None, refresh=False):
     body = f"""
 <div class="page-head"><h1>{T.LAMP} {T.term('review')} <span class="tag">{r['day']}</span></h1>
 <span class="sub">The day replayed through the strategy rules, one stock at a time (portfolio limits not applied) ·
-built {built} from 15-min data</span></div>
+built {built} from 15-min data</span></div>{note}
 <div class="chips"><span class="muted small">Day:</span><span class="days">{days}</span>
 <form method="get" action="/review" style="display:inline;margin:0"><input type="hidden" name="day" value="{r['day']}">
 <input type="hidden" name="refresh" value="1"><button class="ghost small">↻ Refresh</button></form></div>
 <div class="kgrid k4">{_kpi("Signals", f"{r.get('signals', 0)}")}{_kpi("Winners", f"{r.get('wins', 0)}")}
 {_kpi("Total", f"{total:+.2f}R", "after slippage and charges", _cls(total))}
-{_kpi("At 0.5% risk on ₹1L", _signed(at_risk), "about", _cls(at_risk))}</div>{note}{progress_note}
+{_kpi("At 0.5% risk on ₹1L", _signed(at_risk), "about", _cls(at_risk))}</div>{progress_note}
 <section class="card flush"><div class="hd">Stocks <span class="end"><span class="tag">chart = 15-min closes ·
 {T.ui('band_colour')} band = opening range</span></span></div><table class="rt">
 <tr><th>Stock</th><th>Day</th><th class="r">Opening range</th><th class="r">Day %</th><th>Signal → outcome</th>
@@ -935,15 +1020,23 @@ def render_scanner(refresh=False):
     or a re-scan was asked for. Never waits for price downloads."""
     import scanner
     r = scanner.latest()
-    if refresh or r is None or scanner.is_stale(r):
+    fresh = scanner.status(r)
+    if refresh:
         jobs.start("scanner")
-    note = job_note("scanner")
+    elif fresh["stale"]:
+        auto_start("scanner")
+    note = job_strip("scanner", r, fresh, "/scanner?refresh=1", "stocks")
     if not r:
-        j = jobs.get("scanner")
-        running = j and j.snapshot()["state"] == "running"
-        msg = ("Scanning in the background. Reload the page in a minute." if running else
-               "No saved scan yet and none is running - try Re-scan later.")
-        return page("Swing scanner", "/scanner", f"<h1>{T.FLAG} {T.term('scanner')}</h1>{note}<div class='banner'>{msg}</div>")
+        return page("Swing scanner", "/scanner", f"<h1>{T.FLAG} {T.term('scanner')}</h1>{note}<p class='muted'>"
+                    "The scan appears here when it has finished. The page updates by itself.</p>")
+    real_errors = {s: e for s, e in (r.get("errors") or {}).items() if "skipped" not in str(e)}
+    err_note = ""
+    if real_errors:
+        shown = ", ".join(f"{s} ({e.split(': ', 1)[-1]})" for s, e in sorted(real_errors.items())[:5])
+        more = f" and {len(real_errors) - 5} more" if len(real_errors) > 5 else ""
+        err_note = (f"<div class='banner' role='note'><b>Data errors for {len(real_errors)} of "
+                    f"{len(real_errors) + len(r.get('rows', {}))} stocks</b>, left out of this scan: "
+                    f"{html.escape(shown + more)}</div>")
     counts = "".join(_kpi(html.escape(k), f"{v}") for k, v in r.get("counts", {}).items())
     rows = []
     hits = [(s, x) for s, x in r.get("rows", {}).items() if x["setups"]]
@@ -969,7 +1062,7 @@ def render_scanner(refresh=False):
 <div class="page-head"><h1>{T.FLAG} {T.term('scanner')} <span class="tag">{html.escape(str(r.get('day')))}</span></h1>
 <span class="sub">Multi-day (CNC) setups on the last closed daily candle · built {built}</span></div>
 <div class="banner"><b>Research only</b> - {html.escape(T.ui('scanner_scout'), quote=False)}, the bot does not trade these. Check the chart yourself before acting.</div>
-<div class="kgrid k4">{counts}</div>{note}
+{note}{err_note}<div class="kgrid k4">{counts}</div>
 <section class="card flush"><div class="hd">Stocks with a setup <span class="end">
 <form method="get" action="/scanner" style="margin:0"><input type="hidden" name="refresh" value="1">
 <button class="ghost small">↻ Re-scan</button></form></span></div>

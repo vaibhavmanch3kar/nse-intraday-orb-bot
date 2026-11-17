@@ -121,6 +121,13 @@ details.card > summary .end{margin-left:auto} details.card > summary .end + *{ma
 .tag.up{color:var(--up);background:var(--up-bg);border-color:transparent}
 .tag.dn{color:var(--dn);background:var(--dn-bg);border-color:transparent}
 .tag.warn{color:var(--warn);background:var(--warn-bg);border-color:transparent}
+.jobstrip{display:flex;gap:6px 12px;align-items:center;flex-wrap:wrap;padding:8px 12px;margin:0 0 12px;
+border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);font-size:13px}
+.jobstrip .js-state{white-space:nowrap}
+.jobstrip.ok .js-state{color:var(--up)}.jobstrip.bad .js-state{color:var(--dn)}
+.jobstrip.warn .js-state{color:var(--warn)}.jobstrip.run .js-state{color:var(--info)}
+.jobstrip .js-text{color:var(--text);flex:1 1 220px}
+.jobstrip .btn{margin-left:auto}
 .banner{background:var(--banner-bg);color:var(--banner-fg);border:1px solid color-mix(in srgb,var(--warn) 45%,transparent);
  border-radius:10px;padding:10px 14px;margin:0 0 14px} .banner a{color:inherit;font-weight:600}
 .viewbar{border-radius:10px;padding:8px 14px;font-weight:700;font-size:12.5px;letter-spacing:.6px;margin:0 0 14px}
