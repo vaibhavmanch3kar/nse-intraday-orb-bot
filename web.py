@@ -303,7 +303,7 @@ def zerodha_card(acct):
         f"<td class='{'up' if r['qty'] > 0 else 'dn' if r['qty'] < 0 else 'muted'}'>{r['qty'] if r['qty'] else 'closed'}</td>"
         f"<td>{_fmt(r['avg'])}</td><td>{_fmt(r['price'])}</td><td>{_pl(r['realised'])}</td><td>{_pl(r['unrealised'])}</td></tr>"
         for r in acct.get("positions", [])) or "<tr><td colspan=7 class='muted'>No positions today</td></tr>"
-    return (f"<h2>{title}</h2><div class='kpis'>{kpis}</div>{warn}"
+    return (f"<h2>{title}</h2><div class='kpis'>{kpis}</div>{warn}{logout_form(read_status())}"
             f"<table style='margin-top:10px'><tr><th>Position</th><th>Product</th><th>Qty</th><th>Avg price</th>"
             f"<th>Last price</th><th>Realised</th><th>Unrealised</th></tr>{rows}</table>"
             f"<div class='muted' style='margin-top:6px'>From Zerodha at {_clock(acct.get('fetched_at'))} IST · "
@@ -754,11 +754,84 @@ def live_limits(s):
             f"</dl></details>")
 
 
-def live_login(ok, login_msg):
+def live_positions_held(s):
+    """Real-money positions the RUNNING bot holds (0 in paper mode or when the bot isn't running)."""
+    return len(s.get("positions") or []) if (s.get("mode") == "live" and bot_running(s)) else 0
+
+
+def logout_form(s):
+    """'Log out of Zerodha' (asks first). Disabled while the bot holds real-money positions: it needs the login
+    to manage and close them."""
+    held = live_positions_held(s or {})
+    if held:
+        return (f"<div class='logout'><button type='button' class='red wide' disabled aria-disabled='true'>"
+                f"⏏ Log out of Zerodha</button><div class='muted small'>Not available now: the bot holds {held} "
+                f"real-money position(s) and needs the login to manage and close them. Log out after they close."
+                f"</div></div>")
+    live_note = ("\\n\\nThe bot is trading REAL MONEY: new entries will be paused until you log in again."
+                 if (s or {}).get("mode") == "live" and bot_running(s or {}) else "")
+    ask = ("Log out of Zerodha?\\n\\nThis ends today\\'s Zerodha session for this dashboard and the bot, and deletes "
+           "the login saved on this PC. Price data switches to Yahoo until you log in again." + live_note)
+    return (f"<form method='post' action='/zerodha/logout' class='logout' "
+            f"onsubmit=\"if(!confirm('{ask}'))return false;this.confirm.value='yes'\">"
+            f"<input type='hidden' name='confirm' value=''>{csrf_field()}"
+            f"<button class='red wide'>⏏ Log out of Zerodha</button></form>")
+
+
+def zerodha_logout():
+    """Log out of Zerodha from the dashboard: end the session at Zerodha (when it can be reached) and delete the
+    login saved on this PC (.kite_token.json). Refused while the bot holds real-money positions. If the bot trades
+    real money (and is flat), new entries are paused too. The token is never shown or logged."""
+    s = read_status()
+    held = live_positions_held(s)
+    if held:
+        return (f"Not logged out: the bot holds {held} real-money position(s) and needs the Zerodha login to "
+                "manage and close them. Log out after they close.")
+    try:
+        kp = _kite_proxy()
+    except SystemExit:
+        return "Nothing to log out: the Kite settings are missing on this PC."
+    path = kp.TOKEN_FILE
+    if not path.exists():
+        return "You are not logged in to Zerodha on this PC."
+    tok = kp.load_token()           # None if the saved login already expired (06:00)
+    ended, why = False, ""
+    if tok:
+        try:
+            kp.make_kite(tok).invalidate_access_token(tok)
+            ended = True
+        except (Exception, SystemExit) as e:  # network, proxy or Kite error: still delete the saved login
+            why = type(e).__name__
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+    except OSError as e:
+        return (f"Logout incomplete: the saved login on this PC could not be deleted ({type(e).__name__}). "
+                f"Close other programs using it and try again.")
+    live = s.get("mode") == "live" and bot_running(s)
+    if live:
+        os.makedirs(C.DATA_DIR, exist_ok=True)
+        open(C.PAUSE_FILE, "w").close()
+    log.info("Zerodha: logged out from the dashboard (session ended at Zerodha: %s)", "yes" if ended else "no")
+    if ended:
+        msg = "Logged out of Zerodha: Zerodha ended the session and the login saved on this PC is deleted."
+    elif tok:
+        msg = (f"Logged out on this PC: the saved login is deleted. Zerodha could not be reached ({why}), so the "
+               "session there ends by itself at about 06:00.")
+    else:
+        msg = "Logged out: the saved login had already expired and is now deleted."
+    if live:
+        msg += " The bot trades real money, so new entries are paused until you log in again."
+    return msg + " Price data uses Yahoo until you log in again."
+
+
+def live_login(ok, login_msg, s=None):
     url = login_url()
     login_btn = (f"<a class='btn' href='{html.escape(url)}'>Log in to Zerodha</a>" if url and not ok else "")
+    logout = logout_form(s) if ok else ""
     return (f"<section class='card'><div class='hd'><span class='theme'>{T.term('login')}</span></div>"
-            f"<div class='{'up' if ok else 'warn'}'>{html.escape(login_msg)}</div>{login_btn}"
+            f"<div class='{'up' if ok else 'warn'}'>{html.escape(login_msg)}</div>{login_btn}{logout}"
             f"<div class='muted small'>{T.term('paper')} mode doesn't need a login, except for {T.name('kite_data')} (Kite) "
             f"price data. {T.term('live')} mode needs one every day (tokens expire ~06:00 IST).</div></section>")
 
@@ -775,7 +848,7 @@ def live_regions(view, s):
             "notice": live_notice(s, running), "acct": live_kpis(view, s), "equity": live_equity(view, s),
             "zpositions": zerodha_positions() if view == "zerodha" else "",
             "positions": live_positions(s, view), "watchlist": live_watchlist(s),
-            "controls": live_controls(s, running), "login": live_login(ok, login_msg),
+            "controls": live_controls(s, running), "login": live_login(ok, login_msg, s),
             "events": live_events(s), "limits": live_limits(s)}
 
 
@@ -2185,6 +2258,12 @@ class Handler(BaseHTTPRequestHandler):
         if self.path in ("/bot/apply-now", "/bot/apply-after-close", "/bot/restart-cancel", "/bot/restart-dismiss",
                          "/bot/go-back", "/dashboard/restart"):
             self._restart(form)
+            return
+        if self.path == "/zerodha/logout":
+            from urllib.parse import quote
+            msg = (zerodha_logout() if form.get("confirm", [""])[0] == "yes"
+                   else "Not logged out: the logout needs your confirmation.")
+            self._redirect("/?msg=" + quote(msg))
             return
         if self.path == "/pause":
             open(C.PAUSE_FILE, "w").close()

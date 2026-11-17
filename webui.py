@@ -170,6 +170,8 @@ tbody tr:hover td,table tr:hover td{background:color-mix(in srgb,var(--surface-2
 button.ghost,.btn.ghost{background:var(--surface-2);color:var(--text);border:1px solid var(--border)}
 button.red,.btn.red{background:var(--dn-bg);color:var(--dn);border:1px solid color-mix(in srgb,var(--dn) 45%,transparent)}
 button.small,.btn.small{min-height:30px;padding:4px 10px;font-size:12.5px}
+button[disabled]{opacity:.55;cursor:not-allowed;filter:none}
+.logout{margin:10px 0 4px}
 .opts{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 8px}
 .opt{display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border:1px solid var(--border);border-radius:9px;background:var(--surface-2);
  cursor:pointer;min-height:40px} .opt:has(input:checked){border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
@@ -201,6 +203,7 @@ input[type=number],input[type=search],select{background:var(--surface);color:var
   .brand small,.tabs,.top .right .seg{display:none}
   .phone-seg{display:block;padding:10px 14px 0}
   .phone-seg .seg{display:flex;width:100%} .phone-seg .seg a{flex:1;min-height:42px}
+  button.wide{width:100%;min-height:44px}
   .wrap{padding:12px 14px calc(84px + env(safe-area-inset-bottom))}
   h1{font-size:19px}
   .chips{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin-left:-14px;margin-right:-14px;padding:0 14px 2px}
