@@ -122,10 +122,30 @@ def version(root=ROOT):
         return "unknown"
 
 
+def _git(*args, root=ROOT):
+    try:
+        out = subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, timeout=10)
+        return out.stdout.strip() if out.returncode == 0 else None
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def commit(root=ROOT):
+    """The git commit the folder is on (None without git)."""
+    return _git("rev-parse", "HEAD", root=root)
+
+
+def dirty(root=ROOT):
+    """True if tracked files were edited since that commit (new untracked files such as data/ don't count)."""
+    out = _git("status", "--porcelain", "--untracked-files=no", root=root)
+    return None if out is None else bool(out)
+
+
 def snapshot(program, with_settings=True):
-    """What this program is running now: version, file hashes and (for the bot) settings hashes."""
-    snap = {"program": program, "version": version(), "files": files_fp(), "pid": os.getpid(),
-            "started": dt.datetime.now(IST).isoformat(timespec="seconds")}
+    """What this program is running now: version, git commit, edited-or-not, file hashes and (for the bot)
+    settings hashes."""
+    snap = {"program": program, "version": version(), "commit": commit(), "dirty": dirty(), "files": files_fp(),
+            "pid": os.getpid(), "started": dt.datetime.now(IST).isoformat(timespec="seconds")}
     if with_settings:
         snap["settings"] = settings_fp()
     return snap

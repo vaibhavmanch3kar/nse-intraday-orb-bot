@@ -222,6 +222,7 @@ class Bot:
         self.journal = None     # today's journal.DayJournal (recording only - never read by trading code)
         self.journal_warned = set()
         self.restart_noted = None   # last "restart requested - waiting" message (said once)
+        self.restart_hold = False   # Apply Now is waiting for a safe moment: no new entries meanwhile (PAPER)
         self.launcher_gone = lambda: False   # main() sets this when run_bot.ps1 passes --launcher-pid
         try:                    # what this bot runs: version and file/setting hashes, for the dashboard
             self.build = buildinfo.snapshot("bot")
@@ -430,7 +431,7 @@ class Bot:
         self.state.save()
 
         # 2) entries
-        paused = os.path.exists(C.PAUSE_FILE)
+        paused = os.path.exists(C.PAUSE_FILE) or self.restart_hold   # Apply Now waiting: no new entries
         candidates = []
         for sym, closed in bars_by_sym.items():
             last = closed[-1]
@@ -510,39 +511,95 @@ class Bot:
             json.dump(status, f, default=str, indent=1)
         os.replace(tmp, os.path.join(C.DATA_DIR, "status.json"))
 
-    def check_restarted(self):
-        """After a "restart when safe": check this start against what the previous bot had (restart.py)."""
-        checks = restart.verify(self.mode, list(self.state.positions), self.state.d["trades_today"], os.getpid())
-        if checks is None:
-            return
-        failed = [k for k, ok in checks.items() if not ok]
-        if failed:
-            self.note(f"Restart check FAILED: {', '.join(failed)} - look at the dashboard", logging.ERROR)
-        else:
-            self.note("Restarted to load the update - all checks passed")
+    def _balance(self):
+        import capital
+        return capital.current_opening_balance(self.state.d)
 
-    def restart_if_requested(self, now):
-        """A "restart when safe" request from the dashboard: restart only in PAPER mode, before the open or
-        with no open position (restart.is_safe). Returns restart.EXIT_RESTART to restart, else None."""
-        if not restart.pending_request():
-            self.restart_noted = None
+    def check_restarted(self):
+        """After an Apply-Now restart: check this start against what the previous bot had (restart.py).
+        Any successful start is recorded, so "Go back to the previous version" knows where to go."""
+        b = self.build or {}
+        checks = restart.verify(self.mode, list(self.state.positions), self.state.d["trades_today"],
+                                self.state.d["cash"], self._balance(), os.getpid(), b.get("version"),
+                                disk_version=b.get("version"))
+        if checks is not None:
+            failed = [k for k, ok in checks.items() if not ok]
+            if failed:
+                self.note(f"Restart check FAILED: {', '.join(failed)} - look at the dashboard", logging.ERROR)
+                return
+            self.note(f"Restarted to apply the changes ({b.get('version')}) - all checks passed")
+        if b.get("commit"):
+            restart.record_good_start(b.get("version"), b.get("commit"))
+
+    def apply_if_requested(self, now):
+        """Apply Now (restart.py): restart only when safe; first check the new code in a separate process;
+        save the journal and state; exit with restart.EXIT_RESTART (run_bot.ps1 starts the bot again)."""
+        req, bad = restart.take_request()
+        if bad:
+            self.note(f"Restart request refused: {bad}", logging.WARNING)
+        if not req:
+            self.restart_hold, self.restart_noted = False, None
             return None
-        if self.live:
-            restart.cancel()
-            self.note("Restart request ignored: in LIVE mode the bot is never restarted automatically. "
-                      "Stop it and start it again yourself when no position is open.", logging.WARNING)
-            return None
-        ok, why = restart.is_safe(self.live, len(self.state.positions), now, at(C.MARKET_OPEN, now.date()))
+        today = now.date()
+        import data_kite
+        ok, why = restart.is_safe(self.live, len(self.state.positions), now, at(C.MARKET_OPEN, today),
+                                  at(C.MARKET_CLOSE, today), 0.0 if self.live else data_kite.candle_hold(now))
         if not ok:
+            self.restart_hold = not self.live
             if self.restart_noted != why:
-                self.note(f"Restart requested - {why}")
+                hold = "; no new entries meanwhile" if self.restart_hold else ""
+                self.note(f"Restart pending - waiting for safe conditions: {why}{hold}")
+                restart.set_stage("waiting", reason=why + hold, nonce=req["nonce"])
                 self.restart_noted = why
             return None
-        self.note(f"Restarting to load the update ({why})")
+        self.restart_hold = False
+        restart.set_stage("checking", reason="checking the new code in a separate process", nonce=req["nonce"])
+        import preflight
+        res = preflight.run_separately()
+        if not res.get("ok"):
+            try:
+                os.remove(restart.request_path())
+            except OSError:
+                pass
+            errs = "; ".join(res.get("errors", [])[:3])
+            restart.set_stage("failed", reason=f"the new code can't start, so the bot keeps running the old code: {errs}",
+                              errors=res.get("errors", []))
+            restart.log("apply now", "new code failed the check", errs)
+            self.note(f"Changes NOT applied: the new code can't start ({errs}). Still running the old code.",
+                      logging.ERROR)
+            return None
+        restart.set_stage("stopping", reason="saving the journal and state", nonce=req["nonce"])
+        if self.journal is not None:
+            self.journal_warn(self.journal.save())
+        self.state.save()
+        self.note(f"Restarting to apply the changes ({why})")
         self.write_status(now)
-        restart.begin(self.mode, list(self.state.positions), self.state.d["trades_today"], os.getpid(),
-                      (self.build or {}).get("version"), now)
+        restart.begin(req, self.mode, list(self.state.positions), self.state.d["trades_today"], self.state.d["cash"],
+                      self._balance(), os.getpid(), (self.build or {}).get("version"), now)
         return restart.EXIT_RESTART
+
+    def check_changes_at_close(self, now):
+        """Apply After Market Close: the changes load at the next start anyway; check them now, so a problem
+        shows this evening instead of at 09:00 tomorrow."""
+        if not restart.after_close_requested():
+            return
+        import preflight
+        res = preflight.run_separately()
+        try:
+            os.remove(restart.after_close_path())
+        except OSError:
+            pass
+        if res.get("ok"):
+            restart.set_stage("checked", reason=f"the changes ({res.get('version')}) passed the check at the close "
+                                                 "and load at the next start")
+            restart.log("apply after close", "check passed", str(res.get("version")))
+            self.note("Changes checked at the close: they load at the next start")
+        else:
+            errs = "; ".join(res.get("errors", [])[:3])
+            restart.set_stage("failed", reason=f"the changes failed the check at the close (the next start would "
+                                               f"fail): {errs}", errors=res.get("errors", []))
+            restart.log("apply after close", "CHECK FAILED", errs)
+            self.note(f"Changes checked at the close: they would NOT start ({errs})", logging.ERROR)
 
     def unlisted_holiday(self, now):
         """Fallback when the holiday file has no list for this year: after 09:45, no NIFTY bar
@@ -619,7 +676,7 @@ class Bot:
                           "(open positions stay protected by exchange stops in live mode)")
                 self.journal_finish(now_ist(), "stopped")
                 break
-            rc = self.restart_if_requested(now_ist())
+            rc = self.apply_if_requested(now_ist())
             if rc:
                 return rc
             now = now_ist()
@@ -644,6 +701,7 @@ class Bot:
                           f"equity ₹{self.state.equity():.2f}")
                 self.journal_finish(now, "complete")
                 self.end_of_day(now)
+                self.check_changes_at_close(now)
                 self.write_status(now)
                 break
             if not self.ensure_live_broker():

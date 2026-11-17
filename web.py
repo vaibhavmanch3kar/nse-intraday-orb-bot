@@ -1694,27 +1694,110 @@ def next_start_text(now=None):
     return "today at 09:00" if d == now.date() else f"{d:%a %d %b} at 09:00"
 
 
-def update_banner(s):
-    """Live page: a red banner if the last "restart when safe" went wrong, else one line when an update is
-    waiting (details and buttons on the Settings page)."""
+def _short(c):
+    return (c or "")[:7]
+
+
+def _bot_running(s):
+    t = _dt_parse((s or {}).get("time"))
+    return t is not None and (_now_ist() - t).total_seconds() < 300
+
+
+def _post_btn(action, label, ask, cls="ghost"):
+    """A small form button that asks first and carries the page's confirmation and CSRF_TOKEN."""
+    return (f"<form method='post' action='{action}' style='display:inline' "
+            f"onsubmit=\"if(!confirm('{ask}'))return false;this.confirm.value='yes'\">"
+            f"<input type='hidden' name='confirm' value=''>{csrf_field()}<button class='{cls} small'>{label}</button></form>")
+
+
+_RESTART_POLL_JS = """<script>(function(){var el=document.querySelector('[data-restart-stage]');if(!el)return;
+var stage=el.getAttribute('data-restart-stage');
+function tick(){if(document.hidden){setTimeout(tick,3000);return;}
+fetch('/api/restart',{cache:'no-store'}).then(function(r){return r.json();}).then(function(j){
+if((j.stage||'')!==stage){location.reload();return;}
+var t=el.querySelector('.js-text');if(t&&j.reason){t.textContent=j.reason;}setTimeout(tick,2000);})
+.catch(function(){setTimeout(tick,5000);});}
+setTimeout(tick,2000);})();</script>"""
+
+_STAGE_LABEL = {"waiting": ("⏸", "Restart Pending – Waiting for Safe Conditions"),
+                "checking": ("⏳", "Applying changes: checking the new code"),
+                "stopping": ("⏳", "Stopping: saving the journal and state"),
+                "restarting": ("⏳", "Restarting")}
+
+
+def restart_strip(s):
+    """Where an Apply-Changes restart stands: the live stages (waiting, checking, stopping, restarting), the
+    result, or a red failure banner with the options (Try again / Go back / Leave it stopped)."""
     import restart
-    try:
-        st_time = _dt_parse((s or {}).get("time"))
-        bad = restart.problem(st_time)
-    except Exception:  # noqa: BLE001
-        bad = None
+    st = restart.state() or {}
+    stage = st.get("stage")
+    bad = restart.problem(_dt_parse((s or {}).get("time")))
     if bad:
-        return f"<div class='banner' role='alert' style='border-color:var(--dn)'><b>⚠ Restart problem.</b> {html.escape(bad)}</div>"
+        return restart_failure(bad, s)
+    if stage in _STAGE_LABEL:
+        icon, label = _STAGE_LABEL[stage]
+        cancel = (_post_btn("/bot/restart-cancel", "Cancel", "Cancel the pending restart?") if stage == "waiting" else "")
+        return (f"<div class='jobstrip {'warn' if stage == 'waiting' else 'run'}' role='status' aria-live='polite' "
+                f"data-restart-stage='{stage}'><span class='js-state'><span aria-hidden='true'>{icon}</span> "
+                f"<b>{html.escape(label)}</b></span><span class='js-text'>{html.escape(st.get('reason') or '')}</span>"
+                f"{cancel}</div>" + _RESTART_POLL_JS)
+    if stage == "running":
+        at = _dt_parse(st.get("at"))
+        if at and (_now_ist() - at).total_seconds() < 3600:
+            b = (s or {}).get("build") or {}
+            return (f"<div class='jobstrip ok' role='status'><span class='js-state'><span aria-hidden='true'>✓</span> "
+                    f"<b>Changes applied</b></span><span class='js-text'>Running {html.escape(str(b.get('version') or st.get('version')))}"
+                    f" ({_short(b.get('commit'))}) since {at:%H:%M}; all checks passed (back in "
+                    f"{int(st.get('took_sec') or 0)} s).</span></div>")
+    if stage == "checked":
+        return (f"<div class='jobstrip ok' role='status'><span class='js-state'><span aria-hidden='true'>✓</span> "
+                f"<b>Checked at the close</b></span><span class='js-text'>{html.escape(st.get('reason') or '')}</span></div>")
+    return ""
+
+
+def restart_failure(reason, s):
+    import restart
+    running = _bot_running(s)
+    cur = buildinfo.commit() if buildinfo else None
+    prev = restart.previous_good(cur)
+    opts = []
+    if running:
+        opts.append(_post_btn("/bot/apply-now", "↻ Try again", "Try the restart again (when safe)?"))
+    if prev:
+        opts.append(_post_btn("/bot/go-back", f"↩ Go back to {html.escape(str(prev.get('version')))}",
+                              f"Switch the folder back to {prev.get('version')} ({_short(prev.get('commit'))}), the last "
+                              "version that started successfully, and restart the bot when safe? Balances, trade "
+                              "history, journals and settings are not touched."))
+    opts.append(_post_btn("/bot/restart-dismiss", "Leave it as it is", "Hide this message and leave the bot as it is?"))
+    steps = ("<details><summary class='small'>Steps to look into it</summary><ol class='small'>"
+             "<li>Read the reason above and <code>data\\logs\\restart_requests.log</code> and today's "
+             "<code>data\\logs\\bot_&lt;date&gt;.log</code>.</li>"
+             "<li>If the bot is stopped, start it by hand with <b>2-START-BOT.bat</b> (it runs the code in the folder).</li>"
+             "<li>Balances, trade history, journals and settings were not touched.</li></ol></details>")
+    return (f"<div class='jobstrip bad' role='alert'><span class='js-state'><span aria-hidden='true'>✕</span> "
+            f"<b>Restart problem</b></span><span class='js-text'>{html.escape(reason)}</span>"
+            f"<span>{' '.join(opts)}</span>{steps}</div>")
+
+
+def update_banner(s):
+    """Live page: where an Apply-Changes restart stands (or a red failure banner), else one line when
+    changes are pending (details and buttons on the Settings page)."""
+    try:
+        strip = restart_strip(s)
+    except Exception:  # noqa: BLE001 - never breaks the Live page
+        strip = ""
+    if strip:
+        return strip
     p = pending_updates(s)
     parts = []
     if p["dashboard_files"]:
-        parts.append("a dashboard update (applies when the dashboard restarts; the bot keeps trading)")
+        parts.append("dashboard only (applies when the dashboard restarts; the bot keeps trading)")
     if p["bot_files"]:
-        parts.append(f"a bot update (active at the bot's next start, {next_start_text()})")
+        parts.append(f"bot code (needs a bot restart; otherwise active at the next start, {next_start_text()})")
     if not parts:
         return ""
-    return (f"<div class='banner' role='status'><b>Update waiting:</b> {html.escape(' and '.join(parts))}. "
-            f"<a href='/settings#updates'>Details</a></div>")
+    return (f"<div class='banner' role='status'><b>Changes pending:</b> {html.escape('; '.join(parts))}. "
+            f"<a href='/settings#updates'>Apply changes</a></div>")
 
 
 def _dt_parse(v):
@@ -1726,71 +1809,97 @@ def _dt_parse(v):
 
 
 def updates_section(s):
-    """Settings page: running versions, waiting updates, when they become active, and the safe-restart
-    buttons. Restarting the dashboard never touches the bot; the bot restarts only when safe (restart.py)."""
+    """Settings page, "Changes Pending": what runs, what is waiting in the folder (dashboard/theme only, or bot
+    code and settings), and the Apply buttons. The buttons restart with the code already in the folder: they
+    never pull or merge anything, and they can't change PAPER/LIVE."""
     import restart
     s = s or {}
-    bot_build = s.get("build")
-    running = bool(s.get("time")) and (lambda t: t is not None and
-                                       (_now_ist() - t).total_seconds() < 300)(_dt_parse(s.get("time")))
+    b = s.get("build") or {}
+    running = _bot_running(s)
     live = (s.get("mode") == "live")
     rows = []
-    if bot_build and running:
-        rows.append(f"<li><b>Bot</b>: {html.escape(str(bot_build.get('version')))} · started "
-                    f"{html.escape(str(bot_build.get('started', ''))[11:16])} · {T.mode_label(s.get('mode') or 'paper')}</li>")
+    if b and running:
+        rows.append(f"<li><b>Bot</b>: running {html.escape(str(b.get('version')))} ({_short(b.get('commit'))})"
+                    f"{' with edited files' if b.get('dirty') else ''} since "
+                    f"{html.escape(str(b.get('started', ''))[11:16])} · {T.mode_label(s.get('mode') or 'paper')}</li>")
     else:
-        rows.append("<li><b>Bot</b>: not running" + (f" (last ran {html.escape(str(bot_build.get('version')))})"
-                                                       if bot_build else "") + "</li>")
+        rows.append("<li><b>Bot</b>: not running" + (f" (last ran {html.escape(str(b.get('version')))})" if b else "")
+                    + "</li>")
     if DASH_BUILD:
-        rows.append(f"<li><b>Dashboard</b>: {html.escape(str(DASH_BUILD.get('version')))} · started "
-                    f"{html.escape(str(DASH_BUILD.get('started', ''))[11:16])}</li>")
+        rows.append(f"<li><b>Dashboard</b>: {html.escape(str(DASH_BUILD.get('version')))} "
+                    f"({_short(DASH_BUILD.get('commit'))}) since {html.escape(str(DASH_BUILD.get('started', ''))[11:16])}</li>")
     if buildinfo:
-        rows.append(f"<li><b>On disk</b>: {html.escape(buildinfo.version())}</li>")
+        rows.append(f"<li><b>In the folder</b>: {html.escape(buildinfo.version())} ({_short(buildinfo.commit())})</li>")
     p = pending_updates(s, with_settings=True)
     items = []
-
-    def btn(action, label, ask, cls="ghost"):
-        return (f"<form method='post' action='{action}' style='display:inline' "
-                f"onsubmit=\"if(!confirm('{ask}'))return false;this.confirm.value='yes'\">"
-                f"<input type='hidden' name='confirm' value=''>{csrf_field()}<button class='{cls} small'>{label}</button></form>")
     if p["dashboard_files"]:
-        items.append(f"<li><b>Dashboard update waiting</b> ({html.escape(', '.join(p['dashboard_files']))}). "
-                     "It applies when the dashboard restarts; the bot is not touched and keeps trading. "
-                     + btn("/dashboard/restart", "↻ Restart the dashboard now",
-                           "Restart the dashboard to load the update? The bot keeps trading; this page reloads.") + "</li>")
-    bot_wait = p["bot_files"] or p["settings"]
-    if bot_wait:
+        items.append(f"<li><b>Dashboard / theme only</b> ({html.escape(', '.join(p['dashboard_files']))}): applies "
+                     "when the dashboard restarts, any time; the bot is not touched. "
+                     + _post_btn("/dashboard/restart", "↻ Restart the dashboard now",
+                                 "Restart the dashboard to apply the changes? The bot keeps trading; this page reloads.")
+                     + "</li>")
+    if p["bot_files"] or p["settings"]:
         what = ", ".join(p["bot_files"] + [f"setting {k}" for k in p["settings"]])
-        line = (f"<li><b>Bot update waiting</b> ({html.escape(what)}). Active at the bot's next start: "
-                f"{next_start_text()}.")
-        req = restart.pending_request()
-        if live:
-            line += (" In LIVE mode the bot is never restarted automatically: stop it and start it again yourself "
-                     "when no position is open.")
-        elif req:
-            line += (f" <b>Restart requested</b> at {html.escape(str(req.get('requested_at', ''))[11:16])}: the bot "
-                     "restarts as soon as it is safe (before 09:15 or with no open position). "
-                     + btn("/bot/restart-cancel", "Cancel the restart", "Cancel the restart request?"))
-        elif running:
-            line += (" Or restart it when safe: PAPER only, before 09:15 or with no open position; it checks itself "
-                     "after the restart. " + btn("/bot/restart-when-safe", "↻ Restart the bot when safe",
-                                                 "Restart the bot to load the update as soon as it is safe (PAPER only, "
-                                                 "before the open or with no open position)?"))
+        line = f"<li><b>Bot code or settings</b> ({html.escape(what)}): needs a bot restart. "
+        st = restart.state() or {}
+        if restart.after_close_requested():
+            line += (f"<b>Set to apply after the market close</b>: checked at 15:35, active at the next start "
+                     f"({next_start_text()}). " + _post_btn("/bot/restart-cancel", "Cancel", "Cancel applying after the close?"))
+        elif restart.busy() or st.get("stage") in _STAGE_LABEL:
+            line += "A restart is in progress (see above)."
+        elif not running:
+            line += f"The bot isn't running: it starts with these changes ({next_start_text()})."
+        else:
+            line += ("<br>" + _post_btn("/bot/apply-after-close", "Apply After Market Close (recommended)",
+                                        "Apply the changes at the next start? The bot finishes today as usual and "
+                                        "checks the new code at the close.", cls="")
+                     + " " + _post_btn("/bot/apply-now", "Apply Now (when safe)",
+                                       "Restart the bot to apply the changes as soon as it is safe? "
+                                       + ("Real money: only before 09:15 or after the close, with no open position."
+                                          if live else "PAPER: with no open position and not right after a candle "
+                                          "close; no new entries while it waits.")))
+            line += ("<div class='muted small'>Apply Now checks the new code in a separate process first; if it "
+                     "can't start, the bot keeps running the old code. After the restart the bot checks itself: "
+                     "one copy, same mode, same positions, trades, cash and balance.</div>")
         items.append(line + "</li>")
     if not items:
-        items.append("<li>Nothing waiting: everything on disk is running.</li>")
-    st = restart.state()
-    last = ""
-    if st and st.get("phase") == "verified":
-        res = "all checks passed" if st.get("ok") else "checks FAILED: " + ", ".join(
-            k for k, v in (st.get("checks") or {}).items() if not v)
-        last = (f"<p class='muted small'>Last bot restart: {html.escape(str(st.get('at', ''))[:16].replace('T', ' '))}"
-                f", {html.escape(res)}.</p>")
-    return (f"<section class='card' id='updates'><div class='hd'>Version and updates</div>"
+        items.append("<li>No changes pending: everything in the folder is running.</li>")
+    return (f"<section class='card' id='updates'><div class='hd'>Changes Pending</div>{restart_strip(s)}"
             f"<ul style='margin:0 0 8px;padding-left:18px'>{''.join(rows)}</ul>"
-            f"<ul style='margin:0;padding-left:18px'>{''.join(items)}</ul>{last}"
-            "<p class='muted small'>Theme files apply by themselves. Strategy, risk and other bot changes, and "
-            "settings, apply only when the bot starts. Only hashes are compared, never secret settings.</p></section>")
+            f"<ul style='margin:0;padding-left:18px'>{''.join(items)}</ul>"
+            "<p class='muted small'>Theme files apply by themselves. Only hashes are compared, never secret "
+            "settings. Nothing here pulls or merges code, or changes PAPER/LIVE. Every request is logged in "
+            "data\\logs\\restart_requests.log.</p></section>")
+
+
+def go_back(s):
+    """Switch the folder back to the last version that started successfully (git, detached), then ask the bot
+    to restart when safe. Refused if program files were edited and not committed (they would be lost)."""
+    import subprocess
+    import restart
+    if not buildinfo:
+        return False, "Version information isn't available."
+    cur = buildinfo.commit()
+    prev = restart.previous_good(cur)
+    if not prev:
+        return False, "No earlier version that started successfully is recorded."
+    if buildinfo.dirty():
+        return False, ("Program files in the folder were edited and not committed; going back would lose them. "
+                       "Commit them or go back by hand.")
+    branch = buildinfo._git("rev-parse", "--abbrev-ref", "HEAD") or "main"
+    root = os.path.dirname(os.path.abspath(__file__))
+    out = subprocess.run(["git", "switch", "--detach", prev["commit"]], cwd=root, capture_output=True, text=True,
+                         timeout=60)
+    if out.returncode:
+        restart.log("go back", "git failed", (out.stderr or "").strip()[-200:])
+        return False, "git could not switch: " + (out.stderr or "").strip()[-200:]
+    restart.log("go back", "switched", f"{_short(cur)} -> {_short(prev['commit'])} ({prev.get('version')})")
+    msg = f"The folder is back on {prev.get('version')} ({_short(prev['commit'])}). "
+    if _bot_running(s):
+        restart.request_now()
+        msg += "The bot restarts with it when safe. "
+    msg += f"To return to the newer code later: git switch {branch}"
+    return True, msg
 
 
 def _now_ist():
@@ -1954,9 +2063,15 @@ class Handler(BaseHTTPRequestHandler):
         elif u.path == "/api/jobs":
             # read-only: progress of the Review and Scanner background builds
             self._send(json.dumps(jobs.snapshot_all()), ctype="application/json; charset=utf-8")
+        elif u.path == "/api/restart":
+            # read-only: where an Apply-Changes restart stands (for the live stage display)
+            import restart
+            st = restart.state() or {}
+            self._send(json.dumps({"stage": st.get("stage"), "reason": st.get("reason"), "at": st.get("at")}),
+                       ctype="application/json; charset=utf-8")
         elif u.path == "/api/version":
             # read-only: which version the dashboard and the bot run (no file lists, no settings)
-            keep = ("program", "version", "started", "pid")
+            keep = ("program", "version", "commit", "dirty", "started", "pid")
             bot_b = read_status().get("build") or {}
             self._send(json.dumps({"dashboard": {k: (DASH_BUILD or {}).get(k) for k in keep},
                                    "bot": {k: bot_b.get(k) for k in keep}}),
@@ -2008,27 +2123,42 @@ class Handler(BaseHTTPRequestHandler):
         self._redirect("/?view=paper&msg=" + quote(msg))
 
     def _restart(self, form):
-        """Restart requests from the Settings page (do_POST has already checked Host, Origin and CSRF_TOKEN),
-        after the confirmation the page adds when you click OK. The bot is never stopped from here: it
-        restarts itself when safe."""
+        """Apply-Changes requests from the Settings page (do_POST has already checked Host, Origin and
+        CSRF_TOKEN), after the confirmation the page adds when you click OK. The bot is never stopped from
+        here: it restarts itself when safe. A second request while one is pending is refused (409)."""
         import restart
         if form.get("confirm", [""])[0] != "yes":
             self._redirect("/settings#updates")    # nothing done without the confirmation
             return
         if self.path == "/dashboard/restart":
+            restart.log("restart dashboard", "requested")
             self._send(page("Restarting", "/settings",
                             "<meta http-equiv='refresh' content='5;url=/settings#updates'>"
                             "<div class='banner' role='status'>Restarting the dashboard to load the update. "
                             "The bot keeps trading. This page reloads in a few seconds.</div>"))
             restart_dashboard()
             return
-        if self.path == "/bot/restart-cancel":
+        ok, msg = True, ""
+        if self.path == "/bot/apply-now":
+            ok, msg = restart.request_now()
+        elif self.path == "/bot/apply-after-close":
+            ok, msg = restart.request_after_close()
+        elif self.path == "/bot/restart-cancel":
             restart.cancel()
-        elif read_status().get("mode") == "live":
-            self._redirect("/settings#updates")   # never automatic in LIVE mode
+        elif self.path == "/bot/restart-dismiss":
+            restart.set_stage("dismissed")
+            restart.log("restart problem", "left as it is")
+        elif self.path == "/bot/go-back":
+            ok, msg = go_back(read_status())
+        if not ok:
+            code = 409 if "pending" in msg or "Already" in msg else 400
+            self._send(page("Not done", "/settings", f"<div class='banner' role='alert'>{html.escape(msg)} "
+                            "<a href='/settings#updates'>Back</a></div>"), code)
             return
-        else:
-            restart.request()
+        if msg and self.path == "/bot/go-back":
+            self._send(page("Going back", "/settings", f"<div class='banner' role='status'>{html.escape(msg)} "
+                            "<a href='/settings#updates'>Back</a></div>"))
+            return
         self._redirect("/settings#updates")
 
     def do_POST(self):
@@ -2052,7 +2182,8 @@ class Handler(BaseHTTPRequestHandler):
         if self.path in ("/paper-capital", "/paper-capital/cancel"):
             self._paper_capital(form)
             return
-        if self.path in ("/bot/restart-when-safe", "/bot/restart-cancel", "/dashboard/restart"):
+        if self.path in ("/bot/apply-now", "/bot/apply-after-close", "/bot/restart-cancel", "/bot/restart-dismiss",
+                         "/bot/go-back", "/dashboard/restart"):
             self._restart(form)
             return
         if self.path == "/pause":
