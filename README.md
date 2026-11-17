@@ -56,6 +56,7 @@ Press any key to close the window.
 **Double-click `3-DASHBOARD.bat`.** Your browser opens **http://127.0.0.1:5000**.
 This only *shows* information and never trades, so it's safe to run on weekends.
 Keep the black window open while you use the dashboard; close it when you're done.
+The dashboard is its own program: closing or restarting it never stops the bot.
 
 ![Live dashboard](docs/screenshots/01-live-dashboard.png)
 
@@ -63,12 +64,15 @@ Keep the black window open while you use the dashboard; close it when you're don
 
 On a weekday (not an NSE holiday), **before 9:15 AM IST**:
 
-1. **Double-click `2-START-BOT.bat`.** The dashboard opens and the bot starts in **PAPER** mode.
+1. **Double-click `2-START-BOT.bat`.** The dashboard starts in its own small (minimized) window and opens in your
+   browser, and the bot starts in **PAPER** mode.
 2. Leave the black window open and the PC awake. Look at the dashboard whenever you like:
    its figures update by themselves every 10 seconds, without reloading the page.
 3. The bot takes trades from about 9:45 AM, closes everything by **3:10 PM**, and **stops by itself at 3:35 PM**.
 
-To stop early, click **Stop bot** on the dashboard, or just close the black window.
+To stop early, click **Stop bot** on the dashboard, double-click **`7-STOP-BOT.bat`** (it waits until the bot has
+really stopped), or close the bot's black window. Stopping the "Kite ORB Bot" task in Task Scheduler stops the bot
+too. The dashboard keeps running after the bot stops.
 
 ### Step 6 (optional): Start automatically every weekday
 
@@ -83,8 +87,13 @@ To undo it, double-click `5-UNSCHEDULE.bat`.
 | Page | What you see |
 |---|---|
 | 🏹 **Ayodhya Darbar · Live** | A **status bar** (market open, bot running, the mode it trades in, price data and delay, Zerodha login), the account's **key figures** (equity, available funds, today's P&L, open P&L, trades used of 4, daily loss limit used), **today's equity chart**, open positions as cards (profit in ₹ and R, where the price sits between the stop and the target, the EMA trail, the 1-hour time-stop check, time in trade), every stock's opening range and status, Pause/Stop (both ask first), the opening balance, Zerodha login, recent events, NSE calendar and limits |
-| 🪔 **Chitrakoot · Session review** | Pick any recent trading day. For each stock: a mini chart, whether the rules fired, and how the trade would have ended. Each trade also shows the **Time Machine**: the odds from 10,000 replays of that stock's own moves, a plain verdict ("coin flip", "leans toward the stop"…) and the rule's real track record over 60 days |
-| 🚩 **Hanuman's Watch · Swing scanner** | Nifty 50 stocks with a multi-day setup on the last daily candle (20-day breakout, bull flag, 20-day average reclaim, oversold, oversold bounce), with a suggested stop, target and quantity. **Research only: the bot doesn't trade these** |
+| 🪔 **Chitrakoot · Session review** | Pick any recent trading day. For each stock: a mini chart, whether the rules fired, and how the trade would have ended. Each trade also shows the **Time Machine**: the odds from 10,000 replays of that stock's own moves, a plain verdict ("coin flip", "leans toward the stop"…) and the rule's real track record over 60 days. Opens at once from the saved review; today's session is marked **in progress** and updated after each 15-minute candle |
+| 🚩 **Hanuman's Watch · Swing scanner** | Nifty 50 stocks with a multi-day setup on the last daily candle (20-day breakout, bull flag, 20-day average reclaim, oversold, oversold bounce), with a suggested stop, target and quantity. **Research only: the bot doesn't trade these**. Opens at once; re-scanned once a day after the close (or with Re-scan) |
+
+Both pages start with a **status strip**: *Completed* (when it was last updated), *Running* (in the background, with
+progress and time taken, and the page updates itself when done), *Failed* (why, with **Retry**), *Data stale* (why,
+with **Refresh**) or *Partial* (stocks skipped at the 5-minute time limit). Downloads for these pages give way to
+the bot's own, so they never hold the bot up.
 | 📜 **Rajkosh · Trades** | Key figures, then tabs: **Overview** (equity curve with drawdowns shaded and 1W/1M/3M/All ranges, profit/loss per trade and per day, breakdowns by exit reason, side and stock, and the **30-trade edge check**), **Journal** (Daily / Weekly / Monthly), **Trade log** (filter by stock, side and result; each trade links to its **chart** with entry, exit, stop and trail drawn on) and **Backtest** |
 
 ### Look and feel: light and dark, desktop and phone
@@ -248,7 +257,8 @@ writes files to `data\advisor\`. Run these in PowerShell inside the project fold
 | Setup says **Python is not installed** | Do Step 1 again and make sure you tick **Add python.exe to PATH**. Then restart the PC and run `1-SETUP.bat` again |
 | **"Windows protected your PC"** | Click **More info**, then **Run anyway** |
 | The black window opens and closes instantly | Open the project folder, click the address bar, type `powershell` and press Enter. In the blue window type `.\1-SETUP.bat` (or the file you tried) and press Enter to read the error |
-| Browser shows **"This site can't be reached"** | The black window was closed. Double-click `3-DASHBOARD.bat` (or `2-START-BOT.bat`) again and keep it open |
+| Browser shows **"This site can't be reached"** | The dashboard's window was closed. Double-click `3-DASHBOARD.bat` and keep it open (the bot keeps trading either way) |
+| Review or Scanner says **Failed** | Read the reason in the strip (often: no Zerodha login today, or the internet). Click **Retry**; the saved result stays on the page meanwhile |
 | Live page says **NOT RUNNING** | Normal outside market hours, on weekends and on holidays. On a market day, run `2-START-BOT.bat` |
 | **Data delay** shows 15+ minutes | Yahoo's free data is running late. Paper results will be less accurate that day. Kite data fixes this (see above) |
 | Live page says **Kite unavailable** | Log in to Zerodha on the dashboard (needed every day), then run `6-CHECK-KITE-DATA.bat` |
@@ -282,6 +292,15 @@ With Kite you can also backtest further back: `.venv\Scripts\python.exe backtest
 ## Changing settings (optional)
 
 All settings live in `config.py` with comments. Open it in Notepad, change a number, save, and restart the bot.
+The dashboard's **Settings** page (gear button) shows under **Version and updates** which version is running, whether
+a change is waiting and when it becomes active:
+
+- **dashboard changes** apply when the dashboard restarts (**Restart the dashboard now**); the bot keeps trading;
+- **bot, strategy, risk and setting changes** apply at the bot's next start (09:00 on the next trading day with the
+  schedule), or with **Restart the bot when safe**: PAPER only, and only before 9:15 or with no open position; the
+  bot checks itself after the restart and the Live page shows a red banner if anything is off. In LIVE mode the bot
+  is never restarted automatically.
+
 Common ones:
 
 | Setting | Default | Meaning |

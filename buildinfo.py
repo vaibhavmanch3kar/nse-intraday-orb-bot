@@ -45,9 +45,16 @@ def files_fp(root=ROOT):
     return out
 
 
+_IMPORTS_CACHE = {}   # (path, size, mtime) -> imported names: a file is read again only after it changed
+
+
 def _imports(path):
     """Module names imported anywhere in a file (top level or inside functions)."""
     try:
+        st = os.stat(path)
+        key = (path, st.st_size, st.st_mtime_ns)
+        if key in _IMPORTS_CACHE:
+            return _IMPORTS_CACHE[key]
         with open(path, encoding="utf-8") as f:
             tree = ast.parse(f.read())
     except (OSError, SyntaxError, ValueError):
@@ -58,6 +65,7 @@ def _imports(path):
             names.update(a.name.split(".")[0] for a in node.names)
         elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
             names.add(node.module.split(".")[0])
+    _IMPORTS_CACHE[key] = names
     return names
 
 
@@ -156,10 +164,10 @@ def pending(bot_snap, dash_snap, disk=None, settings_now=None, root=ROOT):
     disk = disk if disk is not None else files_fp(root)
     out = {"bot_files": [], "settings": [], "dashboard_files": []}
     bot_run = (bot_snap or {}).get("files") or {}
-    if bot_run:
+    if bot_run and bot_run != disk:      # (the usual case, nothing changed, needs no import reading)
         out["bot_files"] = sorted(f for f in bot_files(root) if disk.get(f) != bot_run.get(f))
     dash_run = (dash_snap or {}).get("files") or {}
-    if dash_run:
+    if dash_run and dash_run != disk:
         dash_only = dashboard_files(root) - bot_files(root)
         out["dashboard_files"] = sorted(f for f in dash_only if disk.get(f) != dash_run.get(f))
     bot_set = (bot_snap or {}).get("settings") or {}

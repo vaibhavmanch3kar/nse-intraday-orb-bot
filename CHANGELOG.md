@@ -6,6 +6,37 @@ Every version is on the [Releases page](https://github.com/vaibhavmanch3kar/nse-
 with a ZIP you can download. To go back to an older version, download that version's ZIP.
 Your settings (Windows user environment variables) and your `data` folder are not part of the ZIP, so keep them.
 
+## Unreleased (branch feature/review-scanner-jobs): fast Review and Scanner pages, safe updates and restarts
+
+The strategy, risk limits, entry and exit rules, orders and the backtest are unchanged: on frozen data every
+Review, History check and backtest trade is identical to v1.8.0 (84 trades, −3.03%, PF 0.47). Full report:
+[docs/design/jobs/REPORT.md](docs/design/jobs/REPORT.md).
+
+- **Review (Chitrakoot) and Scanner (Hanuman's Watch) open at once.** They show the saved result straight away
+  and build a new one in the background when needed (v1.8.0 made you wait 20–35 s while it downloaded from Kite,
+  and often the browser gave up).
+  - A **status strip** says Completed / Running (progress, time) / Failed (why, Retry) / Data stale (why,
+    Refresh) / Partial, in words and an icon. The page updates itself when a build finishes.
+  - One build at a time per page; a second click joins it. A 5-minute time limit, with skipped stocks listed.
+  - Scanner data errors and failed Time Machine downloads are now shown instead of hidden.
+- **Saved results follow the data.** The Scanner refreshes once a day after the close (not every 30 minutes).
+  Past Reviews are final. Today's Review is marked **in progress** and refreshed after each 15-minute candle
+  (v1.8.0 could show a half-built morning copy all day). Results built with other settings are refreshed.
+- **History check 3× faster**, with identical results.
+- **The bot comes first for Kite data.** Page downloads use at most 2 of Kite's 3 requests a second, wait while
+  the bot fetches and for 90 s after each candle close, and never hold a lock while waiting.
+- **The dashboard is its own program.** `run_bot.ps1` starts it in a minimized window; it keeps running when the
+  bot stops and can be restarted without touching the bot. The Kite request budget is shared by both through a
+  small locked file. Edited theme files show without a restart.
+- **Version and updates** on the Settings page: what the bot and the dashboard run, what is waiting on disk
+  (dashboard or bot files, settings) and when it becomes active. **Restart the dashboard now**, and
+  **Restart the bot when safe**: PAPER only, before 9:15 or with no open position, checked after the restart
+  (red banner if not). Never automatic in LIVE mode. Secret settings are never recorded.
+- **Stopping really stops.** Stopping the scheduled task now stops the bot too (it used to keep running), a stop
+  request takes effect within a second, and the new `7-STOP-BOT.bat` confirms the bot has stopped.
+- **Tests:** 308 pass (v1.8.0 had 248), 1 skipped while the real bot runs on the PC. They include a v1.8.0
+  reference replay, two real programs sharing the Kite budget and a real dashboard restarting itself.
+
 ## v1.8.0 (17 Nov 2026): dashboard themes: Default, Playground and Sandbox
 
 Display only. The strategy, risk limits, bot logic, orders, settings, the trading mode and account data are
