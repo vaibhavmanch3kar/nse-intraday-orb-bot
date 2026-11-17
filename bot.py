@@ -222,6 +222,7 @@ class Bot:
         self.journal = None     # today's journal.DayJournal (recording only - never read by trading code)
         self.journal_warned = set()
         self.restart_noted = None   # last "restart requested - waiting" message (said once)
+        self.launcher_gone = lambda: False   # main() sets this when run_bot.ps1 passes --launcher-pid
         try:                    # what this bot runs: version and file/setting hashes, for the dashboard
             self.build = buildinfo.snapshot("bot")
         except Exception:  # noqa: BLE001 - never stops the bot
@@ -611,6 +612,13 @@ class Bot:
                 self.journal_finish(now_ist(), "stopped")
                 os.remove(C.STOP_FILE)
                 break
+            if self.launcher_gone():
+                # Stopping the "Kite ORB Bot" task (or killing run_bot.ps1) ends only the launcher; v1.8.0
+                # kept trading on its own after that. Now it stops the same way as the STOP file.
+                self.note("The launcher (run_bot.ps1 / the scheduled task) was stopped - Ayodhya ORB shutting down "
+                          "(open positions stay protected by exchange stops in live mode)")
+                self.journal_finish(now_ist(), "stopped")
+                break
             rc = self.restart_if_requested(now_ist())
             if rc:
                 return rc
@@ -654,7 +662,17 @@ class Bot:
             else:
                 self.write_status(now)
             # wake shortly after each 15-minute candle closes, plus a check every POLL_SEC
-            time.sleep(C.POLL_SEC)
+            self.nap(C.POLL_SEC)
+
+    def nap(self, seconds):
+        """Sleep between checks, but wake within a second when asked to stop (STOP file or launcher gone),
+        instead of up to a minute later. Nothing else changes: the next check runs as before."""
+        end = time.monotonic() + seconds
+        while True:
+            left = end - time.monotonic()
+            if left <= 0 or os.path.exists(C.STOP_FILE) or self.launcher_gone():
+                return
+            time.sleep(min(1.0, left))
 
 
 SINGLE_INSTANCE_MUTEX = "Local\\AyodhyaORB_bot"   # run_bot.ps1 checks this same name
@@ -694,9 +712,32 @@ def main():
     if not dashboard_listening():
         log.info(f"Dashboard not running - double-click 3-DASHBOARD.bat to open it "
                  f"(http://{C.WEB_HOST}:{C.WEB_PORT}); the bot trades the same without it")
-    rc = Bot().run()
+    b = Bot()
+    b.launcher_gone = watch_launcher(sys.argv)
+    rc = b.run()
     if rc:
         sys.exit(rc)   # restart.EXIT_RESTART: run_bot.ps1 starts the bot again
+
+
+def watch_launcher(argv):
+    """`--launcher-pid N` (run_bot.ps1 passes its own process id): returns a function that says whether that
+    process has ended. It holds a handle to the process, so a reused process id can't fool it. Without the
+    option (bot started by hand), or off Windows, it always says no."""
+    if "--launcher-pid" not in argv or os.name != "nt":
+        return lambda: False
+    try:
+        pid = int(argv[argv.index("--launcher-pid") + 1])
+        import ctypes
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.OpenProcess.restype = ctypes.c_void_p
+        handle = k32.OpenProcess(0x00100000, False, pid)   # SYNCHRONIZE
+    except (ValueError, IndexError, OSError):
+        return lambda: False
+    if not handle:
+        log.warning(f"--launcher-pid {argv[argv.index('--launcher-pid') + 1]}: no such process - not watching it")
+        return lambda: False
+    k32.WaitForSingleObject.argtypes = (ctypes.c_void_p, ctypes.c_uint32)
+    return lambda: k32.WaitForSingleObject(handle, 0) == 0   # WAIT_OBJECT_0: the launcher has ended
 
 
 def dashboard_listening(timeout=0.5):

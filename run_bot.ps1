@@ -36,7 +36,9 @@ Start-Job -ScriptBlock { Start-Sleep 4; Start-Process "http://127.0.0.1:5000" } 
 # (PAPER only, before the open or with no open position; see restart.py). Start it again, at most 3 times.
 $restarts = 0
 while ($true) {
-    & $py bot.py
+    # --launcher-pid: if this window is ended (e.g. Stop on the "Kite ORB Bot" task), the bot stops by itself
+    # the same way as with the STOP file, instead of trading on with nobody watching (as v1.8.0 did).
+    & $py bot.py --launcher-pid $PID
     if ($LASTEXITCODE -eq 3 -and $restarts -lt 3) {
         $restarts++
         Write-Host "[i] Restarting Ayodhya ORB to load the update ($restarts)..."
