@@ -6,6 +6,28 @@ Every version is on the [Releases page](https://github.com/vaibhavmanch3kar/nse-
 with a ZIP you can download. To go back to an older version, download that version's ZIP.
 Your settings (Windows user environment variables) and your `data` folder are not part of the ZIP, so keep them.
 
+## Unreleased (branch feature/zerodha-logout-mode): Zerodha logout, real trading mode on every page, Paper | Real Money control
+
+The strategy, risk limits, entry and exit rules, orders and the backtest are unchanged (frozen backtest identical:
+84 trades, −3.03%, PF 0.47). Live trading stays off unless you set it up as below.
+
+- **Real money needs today's arming too.** Before, `DRY_RUN=false` and `CONFIRM_LIVE=YES` alone made the bot
+  trade real money, so if they were ever saved in Windows the 9:00 task would have started live. Now it also
+  needs the day's arming on the dashboard; without it the bot trades paper, however it was started.
+- **Paper | Real Money on Settings > Trading mode.** Read-only readiness checks (switches, account active and order
+  permission that you confirm in Windows, static-IP proxy, today's login, funds), shown as **Live Trading Locked**
+  with the fixes when any fails, plus the strategy audit's NO-GO warning. Arming needs every check, a Zerodha
+  login from the last 10 minutes and the typed words `REAL MONEY`; it applies at a safe moment and ends at
+  midnight. **Switch back to Paper** stops new real-money trades at once and switches when the open ones have
+  closed (they are still managed). **Close all positions now** is separate, with its own confirmation.
+  See [docs/LIVE-TRADING.md](docs/LIVE-TRADING.md).
+- **Log out of Zerodha** button (Live page): asks first, ends the session at Zerodha, deletes the login saved on
+  this PC, never shows or logs the token; refused while the bot holds real-money positions.
+- **The real trading mode on every page**, in the header, in plain words in every theme and on a phone:
+  PAPER · virtual money, REAL MONEY · Zerodha, or Bot not running, plus any switch that is waiting.
+- **Buttons accept only the dashboard's own page:** exact Origin/Host checks and a secret code made at each
+  dashboard start (other websites and programs can't press them).
+
 ## Unreleased (branch feature/review-scanner-jobs): fast Review and Scanner pages, safe updates and restarts
 
 The strategy, risk limits, entry and exit rules, orders and the backtest are unchanged: on frozen data every

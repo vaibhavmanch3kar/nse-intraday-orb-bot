@@ -46,19 +46,43 @@ Run it again with `-ResetSecrets` to change anything.
 
 ## Every trading day
 
-1. Open PowerShell in the project folder and switch on **both** live switches (they last only for this window):
+Real money needs **three things, every day**: both live switches, today's Zerodha login, and the day's
+**arming** on the dashboard. Without the arming the bot trades paper, however it was started: by hand, by a
+restart, or by the scheduled task (`4-SCHEDULE.bat`). The arming lasts only until midnight.
+
+**Once, before the first live day,** set these yourself in Windows (Start > "Edit environment variables for
+your account" > New). The dashboard can never set them:
+- `KITE_ACCOUNT_ACTIVE` = `YES`, after Zerodha has reactivated your account (it was dormant).
+- `KITE_ORDER_PERMISSION` = `YES`, after you subscribed to the paid Kite Connect plan, whose app can place
+  orders. Zerodha has no read-only way to check either of these, so you confirm them.
+- Optional: `LIVE_MIN_FUNDS_INR` (default 10000), the Zerodha balance needed before you can arm.
+
+**Every trading day:**
+1. Start the bot with **both** live switches on. For one window only:
    ```powershell
    $env:DRY_RUN = "false"; $env:CONFIRM_LIVE = "YES"
    powershell -ExecutionPolicy Bypass -File .\run_bot.ps1
    ```
-2. On the dashboard, click **Log in to Zerodha** and log in. Zerodha sends you back to the dashboard and
-   the day's token is saved automatically. Tokens expire around 6:00 AM, so log in every day.
-3. Start small, for example with `$env:WATCHLIST = "SBIN,INFY"` and `$env:RISK_PER_TRADE_PCT = "0.25"`
-   set before starting.
+   Or save both in Windows so the 9:00 task has them; it still trades paper on any day you don't arm.
+   Start small, for example with `$env:WATCHLIST = "SBIN,INFY"` and `$env:RISK_PER_TRADE_PCT = "0.25"`.
+2. On the dashboard, click **Log in to Zerodha** and log in (Zerodha's own two-step login). The day's token is
+   saved automatically and expires around 6:00 AM.
+3. Within 10 minutes of that login, open **Settings > Trading mode**:
+   - Click **Check readiness**. It checks, read-only: the two switches, your account and order-permission
+     confirmations, that Kite traffic leaves from the whitelisted static IP, today's login and your funds.
+     If anything fails the panel shows **Live Trading Locked**, what's missing and how to fix it.
+   - When everything passes it shows your risk per trade and daily loss limit in rupees. Type `REAL MONEY` and
+     click **Arm REAL MONEY for today**.
+   - The bot switches at the next safe moment: with no open paper position, and not while it fetches a new
+     candle. Until then it opens no new paper trades. The header shows **REAL MONEY** once it has switched.
 
-**Both switches are not enough on their own.** Real money also needs the day's arming on the dashboard
-(Settings > Trading mode). Without it the bot trades paper, however it was started: by hand, by a restart,
-or by the scheduled task (`4-SCHEDULE.bat`). The arming lasts only until midnight.
+**Back to paper** (Settings > Trading mode > **Switch back to Paper**): the arming is removed at once and the bot
+opens no new real-money trades. It keeps managing the open ones (exchange stop orders, trailing stop, 15:10
+close) and switches to paper when all of them have closed. The header says "→ PAPER when 2 close" meanwhile.
+**Close all positions now** is a separate button with its own confirmation, for when you want out at once.
+
+**Log out of Zerodha** (Live page) is refused while the bot holds real-money positions, because it needs the
+login to manage and close them. Every mode change, arming and refusal is logged in `data/logs/mode_changes.log`.
 
 ## What the bot does with real orders
 
