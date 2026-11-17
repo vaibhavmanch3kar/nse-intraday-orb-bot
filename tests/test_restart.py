@@ -142,7 +142,15 @@ def srv(monkeypatch):
     s.shutdown()
 
 
-def post(url, path, data, origin=True):
+def csrf_of(url):
+    """The dashboard's per-start form token, read from its own page (as a browser would)."""
+    import re
+    html = urllib.request.urlopen(url + "/?view=paper", timeout=10).read().decode("utf-8")
+    return re.search(r"name='csrf' value='([^']+)'", html).group(1)
+
+
+def post(url, path, data, origin=True, csrf=None):
+    data = dict(data, csrf=csrf if csrf is not None else web.CSRF_TOKEN)
     req = urllib.request.Request(url + path, data=urlencode(data).encode(), method="POST",
                                  headers={"Origin": url} if origin else {})
     try:
@@ -222,7 +230,7 @@ def test_dashboard_restarts_itself_without_touching_anything_else(tmp_path):
             except OSError:
                 time.sleep(0.1)
         assert first["pid"]                 # (the venv's python.exe is a launcher: its pid differs)
-        post(url, "/dashboard/restart", {"confirm": "yes"})
+        post(url, "/dashboard/restart", {"confirm": "yes"}, csrf=csrf_of(url))
         p.wait(15)                                              # the old dashboard has stopped
         for _ in range(150):
             try:

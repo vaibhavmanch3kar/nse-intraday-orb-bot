@@ -150,7 +150,10 @@ def get(url):
         return r.read().decode()
 
 
-def post(base, path, fields, origin="same"):
+def post(base, path, fields, origin="same", csrf=True):
+    import web
+    if csrf:
+        fields = {**fields, "csrf": web.CSRF_TOKEN}
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
     if origin == "same":
         headers["Origin"] = base

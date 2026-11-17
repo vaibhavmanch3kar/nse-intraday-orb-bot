@@ -54,7 +54,7 @@ def test_pause_and_cross_origin_post(server):
     with pytest.raises(urllib.error.HTTPError) as e:
         urllib.request.urlopen(req)
     assert e.value.code == 403 and not os.path.exists(C.PAUSE_FILE)
-    req = urllib.request.Request(server + "/pause", data=b"", method="POST",
+    req = urllib.request.Request(server + "/pause", data=("csrf=" + web.CSRF_TOKEN).encode(), method="POST",
                                  headers={"Origin": server})
     urllib.request.urlopen(req)
     assert os.path.exists(C.PAUSE_FILE)

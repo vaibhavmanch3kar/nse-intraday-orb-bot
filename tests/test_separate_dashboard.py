@@ -75,7 +75,10 @@ def test_dashboard_runs_as_its_own_program_and_controls_the_bot_by_files(tmp_pat
             pytest.fail("dashboard did not start")
         with urllib.request.urlopen(url + "/", timeout=10) as r:
             assert r.status == 200 and "Ayodhya" in r.read().decode("utf-8")
-        req = urllib.request.Request(url + "/pause", data=b"", method="POST", headers={"Origin": url})
+        import re
+        page = urllib.request.urlopen(url + "/?view=paper", timeout=10).read().decode("utf-8")
+        token = re.search(r"name='csrf' value='([^']+)'", page).group(1)
+        req = urllib.request.Request(url + "/pause", data=f"csrf={token}".encode(), method="POST", headers={"Origin": url})
         urllib.request.urlopen(req, timeout=5).read()
         assert os.path.exists(os.path.join(str(tmp_path), "PAUSE"))   # the bot reads this file
     finally:

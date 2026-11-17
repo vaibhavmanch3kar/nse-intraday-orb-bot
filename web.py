@@ -9,13 +9,16 @@ access token through the static-IP proxy, and the token is saved to .kite_token.
 Runs inside bot.py automatically. To log in without the bot:  .venv\\Scripts\\python.exe web.py
 """
 
+import hmac
 import html
 import json
+import logging
 import os
+import secrets
 import sys
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlparse, urlsplit
 
 import config as C
 import jobs
@@ -29,6 +32,41 @@ except Exception:  # noqa: BLE001 - never stops the dashboard
     buildinfo, DASH_BUILD = None, None
 
 STATUS_FILE = os.path.join(C.DATA_DIR, "status.json")
+log = logging.getLogger("ayodhya")
+
+# ---------------------------------------------------------------- request safety
+# Every button that changes something (pause, stop, opening balance, Zerodha logout) must come from this
+# dashboard's own page: the browser's Origin (or Referer) must be exactly this dashboard, the Host header must
+# be this dashboard (so another website can't pose as it via DNS tricks), and the form must carry CSRF_TOKEN,
+# a secret made fresh every time the dashboard starts and only ever written into its own pages.
+CSRF_TOKEN = secrets.token_urlsafe(32)
+LOCAL_HOSTS = ("127.0.0.1", "localhost")
+
+
+def csrf_field():
+    return f"<input type='hidden' name='csrf' value='{CSRF_TOKEN}'>"
+
+
+def host_ok(host, port):
+    """The Host header names this dashboard (127.0.0.1 or localhost, on its own port)."""
+    try:
+        u = urlsplit("http://" + (host or ""))
+        return u.hostname in LOCAL_HOSTS and (u.port or 80) == port
+    except ValueError:
+        return False
+
+
+def origin_ok(origin, port):
+    """The page that sent a form is exactly this dashboard (not a look-alike such as 127.0.0.1:5000.example)."""
+    try:
+        u = urlsplit(origin or "")
+        return u.scheme == "http" and u.hostname in LOCAL_HOSTS and (u.port or 80) == port
+    except ValueError:
+        return False
+
+
+def csrf_ok(form):
+    return hmac.compare_digest((form.get("csrf") or [""])[0].encode(), CSRF_TOKEN.encode())
 
 
 def _kite_proxy():
@@ -308,7 +346,7 @@ def capital_card():
                f"onfocus=\"this.form.amount.value='custom'\"></label>")
     cancel = ("<form method='post' action='/paper-capital/cancel' style='display:inline' "
               "onsubmit=\"if(!confirm('Cancel the pending opening balance change?'))return false;this.confirm.value='yes'\">"
-              "<input type='hidden' name='confirm' value=''><button class='red'>Cancel pending change</button></form>"
+              f"<input type='hidden' name='confirm' value=''>{csrf_field()}<button class='red'>Cancel pending change</button></form>"
               if pending else "")
     state = (f"<span class='tag warn'>→ {_inr(float(pending['amount']))[:-3]} at next start</span>" if pending
              else "<span class='tag warn'>paper only</span>")
@@ -316,7 +354,7 @@ def capital_card():
 <span class="end"><b class="mono">{_inr(current)[:-3]}</b>{state}</span></summary>
 <form method="post" action="/paper-capital" onsubmit="return confirmCapital(this)" style="display:inline">
 <div class="opts">{radios}</div>
-<input type="hidden" name="confirm" value="">
+<input type="hidden" name="confirm" value="">{csrf_field()}
 <button>Save opening balance</button></form> {cancel}
 {capital_lines()}
 <div class="muted small" style="margin-top:6px">Now <b>{_inr(current)}</b>. A new amount takes effect when the bot next starts
@@ -691,10 +729,10 @@ def live_controls(s, running):
     label = "▶ Resume new entries" if paused else f"⏸ {T.name('pause')} · Pause new entries"
     return (f"<section class='card'><div class='hd'><span class='theme'>{T.term('controls')}</span></div>"
             f"<form method='post' action='/{'resume' if paused else 'pause'}' style='display:inline' "
-            f"onsubmit=\"return confirm('{ask}')\"><button class='ghost'>{label}</button></form>"
+            f"onsubmit=\"return confirm('{ask}')\">{csrf_field()}<button class='ghost'>{label}</button></form>"
             f"<form method='post' action='/stop' style='display:inline' "
             f"onsubmit=\"return confirm('Stop the bot? In live mode open positions keep their exchange stop-loss.')\">"
-            f"<button class='red'>■ Stop bot</button></form>"
+            f"{csrf_field()}<button class='red'>■ Stop bot</button></form>"
             f"<div class='muted small'>Both ask before acting. Open positions keep their stop.</div></section>")
 
 
@@ -1714,7 +1752,7 @@ def updates_section(s):
     def btn(action, label, ask, cls="ghost"):
         return (f"<form method='post' action='{action}' style='display:inline' "
                 f"onsubmit=\"if(!confirm('{ask}'))return false;this.confirm.value='yes'\">"
-                f"<input type='hidden' name='confirm' value=''><button class='{cls} small'>{label}</button></form>")
+                f"<input type='hidden' name='confirm' value=''>{csrf_field()}<button class='{cls} small'>{label}</button></form>")
     if p["dashboard_files"]:
         items.append(f"<li><b>Dashboard update waiting</b> ({html.escape(', '.join(p['dashboard_files']))}). "
                      "It applies when the dashboard restarts; the bot is not touched and keeps trading. "
@@ -1827,6 +1865,9 @@ class Handler(BaseHTTPRequestHandler):
         """Every page is drawn in the dashboard theme chosen in this browser (cookie; Default if none).
         The theme only changes the look; the request handling below is the same for every theme.
         Edited theme files are picked up here, without restarting the dashboard."""
+        if not host_ok(self.headers.get("Host"), self.server.server_address[1]):
+            self._send("forbidden: open the dashboard at http://127.0.0.1:%d" % C.WEB_PORT, 403, "text/plain")
+            return
         if T._ui:
             try:
                 T._ui.maybe_reload()
@@ -1947,19 +1988,11 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self._send("not found", 404, "text/plain")
 
-    def _paper_capital(self, origin):
-        """Save or cancel a PAPER opening-balance change. Needs the dashboard's own page (Origin/Referer)
-        and the confirmation the page adds after you click OK. Writes only data/paper_capital.json."""
+    def _paper_capital(self, form):
+        """Save or cancel a PAPER opening-balance change, after the confirmation the page adds when you
+        click OK. Writes only data/paper_capital.json."""
         from urllib.parse import quote
         import capital
-        if not origin:
-            self._send("forbidden: open the dashboard page to change the opening balance", 403, "text/plain")
-            return
-        length = int(self.headers.get("Content-Length") or 0)
-        if length > 10_000:
-            self._send("too large", 413, "text/plain")
-            return
-        form = parse_qs(self.rfile.read(length).decode("utf-8", "replace"))
         if form.get("confirm", [""])[0] != "yes":
             msg = "Not changed: the change needs your confirmation."
         elif self.path == "/paper-capital/cancel":
@@ -1974,15 +2007,11 @@ class Handler(BaseHTTPRequestHandler):
                 msg = f"Not changed: {e}"
         self._redirect("/?view=paper&msg=" + quote(msg))
 
-    def _restart(self, origin):
-        """Restart requests from the Settings page. They need the page's own Origin and the confirmation
-        it adds after you click OK. The bot is never stopped from here: it restarts itself when safe."""
+    def _restart(self, form):
+        """Restart requests from the Settings page (do_POST has already checked Host, Origin and CSRF_TOKEN),
+        after the confirmation the page adds when you click OK. The bot is never stopped from here: it
+        restarts itself when safe."""
         import restart
-        if not origin:
-            self._send("forbidden: use the Settings page", 403, "text/plain")
-            return
-        length = int(self.headers.get("Content-Length") or 0)
-        form = parse_qs(self.rfile.read(min(length, 10_000)).decode("utf-8", "replace"))
         if form.get("confirm", [""])[0] != "yes":
             self._redirect("/settings#updates")    # nothing done without the confirmation
             return
@@ -2003,17 +2032,28 @@ class Handler(BaseHTTPRequestHandler):
         self._redirect("/settings#updates")
 
     def do_POST(self):
-        # Browsers on other sites can't read the response, but they can POST: only accept same-origin.
+        # Other websites can't read the dashboard, but a page could try to send it a form: only forms from the
+        # dashboard's own pages are accepted (exact Origin/Referer, Host, and the per-start CSRF_TOKEN).
+        port = self.server.server_address[1]
         origin = self.headers.get("Origin") or self.headers.get("Referer") or ""
-        if origin and not origin.startswith(f"http://{C.WEB_HOST}:{C.WEB_PORT}"):
-            self._send("forbidden", 403, "text/plain")
+        if not host_ok(self.headers.get("Host"), port) or not origin_ok(origin, port):
+            self._send("forbidden: use the buttons on the dashboard page", 403, "text/plain")
+            return
+        length = int(self.headers.get("Content-Length") or 0)
+        if length > 10_000:
+            self._send("too large", 413, "text/plain")
+            return
+        form = parse_qs(self.rfile.read(length).decode("utf-8", "replace"))
+        if not csrf_ok(form):
+            self._send("forbidden: this page is out of date (the dashboard restarted). Reload it and try again.",
+                       403, "text/plain")
             return
         os.makedirs(C.DATA_DIR, exist_ok=True)
         if self.path in ("/paper-capital", "/paper-capital/cancel"):
-            self._paper_capital(origin)
+            self._paper_capital(form)
             return
         if self.path in ("/bot/restart-when-safe", "/bot/restart-cancel", "/dashboard/restart"):
-            self._restart(origin)
+            self._restart(form)
             return
         if self.path == "/pause":
             open(C.PAUSE_FILE, "w").close()
