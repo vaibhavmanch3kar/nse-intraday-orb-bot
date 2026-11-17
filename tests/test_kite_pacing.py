@@ -69,8 +69,47 @@ def test_a_waiting_job_never_blocks_the_bot():
     assert time.perf_counter() - t0 < 0.2
     assert not done.is_set()
     hold["s"] = 0.0
-    p._bot_busy_until = 0.0
+    p.store.state["busy_until"] = 0.0
     assert done.wait(3)
+
+
+def test_bot_and_dashboard_programs_share_one_budget(tmp_path):
+    """The bot and the dashboard are separate programs: a shared, locked file keeps them within 3 a second
+    together, and a dashboard job still waits while the bot fetches."""
+    path = str(tmp_path / "kite_pacing.json")
+    c = FakeClock()
+    bot = data_kite.Pacer(clock=c, sleep=c.sleep, hold=lambda: 0.0, store=data_kite.FileStore(path))
+    dash = data_kite.Pacer(clock=c, sleep=c.sleep, hold=lambda: 0.0, store=data_kite.FileStore(path))
+    slots = sorted([bot.wait_turn() for _ in range(3)] + [dash.wait_turn() for _ in range(3)])
+    assert all(slots[i + 3] - slots[i] > 1.0 for i in range(len(slots) - 3))
+    c.t = 10.0
+    bot.wait_turn()
+    assert dash.wait_turn(background=True) >= 10.0 + data_kite.BOT_BUSY_SEC
+
+
+def test_two_real_programs_stay_within_three_a_second(tmp_path):
+    import subprocess
+    import sys
+    path = str(tmp_path / "kite_pacing.json")
+    code = ("import sys,json;sys.path.insert(0,sys.argv[1]);import data_kite as d;"
+            "p=d.Pacer(clock=__import__('time').time,store=d.FileStore(sys.argv[2]),hold=lambda:0.0);"
+            "print(json.dumps([p.wait_turn() for _ in range(6)]))")
+    root = __import__("os").path.dirname(__import__("os").path.dirname(__import__("os").path.abspath(__file__)))
+    procs = [subprocess.Popen([sys.executable, "-B", "-c", code, root, path], stdout=subprocess.PIPE, text=True)
+             for _ in range(2)]
+    import json
+    slots = sorted(s for pr in procs for s in json.loads(pr.communicate(timeout=60)[0]))
+    assert len(slots) == 12
+    assert all(slots[i + 3] - slots[i] > 1.0 for i in range(len(slots) - 3))
+
+
+def test_unusable_shared_file_falls_back_without_blocking(tmp_path):
+    bad = tmp_path / "is_a_dir"
+    bad.mkdir()
+    (tmp_path / "is_a_dir.lock").mkdir()            # the lock file can't be opened
+    c = FakeClock()
+    p = data_kite.Pacer(clock=c, sleep=c.sleep, hold=lambda: 0.0, store=data_kite.FileStore(str(bad)))
+    assert p.wait_turn() == 0.0
 
 
 def at(hhmm, day=dt.date(2026, 11, 18)):

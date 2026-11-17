@@ -1636,7 +1636,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         """Every page is drawn in the dashboard theme chosen in this browser (cookie; Default if none).
-        The theme only changes the look; the request handling below is the same for every theme."""
+        The theme only changes the look; the request handling below is the same for every theme.
+        Edited theme files are picked up here, without restarting the dashboard."""
+        if T._ui:
+            try:
+                T._ui.maybe_reload()
+            except Exception:  # never let a theme check break a page
+                pass
         tok = T._ui.activate(T._ui.from_cookie(self.headers.get("Cookie"))) if T._ui else None
         try:
             self._get()
@@ -1798,11 +1804,15 @@ def serve():
 
 
 if __name__ == "__main__":
-    print(T.banner(f"{T.name('live_page')} dashboard only (no trading)"))
-    print(f"  Dashboard: http://{C.WEB_HOST}:{C.WEB_PORT}   (Ctrl+C to stop)")
+    # The dashboard is its own program: it never trades. The bot (bot.py) runs separately and keeps
+    # trading when this window is closed or restarted (for example to load a dashboard update).
+    print(T.banner(f"{T.name('live_page')} dashboard (the bot runs separately; this only shows it)"))
+    print(f"  Dashboard: http://{C.WEB_HOST}:{C.WEB_PORT}   (Ctrl+C or closing this window stops the dashboard only)")
     if "--no-browser" not in sys.argv:
         webbrowser.open(f"http://{C.WEB_HOST}:{C.WEB_PORT}")
     try:
         serve()
     except KeyboardInterrupt:
         pass
+    except OSError as e:   # port 5000 taken: another dashboard (or an older bot that still serves it)
+        print(f"  Not started: http://{C.WEB_HOST}:{C.WEB_PORT} is already in use ({e}).")

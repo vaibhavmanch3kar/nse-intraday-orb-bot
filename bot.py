@@ -2,7 +2,7 @@
 """
 Kite NSE intraday opening-range-breakout bot.
 
-    .venv\\Scripts\\python.exe bot.py          # PAPER mode (default), dashboard at http://127.0.0.1:5000
+    .venv\\Scripts\\python.exe bot.py          # PAPER mode (default); the dashboard is web.py (3-DASHBOARD.bat)
     New-Item STOP                             # graceful stop (or the dashboard's Stop button)
 
 Live trading needs DRY_RUN=false AND CONFIRM_LIVE=YES, plus today's Kite login.
@@ -14,7 +14,6 @@ import json
 import logging
 import os
 import sys
-import threading
 import time
 
 import archive
@@ -643,9 +642,21 @@ def main():
         log.warning(f"{T.APP} is already running - not starting a second copy "
                     "(dashboard: http://127.0.0.1:5000)")
         return
-    import web
-    threading.Thread(target=web.serve, daemon=True).start()
+    # The dashboard is its own program now (web.py, started by run_bot.ps1 or 3-DASHBOARD.bat), so it can
+    # be updated and restarted without touching the trading bot, and its slow pages never share this process.
+    if not dashboard_listening():
+        log.info(f"Dashboard not running - double-click 3-DASHBOARD.bat to open it "
+                 f"(http://{C.WEB_HOST}:{C.WEB_PORT}); the bot trades the same without it")
     Bot().run()
+
+
+def dashboard_listening(timeout=0.5):
+    import socket
+    try:
+        with socket.create_connection((C.WEB_HOST, C.WEB_PORT), timeout=timeout):
+            return True
+    except OSError:
+        return False
 
 
 if __name__ == "__main__":

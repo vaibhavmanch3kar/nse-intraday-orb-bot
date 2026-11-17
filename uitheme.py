@@ -146,6 +146,51 @@ def load():
 REGISTRY, THEMES = load()
 
 
+def _signature():
+    """(path, size, modified time) of every file under themes/: changes when any theme file changes."""
+    out = []
+    for d, _, files in os.walk(ROOT):
+        for f in files:
+            try:
+                st = os.stat(os.path.join(d, f))
+                out.append((os.path.join(d, f), st.st_size, st.st_mtime_ns))
+            except OSError:
+                pass
+    return tuple(sorted(out))
+
+
+_SIG = _signature()
+_checked = 0.0
+
+
+def maybe_reload(min_interval=2.0):
+    """Read the theme files again if any changed on disk (looked at no more than every `min_interval` s),
+    so a theme edit shows on the next page without restarting the dashboard. A broken edit is ignored:
+    the themes already loaded stay in use and the problem is listed in LOAD_ERRORS. Returns True if
+    the themes were reloaded."""
+    global REGISTRY, THEMES, _SIG, _checked
+    import time
+    now = time.monotonic()
+    if now - _checked < min_interval:
+        return False
+    _checked = now
+    sig = _signature()
+    if sig == _SIG:
+        return False
+    _SIG = sig
+    errors_before = len(LOAD_ERRORS)
+    try:
+        reg, themes = load()
+    except Exception as e:  # Default itself unreadable: keep what we have
+        LOAD_ERRORS.append(f"reload failed, kept the loaded themes: {e}")
+        return False
+    if len(LOAD_ERRORS) > errors_before:   # a theme is broken right now (half-saved edit?): keep the old set
+        LOAD_ERRORS.append("reload skipped, kept the loaded themes")
+        return False
+    REGISTRY, THEMES = reg, themes
+    return True
+
+
 def ids():
     return [e["id"] for e in REGISTRY["themes"]]
 
@@ -175,7 +220,7 @@ def reset(token):
 
 
 def active():
-    return THEMES[_active.get()]
+    return THEMES.get(_active.get()) or THEMES[DEFAULT]   # a theme removed by a reload falls back
 
 
 def _vars(d):

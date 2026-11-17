@@ -21,7 +21,6 @@ import os
 import re
 import threading
 import time
-from collections import deque
 
 import config as C
 from data_yahoo import IST, DataError
@@ -57,37 +56,93 @@ def candle_hold(now=None):
     return max(0.0, CANDLE_HOLD_SEC - into) if (now - open_t).total_seconds() >= C.INTERVAL_MIN * 60 else 0.0
 
 
+class MemoryStore:
+    """Pacing state for one process (tests, and the fallback if the shared file can't be used)."""
+
+    def __init__(self):
+        self.state = {"slots": [], "busy_until": 0.0}
+        self._lock = threading.Lock()
+
+    def transact(self, fn):
+        with self._lock:
+            return fn(self.state)
+
+
+class FileStore:
+    """Pacing state shared by the bot and the dashboard, which run as separate programs:
+    data/kite_pacing.json, read and written under an operating-system file lock (held for a moment only,
+    never while waiting). If the file can't be used, each program paces on its own (MemoryStore)."""
+
+    def __init__(self, path=None):
+        self._path = path
+        self._tlock = threading.Lock()
+        self._fallback = MemoryStore()
+
+    def path(self):
+        return self._path or os.path.join(C.DATA_DIR, "kite_pacing.json")
+
+    def transact(self, fn):
+        p = self.path()
+        with self._tlock:
+            try:
+                os.makedirs(os.path.dirname(os.path.abspath(p)), exist_ok=True)
+                with open(p + ".lock", "a+b") as lf:
+                    _os_lock(lf)
+                    try:
+                        try:
+                            with open(p, encoding="utf-8") as f:
+                                state = json.load(f)
+                        except (OSError, ValueError):
+                            state = {"slots": [], "busy_until": 0.0}
+                        out = fn(state)
+                        with open(p, "w", encoding="utf-8") as f:
+                            json.dump(state, f)
+                        return out
+                    finally:
+                        _os_unlock(lf)
+            except OSError:
+                return self._fallback.transact(fn)
+
+
+def _os_lock(f):
+    f.seek(0)
+    if os.name == "nt":
+        import msvcrt
+        msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)   # retries for ~10 s, then OSError -> fallback
+    else:
+        import fcntl
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+
+
+def _os_unlock(f):
+    f.seek(0)
+    if os.name == "nt":
+        import msvcrt
+        msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+    else:
+        import fcntl
+        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+
 class Pacer:
-    """Kite allows HIST_PER_SEC historical requests a second. Every request books a time slot, and the
-    slots are spaced so no second ever holds more than that. The bot comes first:
+    """Kite allows HIST_PER_SEC historical requests a second, for the bot and the dashboard together.
+    Every request books a time slot in a shared store, spaced so no second ever holds more than that.
+    The bot comes first:
 
     - a request from a dashboard job (Review, Scanner) books at most HIST_PER_SEC - 1 a second, so there
       is always room for the bot, and waits while the bot is fetching (BOT_BUSY_SEC after its last
       request) and during the first CANDLE_HOLD_SEC after each candle close;
-    - waiting happens outside the lock, so a sleeping request never holds anyone else up (v1.8.0 slept
-      while holding it, so the bot could queue behind a 50-stock scan)."""
+    - waiting happens outside any lock, so a sleeping request never holds anyone else up (v1.8.0 slept
+      while holding its lock, so the bot could queue behind a 50-stock scan)."""
 
-    def __init__(self, clock=time.monotonic, sleep=time.sleep, hold=candle_hold):
+    def __init__(self, clock=time.monotonic, sleep=time.sleep, hold=candle_hold, store=None):
         self.clock, self.sleep, self.hold = clock, sleep, hold
-        self._lock = threading.Lock()
-        self._slots = deque()          # booked start times, ascending
-        self._bot_busy_until = 0.0
+        self.store = store or MemoryStore()
 
     def wait_turn(self, background=False):
         while True:
-            with self._lock:
-                now = self.clock()
-                while self._slots and self._slots[0] < now - 1.0:
-                    self._slots.popleft()
-                if background:
-                    wait = max(self._bot_busy_until - now, self.hold())
-                    if wait > 0:
-                        slot = None
-                    else:
-                        slot = self._book(now, max(1, HIST_PER_SEC - 1))
-                else:
-                    self._bot_busy_until = now + BOT_BUSY_SEC
-                    slot = self._book(now, HIST_PER_SEC)
+            now = self.clock()
+            slot, wait = self.store.transact(lambda st: self._book(st, now, background))
             if slot is None:
                 self.sleep(min(wait, 1.0))
                 continue
@@ -95,15 +150,25 @@ class Pacer:
                 self.sleep(slot - now)
             return slot
 
-    def _book(self, now, limit):   # caller holds the lock
-        slot = max(now, self._slots[-1] if self._slots else now)
-        if len(self._slots) >= limit:
-            slot = max(slot, self._slots[-limit] + 1.0 + 0.02)
-        self._slots.append(slot)
-        return slot
+    def _book(self, st, now, background):
+        slots = [x for x in st.get("slots", []) if x >= now - 1.0]
+        st["slots"] = slots
+        if background:
+            wait = max(st.get("busy_until", 0.0) - now, self.hold())
+            if wait > 0:
+                return None, wait
+            limit = max(1, HIST_PER_SEC - 1)
+        else:
+            st["busy_until"] = max(st.get("busy_until", 0.0), now + BOT_BUSY_SEC)
+            limit = HIST_PER_SEC
+        slot = max(now, slots[-1] if slots else now)
+        if len(slots) >= limit:
+            slot = max(slot, slots[-limit] + 1.0 + 0.02)
+        slots.append(slot)
+        return slot, 0.0
 
 
-_pacer = Pacer()
+_pacer = Pacer(clock=time.time, store=FileStore())   # wall clock: shared between programs
 
 
 class PlanError(DataError):
