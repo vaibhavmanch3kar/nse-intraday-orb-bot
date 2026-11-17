@@ -233,16 +233,27 @@ def data_tokens(page):
     body = re.sub(r"<svg\b.*?</svg>", " ", body, flags=re.S | re.I)
     text = html.unescape(re.sub(r"<[^>]+>", " ", body))
     text = re.sub(r"<!doctype html>", " ", text, flags=re.I)
+    # the live clock's seconds tick between two renders; they are not data (HH:MM is still compared)
+    text = re.sub(r"\b(\d{1,2}:\d{2}):\d{2}\b", r"\1", text)
     return _TOKEN.findall(text), charts
+
+
+def same_in_every_theme(get):
+    """Render with every theme; retry (up to 3 times) when the clock changes minute between renders."""
+    for _attempt in range(3):
+        seen = {tid: get(tid) for tid in IDS}
+        if all(v == seen["default"] for v in seen.values()):
+            break
+    return seen
 
 
 @pytest.mark.parametrize("path", PAGES)
 def test_same_data_same_numbers_signs_and_status_words_in_every_theme(server, path):
-    seen = {}
-    for tid in IDS:
+    def get(tid):
         code, page, _ = fetch(server + path, tid)
         assert code == 200, (tid, path, code)
-        seen[tid] = data_tokens(page)
+        return data_tokens(page)
+    seen = same_in_every_theme(get)
     base = seen["default"]
     assert base[0], path
     for tid in IDS[1:]:
@@ -250,12 +261,11 @@ def test_same_data_same_numbers_signs_and_status_words_in_every_theme(server, pa
 
 
 def test_live_api_regions_carry_identical_data_in_every_theme(server):
-    out = {}
-    for tid in IDS:
+    def get(tid):
         code, body, _ = fetch(server + "/api/live?view=paper", tid)
         assert code == 200
-        regions = json.loads(body)["regions"]
-        out[tid] = {k: data_tokens(v) for k, v in regions.items()}
+        return {k: data_tokens(v) for k, v in json.loads(body)["regions"].items()}
+    out = same_in_every_theme(get)
     assert out["roblox_inspired"] == out["default"] == out["minecraft_inspired"]
 
 
