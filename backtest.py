@@ -106,7 +106,8 @@ def simulate(data, start_cash, verbose=True, index_data=None, vix=None, trades_p
                     # the same Kavach checks as the live bot (kavach.py). Open losses count toward the daily
                     # limit (prices=last_close); the size comes from booked equity, as before.
                     decision = kavach.pre_trade(st, s, d, entry, stop, day, prices=last_close, equity=st.equity(),
-                                                risk_mult=mult, sector_of=strategy.index_for)
+                                                risk_mult=mult, bar_volume=sig.get("volume"),
+                                                sector_of=strategy.sector_for)
                     if decision.ok:
                         st.record_entry(s, d, decision.qty, entry, stop, strategy.target_for(entry, stop, d),
                                         b["t"], {"held": 0, **(sig["context"] or {})})
@@ -135,7 +136,8 @@ def simulate(data, start_cash, verbose=True, index_data=None, vix=None, trades_p
                 ev = strategy.evaluate(bars, i, index_data.get(strategy.index_for(s)))
                 if ev["signal"]:
                     pending[s] = {"direction": ev["signal"], "stop": ev["stop"], "day": day,
-                                  "rank": ev["vol_ratio"] or 0.0, "context": ev["context"]}
+                                  "rank": ev["vol_ratio"] or 0.0, "context": ev["context"],
+                                  "volume": b.get("v")}
         # mark open positions to this bar's close, so drawdowns inside open trades are counted
         equity_curve.append((t, st.equity(last_close)))
 

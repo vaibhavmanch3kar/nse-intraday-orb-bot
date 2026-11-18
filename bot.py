@@ -563,7 +563,7 @@ class Bot:
                 self.state, sym, direction, ref, stop, today, prices=self.prices, risk_mult=mult, now=now,
                 square_off=square_off_time, paused=paused, balance_ok=self.balance_ok,
                 balance_problem=self.balance_problem, data=data, signal_close=last["c"],
-                sector_of=strategy.index_for)
+                bar_volume=last.get("v"), sector_of=strategy.sector_for)
             if not decision.ok:
                 if decision.check == "paused":
                     row["reason"] += " (paused)"
