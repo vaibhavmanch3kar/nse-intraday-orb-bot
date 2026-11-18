@@ -32,7 +32,9 @@ import safefile
 IST = dt.timezone(dt.timedelta(hours=5, minutes=30))
 ROOT = os.path.dirname(os.path.abspath(__file__))
 MAX_RESTARTS = 5            # automatic starts per day (crash restarts + watchdog starts together)
-HANG_SEC = 300              # no heartbeat for this long while the bot process exists = not responding
+HANG_SEC = 600              # no heartbeat for this long while the bot process exists = not responding.
+                            # 10 minutes, not 5: with the internet down one round of price requests can
+                            # take 3-4 minutes of timeouts and retries, and that bot is slow, not stuck
 WATCH_FROM = "09:00"        # the watchdog acts from here to MARKET_CLOSE on trading days
 MUTEX = "Local\\AyodhyaORB_bot"
 KEEP_EVENTS = 60
@@ -114,6 +116,7 @@ def bot_started(now=None, pid=None):
         d["stopped"] = None
         add_event(d, "started", "bot started again after a deliberate stop", now)
     _save(d)
+    beat(now, pid)
     return d
 
 
@@ -233,6 +236,14 @@ def check(now=None, probe=None):
             add_event(d, "restart", f"the bot was not running: started it "
                                     f"({d['restarts']} of {MAX_RESTARTS} today)", now)
             done.append("started bot")
+    else:
+        age, pid = heartbeat(now)
+        trading = now >= _at(now.date(), C.MARKET_OPEN) + dt.timedelta(seconds=HANG_SEC)
+        if age is not None and pid and age > HANG_SEC and trading:
+            probe.kill(pid)
+            add_event(d, "hang", f"the bot had not responded for {age / 60:.0f} minutes: ended it so that it "
+                                 f"starts again (open positions keep their exchange stop-loss)", now)
+            done.append(f"ended hung bot {pid}")
     _save(d)
     return done
 

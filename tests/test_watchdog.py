@@ -355,3 +355,64 @@ def test_live_page_and_popup_feed_carry_the_watchdog_record(monkeypatch):
 def test_no_watchdog_events_means_no_banner():
     import web
     assert web.watchdog_banner() == "" and web.watchdog_notices() == []
+
+
+# ---------------------------------------------------------------- item 6: a bot that stopped responding
+def test_heartbeat_age_and_pid():
+    watchdog.beat(t("10:00"), pid=4321)
+    age, pid = watchdog.heartbeat(t("10:03"))
+    assert (age, pid) == (180.0, 4321)
+    os.remove(watchdog.heartbeat_path())
+    assert watchdog.heartbeat(t("10:03")) == (None, None)
+
+
+def test_check_ends_a_bot_that_has_not_responded_for_ten_minutes():
+    assert watchdog.HANG_SEC == 600
+    watchdog.beat(t("10:00"), pid=4321)
+    p = Probe()
+    assert watchdog.check(t("10:09"), p) == [] and p.did == []            # slow, not stuck
+    assert watchdog.check(t("10:11"), p) == ["ended hung bot 4321"] and p.did == [("kill", 4321)]
+    e = watchdog.load(t("10:12"))["events"][-1]
+    assert e["kind"] == "hang" and "11 minutes" in e["text"]
+    assert watchdog.notices(t("10:12"))[-1]["title"] == "The bot stopped responding"
+    assert watchdog.after_exit(1, now=t("10:12")) == ("RESTART", "1 of 5")  # then the launcher starts it again
+
+
+def test_check_never_ends_a_bot_without_a_heartbeat_or_before_trading_starts():
+    p = Probe()
+    assert watchdog.check(t("10:30"), p) == [] and p.did == []            # no heartbeat file: older bot
+    watchdog.beat(t("09:00"), pid=4321)
+    assert watchdog.check(t("09:20"), p) == [] and p.did == []            # before 09:25: still starting up
+    watchdog.mark_stopped("Stop button", now=t("09:30"))
+    assert watchdog.check(t("10:30"), p) == [] and p.did == []            # stopped on purpose: nothing to end
+
+
+def test_running_bot_keeps_its_heartbeat_fresh(monkeypatch):
+    beats = []
+    monkeypatch.setattr(watchdog, "beat", lambda *a, **k: beats.append(1))
+    run_bot_until_stopped(monkeypatch, lambda b: open(C.STOP_FILE, "w").close())
+    assert len(beats) >= 2                                              # every round of the loop
+    b = bot.Bot()
+    import time
+    clock = [0.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(time, "sleep", lambda s: clock.__setitem__(0, clock[0] + s))
+    beats.clear()
+    b.nap(60)
+    assert 3 <= len(beats) <= 4                                         # about every 15 s while waiting
+
+
+def test_real_kill_ends_only_the_named_process():
+    import subprocess
+    import sys
+    if os.name != "nt":
+        pytest.skip("uses taskkill")
+    victim = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    try:
+        watchdog.RealProbe().kill(victim.pid)
+        assert victim.wait(15) != 0 and other.poll() is None
+    finally:
+        for p in (victim, other):
+            if p.poll() is None:
+                p.kill()

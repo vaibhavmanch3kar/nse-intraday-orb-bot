@@ -418,6 +418,7 @@ class Bot:
         bars_by_sym = {}
         lags = []
         fetched = marketdata.fetch_many(C.WATCHLIST, C.INTERVAL_MIN, "10d", C.FETCH_WORKERS)
+        watchdog.beat()                                 # the slow part of a round (price requests) is done
         for sym in C.WATCHLIST:
             got = fetched.get(sym)
             if isinstance(got, Exception) or got is None:
@@ -813,6 +814,7 @@ class Bot:
             self.note(f"Watchdog at {e['at'][11:19]}: {e['text']}", logging.WARNING)
         waiting_login_logged = False
         while True:
+            watchdog.beat()                             # alive and going round: see watchdog.check (hang detection)
             if os.path.exists(C.STOP_FILE):
                 self.note("STOP file found - Ayodhya ORB shutting down (open positions stay protected by exchange stops in live mode)")
                 self.journal_finish(now_ist(), "stopped")
@@ -881,10 +883,14 @@ class Bot:
         """Sleep between checks, but wake within a second when asked to stop (STOP file or launcher gone),
         instead of up to a minute later. Nothing else changes: the next check runs as before."""
         end = time.monotonic() + seconds
+        beat_at = time.monotonic()
         while True:
             left = end - time.monotonic()
             if left <= 0 or os.path.exists(C.STOP_FILE) or self.launcher_gone():
                 return
+            if time.monotonic() - beat_at >= 15:        # waiting between rounds is healthy: keep the heartbeat fresh
+                watchdog.beat()
+                beat_at = time.monotonic()
             time.sleep(min(1.0, left))
 
 

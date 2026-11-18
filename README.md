@@ -86,7 +86,7 @@ It also adds the **watchdog** ("Kite ORB Watchdog" task, `watchdog.py`), which k
 - If the bot ends with an error, it is started again after 10 seconds. The full error is saved in
   `data\logs\crash_<time>.txt`; every start and exit is listed in `data\logs\launcher.log`.
 - Every 5 minutes from 9:05 AM to 3:45 PM it checks that the bot and the dashboard are running and starts whichever
-  is missing. It also ends a bot that has not responded for 5 minutes, so that it starts again.
+  is missing. It also ends a bot that has not responded for 10 minutes, so that it starts again.
 - It gives up after 5 automatic starts in a day, and it never starts a bot you stopped on purpose that day
   (Stop button, `7-STOP-BOT.bat`, or stopping the task) until you start it yourself or the next 9:00 AM start.
 - A bot started by the watchdog is an ordinary start: paper unless real money was armed that day, and it re-checks
