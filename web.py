@@ -173,8 +173,9 @@ def read_status():
     try:
         if not fresh:
             st = os.stat(STATUS_FILE)
-            key = (STATUS_FILE, st.st_mtime_ns, st.st_size)
-            if _STATUS["key"] != key:
+            # a replaced file is a new file (st_ino changes) even if its time and size happen to match
+            key = (STATUS_FILE, st.st_mtime_ns, st.st_size, st.st_ino)
+            if STATUS_POLL_SEC <= 0 or _STATUS["key"] != key:
                 with open(STATUS_FILE, encoding="utf-8") as f:
                     text = f.read()
                 json.loads(text)                   # a half-written file is not kept

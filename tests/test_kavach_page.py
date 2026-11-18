@@ -83,6 +83,7 @@ def test_kavach_route(tmp_path, monkeypatch):
 # ---------------------------------------------------------------- the dashboard touches the status file rarely
 def test_status_is_opened_only_when_it_changed(tmp_path, monkeypatch):
     path = write_status(tmp_path, monkeypatch, marker=1)
+    monkeypatch.setattr(web, "STATUS_POLL_SEC", 1e-9)             # look every time, open only on a change
     opened = []
     real_open = open
 
