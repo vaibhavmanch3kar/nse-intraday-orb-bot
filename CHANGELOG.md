@@ -6,6 +6,99 @@ Every version is on the [Releases page](https://github.com/vaibhavmanch3kar/nse-
 with a ZIP you can download. To go back to an older version, download that version's ZIP.
 Your settings (Windows user environment variables) and your `data` folder are not part of the ZIP, so keep them.
 
+## v2.0 (18 Nov 2026, branch `release/ayodhya-orb-2.0`): safety, research and readiness
+
+Step-by-step guide with screenshots: [docs/GUIDE-2.0.md](docs/GUIDE-2.0.md).
+What the evidence shows: [docs/PRODUCTION-READINESS.md](docs/PRODUCTION-READINESS.md).
+
+**The trading rules are unchanged except for one counting rule** (the cool-down, below). On the one-year candle
+archive to 17 Nov 2026 the backtest was 333 trades, −16.46% before that change and is 334 trades, −16.18% after
+it. The rules still lose money after costs and no idea tested in the lab has passed: paper trading stays the
+default, and real money stays off unless you set it up yourself ([docs/LIVE-TRADING.md](docs/LIVE-TRADING.md)).
+843 offline tests pass.
+
+### Reliability
+
+- **Watchdog.** A second scheduled task checks every 5 minutes in market hours and starts the bot or the
+  dashboard again if either has stopped (at most five times a day). An error that ends the bot is saved in full
+  to `data\logs\crash_<time>.txt`; a bot that stops responding for 10 minutes is ended and started again.
+  **Stop** is remembered: the watchdog leaves a bot you stopped alone.
+- **Fixed:** the bot could end silently when Windows refused to replace a file another program was reading.
+  Every save now waits out a busy file.
+- **Fixed:** the day's counters were started only at the first round after the open; they now start before it.
+- **Popups** on every page when a Zerodha position changes, when the watchlist stops updating, and for every
+  automatic restart.
+
+### Kavach: one risk engine
+
+- Every new position, in paper, real money and backtests, is decided by the same nine checks in the same order:
+  time, pause, balance, data, account limits, price, sector, size, liquidity. A refused signal names the check
+  and the reason.
+- **Real money never trades on bad prices:** delayed or fallback (Yahoo) prices, candles that fail validation, a
+  signal older than 5 minutes, or a missing index candle while the index filter is on.
+- New optional limits: positions per sector, and order size against the candle's volume.
+- **Square-off moved from 15:10 to 15:00**, clear of Zerodha's own 3:12 PM square-off for F&O stocks.
+- **Changed:** positions that close on the same candle are counted **losses first** for the "three losses in a
+  row" cool-down. Before, the count depended on which exit happened to be recorded first, so the bot and the
+  backtest could disagree about a cool-down.
+- **Fixed:** on a day money is added to the account, a restart no longer wipes the day's booked loss out of the
+  balance trades are sized from. A gain is never added, so the figure can only be the same or smaller.
+
+### Execution safety (real money)
+
+- Every order is written to an append-only record before it is sent and carries its own tag. A lost reply is
+  looked up by that tag instead of sending the order again. An order ID is not treated as a fill.
+- Partial fills, rejections, timeouts and late fills are handled; the stop-loss order is verified when placed
+  and checked again on every round.
+- The bot's record is compared with Zerodha at every start and every 5 minutes. A mismatch holds new entries;
+  it never opens or closes a position on its own.
+- A margin check before each entry; if it cannot be made, no order is sent.
+
+### Research and portfolio
+
+- **Yantrashala (strategy lab):** every idea runs through the one backtest engine with no view of future
+  candles, is judged by a rule fixed in advance (walk-forward, a range that chance allows, profit factor, share
+  of positive months), and a passing idea is registered and judged again only on later data. Six ideas tested;
+  none passed.
+- **Chanakya (research assistant):** for each watchlist stock, measured checks for and against a trade, the
+  plan with size and charges, Kavach's answer and the past record with its sample size. A count, not a
+  probability. No AI model, no orders.
+- **Rajya (portfolio):** allocation, concentration, risk budget, past movement, correlation, what-if arithmetic,
+  booked result and drawdown, and a rebalancing simulation that orders nothing. Reads Zerodha only.
+- **One-year backtest page** under Review: runs the present rules over the whole archive from the dashboard in
+  about ten seconds.
+
+### Dashboard
+
+- **All eight pages in the navigation**: Live, Trades, Review, Scanner, Chanakya, Kavach, Rajya, Yantrashala.
+  The row scrolls on narrow screens and on phones.
+- **System health** card on the Live page with twelve checks, an alert history and `/api/health`.
+- **Start** button when the bot is not running. It asks first, says which mode the bot would start in and cannot
+  change the mode.
+- **Readiness** page (`/readiness`): three verdicts from evidence, with the tests behind every requirement.
+- Review and Scanner builds can be cancelled; a cancelled build saves nothing.
+- Clearer wording: a candle's age is no longer shown as a data delay; money added today is explained; a day
+  without trades says why; the page says so when the account in view is not the one the bot trades.
+
+### Security
+
+- **Today's Zerodha login is stored protected by Windows** (readable only by your Windows user on this PC).
+  An older login file is still read and is then protected. Versions before 2.0 cannot read the protected file:
+  after going back to one, log in again.
+- **`secure_secrets.py`** can move the API key, API secret and proxy login out of the plain Windows settings
+  into the same protected store, and back. It never shows a value and never loses a key on a failure.
+- **Logs without secrets:** API keys, the proxy login and the access token are removed before anything is
+  written, tracebacks included. Every log line is also saved as JSON in `data\logs\events_<date>.jsonl`.
+- Tests prove from the code that only one module can send or cancel an order, that only the bot loads it, and
+  that the dashboard and all analysis pages cannot reach it.
+
+### Readiness
+
+- **`paper_replay.py`** drives the real trading loop through every archived day on virtual money and compares
+  it with the backtest. On one year: 328 trades in each, all 328 identical.
+- **`readiness.py`** maps 25 requirements to the tests that prove them and writes the report. Platform: pass.
+  Strategy: fail (no proven edge). Operations: open items listed.
+
 ## v1.9.0 (17 Nov 2026): Paper | Real Money control, Zerodha logout, fast Review and Scanner, six Indian themes
 
 The strategy, risk limits, entry and exit rules and the backtest are unchanged: on frozen data the backtest is

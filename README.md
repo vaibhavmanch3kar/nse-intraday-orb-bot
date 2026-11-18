@@ -337,6 +337,8 @@ Each December, add next year's NSE holidays to `nse_holidays.json` (the list is 
 
 ## More documentation
 
+- **[2.0 step-by-step guide, with screenshots](docs/GUIDE-2.0.md)**: a trading day on the eight pages, health, secrets, logs, readiness
+- **[Production-readiness report](docs/PRODUCTION-READINESS.md)**: what the tests, the paper replay and the lab show
 - **[How the strategy works, and the test results](docs/STRATEGY.md)**: rules, risk limits, backtest, Time Machine, files
 - **[Real-money trading with Zerodha (advanced)](docs/LIVE-TRADING.md)**: Kite Connect app, static IP, daily login, safety switches
 - **[Paid Kite Connect plan for real-time data](docs/KITE-CONNECT-PLAN.md)**: 500 credits a month, adding credits, creating the app, switching the bot
