@@ -1697,6 +1697,72 @@ KAVACH_CHECKS = (
 )
 
 
+def kavach_zerodha_card(s):
+    """REAL MONEY: the bot's last comparison of its own record with Zerodha, and whether new entries are held."""
+    if s.get("mode") != "live":
+        return ""
+    r = s.get("recon") or {}
+    hold = s.get("entry_hold")
+    if not r:
+        body = "<div class='muted'>Not compared yet: the bot does it at every start and every few minutes.</div>"
+    elif not r.get("ok"):
+        body = (f"<div class='warn'>⚠ Zerodha could not be read at {html.escape(str(r.get('at') or '')[11:19])} "
+                f"({html.escape(str(r.get('error') or ''))}). The bot tries again.</div>")
+    else:
+        lines = [f"<li class='dn'><b>{html.escape(p)}</b></li>" for p in r.get("problems") or []]
+        lines += [f"<li>Dropped {html.escape(x)}: Zerodha no longer holds it.</li>" for x in r.get("dropped") or []]
+        lines += [f"<li>{html.escape(k)} corrected to {v} shares.</li>" for k, v in (r.get("resized") or {}).items()]
+        lines += [f"<li>Cancelled a leftover order: {html.escape(x)}</li>" for x in r.get("cancelled") or []]
+        lines += [f"<li class='muted'>{html.escape(x)}</li>" for x in r.get("notes") or []]
+        ok = "<span class='up'>matches Zerodha</span>" if not r.get("problems") else "<b class='dn'>DOES NOT MATCH</b>"
+        body = (f"<div>The bot's record {ok} · checked {html.escape(str(r.get('at') or '')[11:19])}"
+                f"{' (at the start)' if r.get('startup') else ''}</div>"
+                f"<ul style='margin:6px 0 0 18px;padding:0'>{''.join(lines)}</ul>")
+    held = (f"<div class='banner' role='alert' style='border-color:var(--dn);margin-top:8px'><b>New entries are on "
+            f"hold:</b> {html.escape(hold)}. Open positions are still managed and keep their exchange stops.</div>"
+            if hold else "")
+    return (f"<section class='card' id='zmatch'><div class='hd'>Bot's record against Zerodha</div>{body}{held}"
+            f"<div class='muted small' style='margin-top:6px'>The bot corrects only what is safe (a position Zerodha "
+            f"no longer holds, a leftover working order, a missing stop). It never opens or closes a position "
+            f"because of a mismatch.</div></section>")
+
+
+ORDER_ROLE_WORDS = {"E": "entry", "S": "stop-loss", "X": "exit", "F": "flatten"}
+
+
+def kavach_orders_card(s, now=None):
+    """Today's order record (orders.py): every real order the bot asked for and what became of it. Read-only."""
+    import datetime as dt
+    import orders
+    if s.get("mode") != "live":
+        return ""
+    now = now or dt.datetime.now(dt.timezone(dt.timedelta(hours=5, minutes=30)))
+    latest = orders.Journal("live", now=lambda: now).latest()
+    rows = []
+    for tag, o in sorted(latest.items(), key=lambda kv: str(kv[1].get("at") or ""), reverse=True)[:40]:
+        st = str(o.get("status") or "")
+        cls = ("sig" if st == "COMPLETE" else "dn" if st in ("REJECTED", "UNCERTAIN", "NOT SENT") else
+               "in" if st in ("TRIGGER PENDING", "OPEN") else "")
+        fill = (f"{int(o.get('filled') or 0)} @ {_fmt(o.get('avg'))}" if o.get("filled") else "-")
+        rows.append(
+            f"<tr><td class='first' data-label='Time'>{html.escape(str(o.get('at') or '')[11:19])}</td>"
+            f"<td data-label='Order'><b>{html.escape(str(o.get('symbol') or '?'))}</b> "
+            f"{html.escape(str(o.get('side') or ''))} {html.escape(str(o.get('qty') or ''))} "
+            f"<span class='muted'>{html.escape(ORDER_ROLE_WORDS.get(str(o.get('role')), 'order'))}</span></td>"
+            f"<td data-label='Status'><span class='st {cls}'>{html.escape(st)}</span></td>"
+            f"<td data-label='Filled' class='r'>{fill}</td>"
+            f"<td data-label='Note' style='white-space:normal' class='muted small'>"
+            f"{html.escape(str(o.get('note') or o.get('order_id') or ''))}</td></tr>")
+    table = (f"<table class='rt'><tr><th>Last change</th><th>Order</th><th>Status</th><th class='r'>Filled</th>"
+             f"<th>Zerodha order / note</th></tr>{''.join(rows)}</table>" if rows else
+             "<div class='muted' style='padding:10px 14px'>No real order has been asked for today.</div>")
+    return (f"<section class='card flush' id='orders'><div class='hd'>Order record today <span class='end'>"
+            f"<span class='tag'>{len(latest)} order{'s' if len(latest) != 1 else ''}</span></span></div>{table}"
+            f"<div class='muted small' style='padding:8px 14px 12px'>Each order is written down before it is sent "
+            f"and after every change (data\\orders). Filled quantities come from Zerodha's order status, never "
+            f"from the order id alone.</div></section>")
+
+
 def kavach_feed_card(s):
     f = s.get("feed") or {}
     if not f:
@@ -1760,6 +1826,8 @@ read-only</span></div>
 <div class="kgrid">{usage}</div>
 {live_signals(s)}
 {kavach_feed_card(s)}
+{kavach_zerodha_card(s)}
+{kavach_orders_card(s)}
 <section class="card flush"><div class="hd">Limits in force</div>
 <table class="rt"><tr><th>Limit</th><th class="r">Now</th><th class="r">Built-in</th><th>Status</th></tr>{rows}</table>
 <div class="muted small" style="padding:8px 14px 12px">A limit can be changed only in the bot's own settings, never

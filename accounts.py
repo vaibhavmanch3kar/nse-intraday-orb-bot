@@ -228,7 +228,7 @@ def clear_zerodha_cache():
 EVENTS_POLL_SEC = 5
 EVENTS_IDLE_SEC = 60
 MAX_EVENTS = 100
-BOT_TAG = "orbbot"                       # broker.LiveBroker tags every order it places
+BOT_TAG = "orb"                          # every order of the bot has a tag starting with this (orders.py)
 _events = {"seq": 0, "items": [], "orders": None, "positions": None, "day": None, "at": None,
            "error": None, "login_needed": False}
 _events_lock = threading.Lock()
@@ -287,7 +287,7 @@ def diff_events(prev_orders, cur_orders, prev_pos, cur_pos):
         ev = {"kind": "partial" if partial else "fill", "order_id": oid, "symbol": o["symbol"],
               "exchange": o["exchange"], "product": o["product"], "side": o["side"], "qty": got,
               "filled": o["filled"], "quantity": o["quantity"], "pending": max(0, o["quantity"] - o["filled"]),
-              "price": o["avg"], "status": o["status"], "by_bot": o["tag"] == BOT_TAG, "time": o["time"]}
+              "price": o["avg"], "status": o["status"], "by_bot": str(o["tag"] or "").startswith(BOT_TAG), "time": o["time"]}
         events.append(ev)
         touched[(o["exchange"], o["symbol"], o["product"])] = ev       # the last fill of the stock gets it
     for key in sorted(set(prev_pos) | set(cur_pos), key=lambda k: tuple(str(x) for x in k)):
