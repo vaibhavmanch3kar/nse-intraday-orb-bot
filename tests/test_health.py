@@ -103,6 +103,7 @@ def test_feed_login_books_and_holds(isolated):
     assert st(mode="paper")["recon"] == "off"
     assert st(entry_hold="positions do not match Zerodha")["entries"] == "bad"
     assert st(paused=True)["entries"] == "warn" and st(cooldown_until="2026-11-20")["entries"] == "warn"
+    assert st(cooldown_until="2026-11-18")["entries"] == "ok" and st(cooldown_until="2026-11-14")["entries"] == "ok"   # over
     after = dt.datetime(2026, 11, 18, 13, 0, tzinfo=IST)
     beat(isolated, after)
     assert states(health.checks(after, good(after), login=True, disk_free_gb=40.0))["entries"] == "off"

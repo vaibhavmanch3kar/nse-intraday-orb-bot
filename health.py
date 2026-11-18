@@ -191,7 +191,8 @@ def checks(now=None, status=None, login=None, disk_free_gb=None, store=None):
         out.append(_check("entries", "New trades", BAD, f"held: {s['entry_hold']}"))
     elif s.get("paused"):
         out.append(_check("entries", "New trades", WARN, "paused by you: open positions are still managed"))
-    elif s.get("cooldown_until"):
+    elif s.get("cooldown_until") and now.date().isoformat() < str(s["cooldown_until"]):
+        # the saved date stays in the bot's record after it has passed: only a date still ahead holds trades back
         out.append(_check("entries", "New trades", WARN, f"cool-down until {s['cooldown_until']}"))
     elif now.strftime("%H:%M") > C.LAST_ENTRY:
         out.append(_check("entries", "New trades", OFF, f"none after {C.LAST_ENTRY} (the last-entry time); open "
