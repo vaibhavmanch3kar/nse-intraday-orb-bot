@@ -307,9 +307,17 @@ class Bot:
             self.balance_problem = (None if self.balance_ok else
                                     "positions are open and today's Zerodha balance was not read before them")
             return
+        # A loss already booked today counts against this morning's balance. On a day money is added, Zerodha's
+        # "cash now" is larger than the morning balance, so the morning figure is the smaller one and, read again
+        # after a restart, it used to wipe the day's loss out of the bot's cash (18 Nov 2026: ₹4,870.60 shown
+        # after a ₹3.96 loss). A gain is never added: the balance read here can only be the same or smaller.
+        d0 = self.state.d
+        lost_today = (min(float(d0.get("day_pnl") or 0.0), 0.0)
+                      if d0.get("day") == today and d0.get("balance_day") == today else 0.0)
         try:
             avail = (self.kite.margins("equity") or {}).get("available") or {}
-            vals = [float(avail[k]) for k in ("opening_balance", "live_balance") if avail.get(k) is not None]
+            vals = [float(avail[k]) + (lost_today if k == "opening_balance" else 0.0)
+                    for k in ("opening_balance", "live_balance") if avail.get(k) is not None]
             bal = min(vals) if vals else None
         except Exception as e:  # noqa: BLE001 - network, proxy or Zerodha error: no new trades
             bal, err = None, type(e).__name__
@@ -329,7 +337,10 @@ class Bot:
         d.update(balance_day=today, balance_inr=bal, balance_at=now.isoformat(timespec="seconds"))
         self.state.save()
         self.balance_ok, self.balance_problem = True, None
-        self.note(f"REAL MONEY: balance from Zerodha ₹{bal:,.2f} - trades are sized from it")
+        self.note(f"REAL MONEY: balance from Zerodha ₹{bal:,.2f} - trades are sized from it"
+                  + (f" (this morning's balance less today's booked loss of ₹{-lost_today:,.2f})"
+                     if lost_today and avail.get("opening_balance") is not None
+                     and abs(bal - (float(avail["opening_balance"]) + lost_today)) < 0.005 else ""))
         livemode.log("balance", "read", f"₹{bal:,.2f}")
 
     def apply_paper_capital(self):
