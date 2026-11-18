@@ -294,15 +294,19 @@ def verdicts(reqs, replay, strategy, state):
                         f"the checkpoint needs {live.get('needed')} trades and even then is not proof"))
 
     ops = []
+    local = []          # items that describe this PC: shown on the dashboard, left out of the report file
     plain = [n for n, w in state.get("secrets") or [] if w.startswith("Windows settings")]
     if plain:
         ops.append((OPEN, f"{len(plain)} secret(s) are kept as plain text in the Windows settings ({', '.join(plain)}); "
                           f"secure_secrets.py move protects them"))
+        local.append(ops[-1][1])
     g = state.get("git") or {}
     if g.get("unpushed"):
         ops.append((OPEN, f"{g['unpushed']} commits exist only on this PC (not pushed)"))
+        local.append(ops[-1][1])
     if g.get("uncommitted"):
         ops.append((OPEN, f"{g['uncommitted']} changed file(s) are not committed"))
+        local.append(ops[-1][1])
     for found, name, text, settled in FINDINGS:
         if not settled:
             ops.append((OPEN, f"Found {found}: {name}. {text}"))
@@ -318,7 +322,7 @@ def verdicts(reqs, replay, strategy, state):
 
     return {"platform": {"state": overall(platform), "reasons": platform},
             "strategy": {"state": overall(strat), "reasons": strat},
-            "operations": {"state": OPEN if ops else PASS, "reasons": ops}}
+            "operations": {"state": OPEN if ops else PASS, "reasons": ops, "local": local}}
 
 
 def build(tests=None, now=None, replay=None, write=True, code=0):
@@ -372,9 +376,15 @@ def markdown(res):
              "operations": "OPERATIONS: what is still open?"}
     for k in ("platform", "strategy", "operations"):
         L.append(f"| {names[k]} | **{WORDS[v[k]['state']]}** | {HEADLINES[(k, v[k]['state'])]} |")
+    # The report file can be shared (the repository is public). Items that describe this one PC, such as where
+    # its secrets are kept, stay on the dashboard's Readiness page and are only counted here.
+    hidden = set(v["operations"].get("local") or [])
     for k in ("platform", "strategy", "operations"):
         L += ["", f"### {names[k].split(':')[0].title()}", ""]
-        L += [f"- **{WORDS[s]}** {text}" for s, text in v[k]["reasons"]]
+        L += [f"- **{WORDS[s]}** {text}" for s, text in v[k]["reasons"] if text not in hidden]
+        if k == "operations" and hidden:
+            L.append(f"- **OPEN** {len(hidden)} more item(s) about this PC's own set-up are listed on the dashboard's "
+                     f"Readiness page and are not written to this file.")
     L += ["", "## Tests", "",
           f"{t['passed']} passed, {t['failed']} failed, {t['skipped']} skipped, in {t['files']} test files.", "",
           "| | Area | Requirement | Tests passed | Result |", "|---|---|---|---|---|"]
@@ -420,8 +430,8 @@ def markdown(res):
           + (f"; not working: {', '.join(st['health']['bad'])}" if (st.get('health') or {}).get('bad') else "")
           + (f"; needs a look: {', '.join(st['health']['warn'])}" if (st.get('health') or {}).get('warn') else "") + ".",
           f"- Zerodha login on disk: {st.get('login_store')}.",
-          "- Secrets: " + "; ".join(f"{n}: {w}" for n, w in st.get("secrets") or []) + ".",
-          f"- Risk limits looser than built: {', '.join(st['loose_limits']) if st.get('loose_limits') else 'none'}."]
+          f"- Risk limits looser than built: {', '.join(st['loose_limits']) if st.get('loose_limits') else 'none'}.",
+          "- Where this PC keeps its secrets is shown on the dashboard's Readiness page, not in this file."]
     L += ["", "## How to repeat this", "", "```",
           ".venv\\Scripts\\python.exe paper_replay.py --out data\\paper_replay.json",
           ".venv\\Scripts\\python.exe readiness.py run", "```", ""]

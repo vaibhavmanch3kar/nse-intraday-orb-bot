@@ -125,7 +125,11 @@ def test_build_writes_the_result_and_the_report_and_changes_nothing_else(isolate
                  "| K1 | Capital protection (Kavach) |", "Closing session change on 7 Dec 2026", "**not yet**", "## How to repeat this",
                  "## What the testing itself found", "counted losses first"):     # ...but stay in the report
         assert text in md, text
-    assert "KITE_API_KEY: Windows settings (plain text)" in md and "s3cr3t" not in md
+    # the report file can be shared: what describes this one PC stays on the dashboard
+    assert "plain text" not in md and "KITE_API_KEY" not in md and "only on this PC" not in md and "s3cr3t" not in md
+    assert "2 more item(s) about this PC's own set-up are listed on the dashboard's Readiness page" in md
+    assert len(res["verdicts"]["operations"]["local"]) == 2
+    assert any("KITE_API_KEY" in t for _, t in R.latest()["verdicts"]["operations"]["reasons"])     # still on the page
 
 
 def test_page_shows_the_three_verdicts_and_is_read_only(isolated, monkeypatch, tmp_path):
