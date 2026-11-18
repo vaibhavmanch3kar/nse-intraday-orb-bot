@@ -1043,7 +1043,8 @@ def live_limits(s):
             f"<dt>Exits</dt><dd>{T.term('stop')} · {T.term('trail')} · {T.term('time_stop')} · "
             f"{T.term('square_off')} at {C.SQUARE_OFF}</dd>"
             f"</dl><div class='small' style='padding:0 14px 12px'><a href='/kavach'>Kavach · every risk check "
-            f"and limit →</a> · <a href='/yantrashala'>Yantrashala · strategy lab →</a></div></details>")
+            f"and limit →</a> · <a href='/chanakya'>Chanakya · what speaks for and against each stock →</a> · "
+            f"<a href='/yantrashala'>Yantrashala · strategy lab →</a></div></details>")
 
 
 def live_positions_held(s):
@@ -1467,8 +1468,16 @@ def _scan_job(target, job):
         raise RuntimeError(f"no stock could be downloaded ({len(res['errors'])} errors)")
 
 
+def _chanakya_job(target, job):
+    import chanakya
+    res = chanakya.build(job=job)
+    if not res.get("rows") and res.get("errors"):
+        raise RuntimeError(f"no stock could be downloaded ({len(res['errors'])} errors)")
+
+
 jobs.register("review", _review_job, REVIEW_LIMIT_SEC)
 jobs.register("scanner", _scan_job, SCAN_LIMIT_SEC)
+jobs.register("chanakya", _chanakya_job, REVIEW_LIMIT_SEC)
 
 
 def auto_start(name, target=None):
@@ -1844,6 +1853,107 @@ from this page. "Looser" means a larger risk than the built-in value.</div></sec
 <div class="muted small" style="margin-top:8px">The first check that fails stops the trade and names the rule in
 "Today's signals". A stop-loss limits the planned loss; it cannot guarantee the price it fills at.</div></details>"""
     return page("Kavach", "/", body)
+
+
+CHECK_WORDS = {"for": ("agrees", "sig"), "against": ("disagrees", "dn"), "neutral": ("says nothing", ""),
+               "n/a": ("not available", "")}
+
+
+def _chanakya_details(a):
+    """One stock's full picture: every check with its measured value, the plan, Kavach's answer, the record."""
+    rows = "".join(
+        f"<tr><td class='first' data-label='Check'><b>{html.escape(c['name'])}</b></td>"
+        f"<td data-label='Says'><span class='st {CHECK_WORDS[c['state']][1]}'>{CHECK_WORDS[c['state']][0]}</span></td>"
+        f"<td data-label='Measured' style='white-space:normal'>{html.escape(str(c['value']))}</td>"
+        f"<td data-label='What it means' style='white-space:normal' class='muted small'>{html.escape(c['why'])}</td></tr>"
+        for c in a["checks"])
+    p = a.get("plan") or {}
+    plan = ""
+    if p:
+        bits = [f"entry about <b>{_fmt(p['entry'])}</b>", f"stop <b>{_fmt(p['stop'])}</b> ({_fmt(p['risk_per_share'])} a share)",
+                f"2R reference {_fmt(p['reference_2r'])}"]
+        if p.get("qty"):
+            bits += [f"<b>{p['qty']}</b> share(s) = {_inr(p['value'])}", f"at risk {_inr(p['risk'])}",
+                     f"charges {_inr(p['charges'])} + slippage {_inr(p['slippage'])}"]
+        plan = (f"<div class='small' style='padding:8px 14px'><b>The plan the bot would use:</b> {' · '.join(bits)}. "
+                f"Target: {html.escape(str(p.get('target')))}. A stop limits the planned loss; it cannot guarantee "
+                f"the price it fills at.</div>")
+    return (f"<details class='card flush' id='c-{html.escape(a['symbol'])}'><summary><b>{html.escape(a['symbol'])}</b> · "
+            f"{html.escape(a['setup'])} · {a['score']} of {a['of']} agree, {a['against']} disagree</summary>"
+            f"<div style='padding:8px 14px'>{html.escape(a['summary'])}</div>{plan}"
+            f"<table class='rt'><tr><th>Check</th><th>Says</th><th>Measured</th><th>What it means</th></tr>{rows}</table>"
+            f"</details>")
+
+
+def render_chanakya():
+    """Chanakya: for every watchlist stock, what speaks for and against a trade right now, from measured facts.
+    Read-only. It draws from the saved result and rebuilds in the background; it never touches the broker."""
+    import chanakya
+    r = chanakya.latest()
+    fresh = chanakya.status(r)
+    if fresh["stale"]:
+        auto_start("chanakya")
+    note = job_strip("chanakya", r, fresh, "/chanakya?refresh=1", "steps")
+    head = (f"<div class='page-head'><h1>🧭 Chanakya <span class='tag'>research assistant</span></h1>"
+            f"<span class='sub'>What speaks for and against each stock right now, from measured facts · read-only"
+            f"</span></div>"
+            f"<div class='banner' role='note'><b>How to read this.</b> The score is a count of checks that agree, "
+            f"not a probability and not advice. Chanakya cannot place an order and cannot overrule Kavach. "
+            f"The past record is shown with its sample size, and says so when it proves nothing.</div>")
+    if not r:
+        return page("Chanakya", "/", head + note + "<p class='muted'>The first assessment appears here when it has "
+                    "been built. The page updates by itself.</p>")
+    rec = (r.get("record") or {}).get("ALL") or {}
+    period = (r.get("record") or {}).get("period") or ["", ""]
+    record = ""
+    if rec.get("trades"):
+        losing = rec["r_high"] < 0
+        record = (f"<div class='banner' role='note' style='border-color:var(--{'dn' if losing else 'warn'})'>"
+                  f"<b>The record of the bot's rules:</b> {rec['trades']} trades from {html.escape(str(period[0]))} to "
+                  f"{html.escape(str(period[1]))}, average {rec['avg_r']:+.2f}R a trade after charges "
+                  f"(range {rec['r_low']:+.2f} to {rec['r_high']:+.2f}), net {_inr(rec['net'], True)} on ₹1,00,000. "
+                  + ("<b>Over that year these rules lost money.</b> A high count of agreeing checks below does not "
+                     "change that." if losing else "") + "</div>")
+    elif (r.get("record") or {}).get("error"):
+        record = (f"<div class='banner' role='note'>The past record could not be worked out "
+                  f"({html.escape(str(r['record']['error']))}).</div>")
+    rows = []
+    for a in r.get("rows", []):
+        k = a.get("kavach") or {}
+        h = a.get("history") or {}
+        kav = ("-" if not k else f"<span class='st sig'>allowed, {k['qty']}</span>" if k.get("ok") else
+               f"<span class='st dn'>refused</span> <span class='muted small'>{html.escape(str(k.get('reason')))}</span>")
+        past = (f"{h['trades']} trades, {h['avg_r']:+.2f}R <span class='muted small'>({h['r_low']:+.2f} to "
+                f"{h['r_high']:+.2f})</span>" if h.get("trades") else "<span class='muted'>none</span>")
+        score = (f"<b>{a['score']}</b> of {a['of']} agree · {a['against']} disagree" if a.get("direction") else
+                 "<span class='muted'>no setup</span>")
+        rows.append(
+            f"<tr><td class='first' data-label='Stock'><a href='#c-{html.escape(a['symbol'])}'><b>"
+            f"{html.escape(a['symbol'])}</b></a></td>"
+            f"<td data-label='Now' style='white-space:normal'>{html.escape(a['setup'])}</td>"
+            f"<td data-label='Checks'>{score}</td>"
+            f"<td data-label='Kavach' style='white-space:normal'>{kav}</td>"
+            f"<td data-label='Past record'>{past}</td>"
+            f"<td data-label=\"Bot's rule\" style='white-space:normal' class='muted small'>"
+            f"{html.escape(str(a.get('bot_rule') or ''))}</td></tr>")
+    errs = r.get("errors") or {}
+    err = (f"<div class='banner' role='note'>No data for {len(errs)} stock(s): "
+           f"{html.escape(', '.join(sorted(errs)))}</div>" if errs else "")
+    details = "".join(_chanakya_details(a) for a in r.get("rows", []) if a.get("direction"))
+    quiet = [a for a in r.get("rows", []) if not a.get("direction")]
+    quiet_txt = (f"<section class='card'><div class='hd'>No setup right now</div><ul class='small' "
+                 f"style='margin:0 0 0 18px;padding:0'>"
+                 + "".join(f"<li>{html.escape(a['summary'] or a['symbol'] + ': ' + a['setup'])}</li>" for a in quiet)
+                 + "</ul></section>" if quiet else "")
+    body = f"""{head}{note}{record}{err}
+<section class="card flush"><div class="hd">Ranking <span class="muted small">most agreeing checks first ·
+as of {html.escape(str(r.get('as_of') or '')[11:16])} · account {_inr(r.get('equity'))} ({html.escape(str(r.get('mode')))})</span>
+<span class="end"><form method="get" action="/chanakya" style="margin:0"><input type="hidden" name="refresh" value="1">
+<button class="ghost small">↻ Rebuild</button></form></span></div>
+<table class="rt"><tr><th>Stock</th><th>Now</th><th>Checks</th><th>Kavach</th><th>Past record (this stock and direction)</th>
+<th>Bot's rule on this candle</th></tr>{''.join(rows)}</table></section>
+{details}{quiet_txt}"""
+    return page("Chanakya", "/", body)
 
 
 def _lab_row(label, m, judged=False):
@@ -2961,6 +3071,12 @@ class Handler(BaseHTTPRequestHandler):
             self._send(render_kavach())
         elif u.path == "/yantrashala":
             self._send(render_yantrashala())
+        elif u.path == "/chanakya":
+            if q.get("refresh", ["0"])[0] == "1":
+                jobs.start("chanakya")
+                self._redirect("/chanakya")
+                return
+            self._send(render_chanakya())
         elif u.path == "/scanner":
             if q.get("refresh", ["0"])[0] == "1":
                 jobs.start("scanner")
@@ -3110,11 +3226,11 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/jobs/cancel":
             # stop a running Review or Scanner build (nothing of it is saved); never touches the bot
             name = form.get("job", [""])[0]
-            if name in ("review", "scanner"):
+            if name in ("review", "scanner", "chanakya"):
                 job = jobs.get(name)
                 if job:
                     job.cancel()
-            self._redirect("/scanner" if name == "scanner" else "/review")
+            self._redirect({"scanner": "/scanner", "chanakya": "/chanakya"}.get(name, "/review"))
             return
         if self.path in ("/bot/apply-now", "/bot/apply-after-close", "/bot/restart-cancel", "/bot/restart-dismiss",
                          "/bot/go-back", "/dashboard/restart"):
