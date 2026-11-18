@@ -117,3 +117,80 @@ def test_launcher_records_every_start_and_exit_code():
     assert "the bot ended with exit code $code" in ps
     assert ps.index("& $py bot.py --launcher-pid $PID") < ps.index("the bot ended with exit code")
     assert all(ord(c) < 128 for c in ps)                      # PowerShell 5.1 needs plain ASCII
+
+
+# ---------------------------------------------------------------- item 3: start again after a crash
+def test_after_exit_restarts_in_market_hours_up_to_five_times():
+    for n in range(1, 6):
+        assert watchdog.after_exit(1, now=t("10:00")) == ("RESTART", f"{n} of 5")
+    verdict, why = watchdog.after_exit(1, now=t("10:30"))
+    assert verdict == "STOP" and "5 times" in why
+    d = watchdog.load(t("10:31"))
+    assert d["restarts"] == 5 and d["events"][-1]["kind"] == "gave_up"
+    assert [e["kind"] for e in d["events"]].count("restart") == 5
+
+
+def test_after_exit_never_restarts_a_normal_end_or_a_deliberate_stop():
+    assert watchdog.after_exit(0, now=t("10:00"))[0] == "STOP"
+    watchdog.mark_stopped("Stop button", now=t("10:05"))
+    verdict, why = watchdog.after_exit(1, now=t("10:06"))
+    assert verdict == "STOP" and "on purpose" in why and watchdog.load(t("10:07"))["restarts"] == 0
+
+
+def test_after_exit_only_on_trading_days_between_nine_and_the_close():
+    assert watchdog.after_exit(1, now=t("08:30"))[0] == "STOP"
+    assert watchdog.after_exit(1, now=t("15:31"))[0] == "STOP"
+    assert watchdog.after_exit(1, now=t("11:00", dt.date(2026, 11, 21)))[0] == "STOP"      # Saturday
+    assert watchdog.after_exit(1, now=t("09:00"))[0] == "RESTART"
+    assert watchdog.after_exit(-1073741819, now=t("15:29"))[0] == "RESTART"                # a hard crash code
+
+
+def test_a_new_day_starts_a_new_count():
+    for _ in range(5):
+        watchdog.after_exit(1, now=t("10:00"))
+    assert watchdog.after_exit(1, now=t("10:00", dt.date(2026, 11, 19))) == ("RESTART", "1 of 5")
+
+
+def test_cli_answers_the_launcher(capsys, monkeypatch):
+    monkeypatch.setattr(watchdog, "now_ist", lambda: t("10:00"))
+    assert watchdog.main(["watchdog.py", "after-exit", "1"]) == 0
+    assert capsys.readouterr().out.strip() == "RESTART 1 of 5"
+    assert watchdog.main(["watchdog.py", "after-exit", "0"]) == 0
+    assert capsys.readouterr().out.strip().startswith("STOP")
+
+
+def test_launcher_asks_the_watchdog_after_an_error():
+    ps = launcher()
+    assert "watchdog.py after-exit $code" in ps and '-like "RESTART*"' in ps
+    assert "$LASTEXITCODE -eq 3 -and $restarts -lt 3" in ps            # the update restart is unchanged
+    assert "param([switch]$NoBrowser)" in ps
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the launcher is a PowerShell script")
+def test_launcher_really_starts_a_crashed_bot_again(tmp_path):
+    """A copy of run_bot.ps1 in an empty folder with a stand-in bot that crashes twice, then ends normally."""
+    import shutil
+    import subprocess
+    import sys
+    ps = launcher().replace("AyodhyaORB_bot", "AyodhyaORB_launcher_test").replace("Start-Sleep -Seconds 10", "Start-Sleep -Seconds 1")
+    (tmp_path / "run_bot.ps1").write_text(ps, encoding="ascii")
+    scripts = tmp_path / ".venv" / "Scripts"
+    scripts.mkdir(parents=True)
+    shutil.copy(sys.executable, scripts / "python.exe")
+    shutil.copy(os.path.join(sys.prefix, "pyvenv.cfg"), tmp_path / ".venv" / "pyvenv.cfg")
+    (tmp_path / "bot.py").write_text(
+        "import os, sys\nn = len(open('runs.txt').read()) if os.path.exists('runs.txt') else 0\n"
+        "open('runs.txt', 'a').write('x')\nsys.exit(0 if n >= 2 else 1)\n")
+    (tmp_path / "watchdog.py").write_text(
+        "import sys\nopen('asked.txt', 'a').write(sys.argv[2] + ' ')\nprint('RESTART test')\n")
+    (tmp_path / "web.py").write_text("")                     # a stand-in dashboard that ends at once
+    env = dict(os.environ, DATA_DIR=str(tmp_path / "data"))
+    out = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                          str(tmp_path / "run_bot.ps1"), "-NoBrowser"], cwd=tmp_path, env=env,
+                         capture_output=True, text=True, timeout=120)
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert (tmp_path / "runs.txt").read_text() == "xxx"       # crashed, crashed, ended normally
+    assert (tmp_path / "asked.txt").read_text().split() == ["1", "1"]
+    log_text = (tmp_path / "data" / "logs" / "launcher.log").read_text(encoding="utf-8-sig")
+    assert log_text.count("starting the bot") == 3 and log_text.count("exit code 1") == 2
+    assert "watchdog says: RESTART test" in log_text and "exit code 0" in log_text
