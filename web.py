@@ -2409,6 +2409,14 @@ class Handler(BaseHTTPRequestHandler):
                 self._redirect("/scanner")
                 return
             self._send(render_scanner())
+        elif u.path == "/api/zerodha/events":
+            # read-only: Zerodha position-change alerts for the popups on every page (accounts.zerodha_events)
+            import accounts
+            try:
+                since = int(q.get("since", ["-1"])[0])
+            except ValueError:
+                since = -1
+            self._send(json.dumps(accounts.zerodha_events(since)), ctype="application/json; charset=utf-8")
         elif u.path == "/api/jobs":
             # read-only: progress of the Review and Scanner background builds
             self._send(json.dumps(jobs.snapshot_all()), ctype="application/json; charset=utf-8")

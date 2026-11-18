@@ -7,6 +7,10 @@ writes a file, or places an order.
   zerodha_account()  the real Zerodha account from Kite's margins() and positions() calls only,
                      through a wrapper that refuses every other Kite method (so no order can be
                      placed from here). Kept in memory for 15 s; never written to a file or a log.
+  zerodha_events()   position-change alerts for the dashboard popups: new fills, partial fills,
+                     positions opened / closed / changed on Zerodha (the bot's or anyone's), found by
+                     comparing Kite's orders() and positions() with the previous look. Same read-only
+                     wrapper; kept in memory only.
 """
 
 import datetime as dt
@@ -91,7 +95,7 @@ def paper_account(now=None, state_path=None):
 # -- Zerodha (real account, read-only) -----------------------------------------------------------
 
 ZERODHA_CACHE_SEC = 15
-READ_ONLY_CALLS = ("margins", "positions")
+READ_ONLY_CALLS = ("margins", "positions", "orders")   # all three only read; nothing can be placed
 _cache = {"at": None, "data": None}
 _cache_lock = threading.Lock()
 
@@ -208,3 +212,129 @@ def zerodha_account(now=None, client=None):
 def clear_zerodha_cache():
     with _cache_lock:
         _cache.update(at=None, data=None)
+
+
+# -- Zerodha position-change alerts (dashboard popups) -------------------------------------------
+# The dashboard asks /api/zerodha/events every few seconds; Zerodha is asked at most every
+# EVENTS_POLL_SEC during market hours (EVENTS_IDLE_SEC otherwise), however many pages are open.
+# The first look of the day (or after a login) is only a baseline: alerts are for changes after it.
+
+EVENTS_POLL_SEC = 5
+EVENTS_IDLE_SEC = 60
+MAX_EVENTS = 100
+BOT_TAG = "orbbot"                       # broker.LiveBroker tags every order it places
+_events = {"seq": 0, "items": [], "orders": None, "positions": None, "day": None, "at": None,
+           "error": None, "login_needed": False}
+_events_lock = threading.Lock()
+
+
+def _order_fills(orders):
+    """{order_id: what matters for a fill} from Kite orders()."""
+    out = {}
+    for o in orders or []:
+        oid = o.get("order_id")
+        if not oid:
+            continue
+        out[oid] = {"symbol": o.get("tradingsymbol"), "exchange": o.get("exchange"),
+                    "product": o.get("product"), "side": o.get("transaction_type"),
+                    "quantity": int(_num(o.get("quantity"))), "filled": int(_num(o.get("filled_quantity"))),
+                    "pending": int(_num(o.get("pending_quantity"))), "status": o.get("status") or "",
+                    "avg": _num(o.get("average_price")), "tag": o.get("tag") or "",
+                    "time": str(o.get("exchange_update_timestamp") or o.get("order_timestamp") or "")}
+    return out
+
+
+def _net_positions(p):
+    """{(exchange, symbol, product): {qty, avg, pnl}} from Kite positions()['net']."""
+    out = {}
+    for x in (p or {}).get("net") or []:
+        key = (x.get("exchange"), x.get("tradingsymbol"), x.get("product"))
+        out[key] = {"qty": int(_num(x.get("quantity"))), "avg": _num(x.get("average_price")),
+                    "pnl": _num(x.get("pnl")), "realised": _num(x.get("realised"))}
+    return out
+
+
+def _position_change(before, after):
+    """'opened' / 'closed' / 'reversed' / 'added' / 'reduced', or None when the quantity didn't change."""
+    if before == after:
+        return None
+    if before == 0:
+        return "opened"
+    if after == 0:
+        return "closed"
+    if (before > 0) != (after > 0):
+        return "reversed"
+    return "added" if abs(after) > abs(before) else "reduced"
+
+
+def diff_events(prev_orders, cur_orders, prev_pos, cur_pos):
+    """Alerts between two looks at Zerodha. One alert per fill (a partial fill says how much is still
+    pending), carrying the position's change for that stock; a position change with no fill seen
+    (for example one made while the dashboard was closed) gets its own alert."""
+    events, touched = [], {}
+    for oid, o in cur_orders.items():
+        was = (prev_orders.get(oid) or {}).get("filled", 0)
+        got = o["filled"] - was
+        if got <= 0:
+            continue
+        partial = o["filled"] < o["quantity"] and o["status"] not in ("COMPLETE",)
+        ev = {"kind": "partial" if partial else "fill", "order_id": oid, "symbol": o["symbol"],
+              "exchange": o["exchange"], "product": o["product"], "side": o["side"], "qty": got,
+              "filled": o["filled"], "quantity": o["quantity"], "pending": max(0, o["quantity"] - o["filled"]),
+              "price": o["avg"], "status": o["status"], "by_bot": o["tag"] == BOT_TAG, "time": o["time"]}
+        events.append(ev)
+        touched[(o["exchange"], o["symbol"], o["product"])] = ev       # the last fill of the stock gets it
+    for key in sorted(set(prev_pos) | set(cur_pos), key=lambda k: tuple(str(x) for x in k)):
+        before = (prev_pos.get(key) or {}).get("qty", 0)
+        now_p = cur_pos.get(key) or {"qty": 0, "avg": 0.0, "pnl": 0.0, "realised": 0.0}
+        change = _position_change(before, now_p["qty"])
+        if not change:
+            continue
+        pos = {"change": change, "before": before, "after": now_p["qty"], "avg": now_p["avg"],
+               "pnl": now_p["pnl"], "realised": now_p["realised"]}
+        if key in touched:
+            touched[key]["position"] = pos
+        else:
+            events.append({"kind": "position", "symbol": key[1], "exchange": key[0], "product": key[2],
+                           "position": pos})
+    return events
+
+
+def zerodha_events(since=0, now=None, client=None):
+    """Alerts newer than `since` (an alert number). since < 0 asks only for the latest number, so a page
+    that just opened starts from now instead of replaying the morning. Never raises."""
+    now = now or now_ist()
+    with _events_lock:
+        every = EVENTS_POLL_SEC if market_open(now) else EVENTS_IDLE_SEC
+        due = client is not None or _events["at"] is None or (now - _events["at"]).total_seconds() >= every
+        if due:
+            _events["at"] = now
+            try:
+                kite = ReadOnlyKite(client if client is not None else _kite_client())
+                orders, positions = kite.orders(), kite.positions()
+            except LoginNeeded as e:
+                _events.update(error=str(e), login_needed=True, orders=None, positions=None)   # new baseline after login
+            except Exception as e:  # noqa: BLE001 - a failed look keeps the baseline and tries again
+                msg, login = explain_kite_error(e)
+                _events.update(error=msg, login_needed=login)
+                if login:
+                    _events.update(orders=None, positions=None)
+            else:
+                cur_o, cur_p = _order_fills(orders), _net_positions(positions)
+                if _events["orders"] is not None and _events["day"] == now.date():
+                    for ev in diff_events(_events["orders"], cur_o, _events["positions"], cur_p):
+                        _events["seq"] += 1
+                        ev.update(seq=_events["seq"], seen_at=now.isoformat(timespec="seconds"))
+                        _events["items"].append(ev)
+                    del _events["items"][:-MAX_EVENTS]
+                _events.update(orders=cur_o, positions=cur_p, day=now.date(), error=None, login_needed=False)
+        items = [] if since < 0 else [e for e in _events["items"] if e["seq"] > since]
+        return {"seq": _events["seq"], "events": items, "error": _events["error"],
+                "login_needed": _events["login_needed"], "checked_at": _events["at"].isoformat(timespec="seconds"),
+                "every_sec": every}
+
+
+def reset_zerodha_events():
+    with _events_lock:
+        _events.update(seq=0, items=[], orders=None, positions=None, day=None, at=None, error=None,
+                       login_needed=False)
