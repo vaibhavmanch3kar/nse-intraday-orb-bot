@@ -703,7 +703,72 @@ def zerodha_positions():
             f"<th class='r'>Last price</th><th class='r'>Realised</th><th class='r'>Unrealised</th></tr>{rows}</table></section>")
 
 
-def live_watchlist(s):
+CANDLE_PICKUP_MIN = 1    # the bot looks every POLL_SEC (60 s) and Kite has a closed candle within seconds
+CANDLE_LATE_MIN = 4      # this many minutes past the expected time, the page says "No updates"
+
+
+def watch_timing(s, now=None):
+    """When the watchlist last changed and when it should change next. It changes once per 15-minute candle:
+    the 09:15 candle closes at 09:30, so the first update is about 09:31, then about every 15 minutes.
+    Returns {state: before_open|waiting|late|closed|stopped, last, text, key}; `key` names the overdue
+    update, so a page shows one "No updates" popup per missed candle, not one per refresh."""
+    import datetime as dt
+    import holidays
+    now = now or dt.datetime.now(dt.timezone(dt.timedelta(hours=5, minutes=30)))
+    tz = now.tzinfo
+    step = dt.timedelta(minutes=C.INTERVAL_MIN)
+    pick = dt.timedelta(minutes=CANDLE_PICKUP_MIN)
+
+    def at(day, hhmm):
+        h, m = map(int, hhmm.split(":"))
+        return dt.datetime.combine(day, dt.time(h, m), tz)
+
+    day = now.date()
+    open_t, close_t = at(day, C.MARKET_OPEN), at(day, C.MARKET_CLOSE)
+    try:
+        status_at = dt.datetime.fromisoformat(s["time"])
+        status_day = status_at.date()
+        running = (now - status_at).total_seconds() < max(180, 3 * C.POLL_SEC)   # same rule as bot_running()
+    except (KeyError, ValueError, TypeError):
+        status_day, running = None, False
+    bars = sorted(r.get("bar") for r in (s.get("rows") or {}).values() if r.get("bar"))
+    last = bars[-1] if bars and status_day == day else None          # 'HH:MM' strings sort in time order
+    out = {"last": last, "key": ""}
+    if not holidays.is_trading_day(day) or now >= close_t:
+        nd = holidays.next_trading_day(day)
+        first = at(nd, C.MARKET_OPEN) + step + pick
+        out.update(state="closed", text=f"Market closed. Next update about {first:%H:%M} on {first:%a %d %b}, "
+                                        f"when the first 15-minute candle closes.")
+        return out
+    if now < open_t:
+        first = open_t + step + pick
+        out.update(state="before_open", text=f"Market opens at {open_t:%H:%M}. First update about {first:%H:%M}, "
+                                             f"when the {open_t:%H:%M} candle closes.")
+        return out
+    if not running:
+        out.update(state="stopped", key=f"{day}-stopped",
+                   text="No updates: the bot is not running, so the watchlist isn't changing. "
+                        "Start it (2-START-BOT.bat) to resume.")
+        return out
+    nxt = (at(day, last) + step) if last else open_t                  # the candle we are waiting for
+    closes = nxt + step
+    expected = closes + pick
+    mins = max(0, int((expected - now).total_seconds() // 60))
+    if now <= expected + dt.timedelta(minutes=CANDLE_LATE_MIN):
+        when = "in under a minute" if mins == 0 else f"in {mins} min"
+        lead = f"Last update: the {last} candle. " if last else "No candles yet today. "
+        out.update(state="waiting", text=f"{lead}Next update about {expected:%H:%M} ({when}), "
+                                         f"when the {nxt:%H:%M} candle closes at {closes:%H:%M}.")
+        return out
+    late = int((now - expected).total_seconds() // 60)
+    ds = (s.get("data_source") or {}).get("using") or "price data"
+    out.update(state="late", key=f"{day}-{nxt:%H%M}",
+               text=f"No updates: the {nxt:%H:%M} candle closed at {closes:%H:%M} but hasn't reached the bot "
+                    f"({late} min late). The bot retries every minute; check the internet and {ds.capitalize()} data.")
+    return out
+
+
+def live_watchlist(s, now=None):
     rows = []
     for sym, r in sorted(s.get("rows", {}).items()):
         reason = r.get("reason") or ""
@@ -720,8 +785,13 @@ def live_watchlist(s):
             f"<td data-label='Bar' class='hide-s'>{_fmt(r.get('bar'))}</td>"
             f"<td data-label='Status' style='white-space:normal'><span class='st {cls}'>{_fmt(T.decorate(reason) or None)}</span></td></tr>")
     body = "".join(rows) or "<tr><td colspan=7 class='muted'>Waiting for market data</td></tr>"
-    return (f"<section class='card flush' id='watchlist'><div class='hd'><span class='theme'>{T.term('watchlist')}</span> <span class='end'><span class='tag'>last closed 15-min bar</span></span></div>"
-            f"<table><tr><th>Stock</th><th class='r'>Close</th><th class='r hide-s'>Opening range</th><th class='r hide-s'>VWAP</th>"
+    w = watch_timing(s, now)
+    tag = f"last candle {w['last']}" if w["last"] else "last closed 15-min bar"
+    late = f" data-late='{html.escape(w['key'])}'" if w["state"] in ("late", "stopped") else ""
+    bar = (f"<div class='wtime {w['state']}' role='status'{late}>"
+           f"{'⚠ ' if w['state'] in ('late', 'stopped') else '⏱ '}{html.escape(w['text'])}</div>")
+    return (f"<section class='card flush' id='watchlist'><div class='hd'><span class='theme'>{T.term('watchlist')}</span> <span class='end'><span class='tag'>{html.escape(tag)}</span></span></div>"
+            f"{bar}<table><tr><th>Stock</th><th class='r'>Close</th><th class='r hide-s'>Opening range</th><th class='r hide-s'>VWAP</th>"
             f"<th class='r hide-s'>Vol ×</th><th class='hide-s'>Bar</th><th>Status</th></tr>{body}</table></section>")
 
 
@@ -2416,7 +2486,10 @@ class Handler(BaseHTTPRequestHandler):
                 since = int(q.get("since", ["-1"])[0])
             except ValueError:
                 since = -1
-            self._send(json.dumps(accounts.zerodha_events(since)), ctype="application/json; charset=utf-8")
+            out = accounts.zerodha_events(since)
+            w = watch_timing(read_status())       # "No updates" warning for the popups (watchlist timing)
+            out["watch"] = {"state": w["state"], "key": w["key"], "text": w["text"]}
+            self._send(json.dumps(out), ctype="application/json; charset=utf-8")
         elif u.path == "/api/jobs":
             # read-only: progress of the Review and Scanner background builds
             self._send(json.dumps(jobs.snapshot_all()), ctype="application/json; charset=utf-8")

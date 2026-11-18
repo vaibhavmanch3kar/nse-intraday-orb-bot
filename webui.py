@@ -288,6 +288,9 @@ ALERTS_CSS = """
   font-size:20px;line-height:1;padding:2px 6px}
 .alert .ask{margin-top:6px;background:var(--surface-2);color:var(--text);border:1px solid var(--border);
   border-radius:6px;padding:4px 8px;cursor:pointer;font:inherit;font-size:12px}
+.wtime{padding:8px 14px;border-bottom:1px solid var(--border);font-size:13px;color:var(--muted)}
+.wtime.late,.wtime.stopped{background:var(--warn-bg);color:var(--text);font-weight:600;
+  border-left:4px solid var(--warn)}
 @keyframes alertIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
 @media (prefers-reduced-motion: reduce){.alert{animation:none}}
 @media print{.alerts{display:none}}
@@ -327,27 +330,42 @@ ALERTS_JS = """
     b.addEventListener('click',function(){Notification.requestPermission().then(function(){b.remove()})});
     el.appendChild(b);
   }
-  function show(e){
-    var d=describe(e), el=document.createElement('div');
+  function show(e){toast(describe(e),'ayodhya-zerodha-'+e.seq,e);}
+  var LATE='ayodhya-late-key', lateKey=null;
+  try{lateKey=sessionStorage.getItem(LATE)}catch(e){}
+  function watch(w){                       // watchlist timing: one "No updates" popup per missed candle
+    if(!w)return;
+    if((w.state==='late'||w.state==='stopped')&&w.key&&w.key!==lateKey){
+      lateKey=w.key; try{sessionStorage.setItem(LATE,lateKey)}catch(e){}
+      toast({tone:'warn',title:'No updates',body:w.text,meta:'Watchlist timing'},'ayodhya-late-'+w.key,null);
+    }else if(w.state==='waiting'&&lateKey){
+      lateKey=null; try{sessionStorage.removeItem(LATE)}catch(e){}
+      toast({tone:'up',title:'Updates are back',body:w.text,meta:'Watchlist timing'},'ayodhya-late-ok',null);
+    }
+  }
+  function toast(d,tag,e){
+    var el=document.createElement('div');
     el.className='alert'+(d.tone?' '+d.tone:'');
     var x=document.createElement('button'); x.type='button'; x.className='x'; x.textContent='\\u00d7';
     x.setAttribute('aria-label','Close this alert'); x.addEventListener('click',function(){el.remove()});
     var t=document.createElement('span'); t.className='t'; t.textContent=d.title;
     var b=document.createElement('span'); b.className='b'; b.textContent=d.body;
     var m=document.createElement('span'); m.className='m';
-    m.textContent=d.meta+' \\u00b7 '+(e.product||'')+' \\u00b7 seen '+String(e.seen_at||'').slice(11,19);
+    m.textContent=e?(d.meta+' \\u00b7 '+(e.product||'')+' \\u00b7 seen '+String(e.seen_at||'').slice(11,19))
+                    :(d.meta+' \\u00b7 '+new Date().toTimeString().slice(0,8));
     el.appendChild(x); el.appendChild(t); if(d.body)el.appendChild(b); el.appendChild(m); askButton(el);
     box.insertBefore(el, box.firstChild);
     while(box.children.length>5)box.removeChild(box.lastChild);
     var timer=setTimeout(function(){el.remove()},45000);
     el.addEventListener('mouseenter',function(){clearTimeout(timer)});
     if('Notification' in window&&Notification.permission==='granted'){
-      try{new Notification(d.title,{body:(d.body?d.body+'\\n':'')+d.meta,tag:'ayodhya-zerodha-'+e.seq})}catch(err){}
+      try{new Notification(d.title,{body:(d.body?d.body+'\\n':'')+d.meta,tag:tag})}catch(err){}
     }
   }
   function handle(r){
     if(!r||typeof r.seq!=='number')return;
     idle=(r.login_needed?6:0);
+    watch(r.watch);
     if(seq===null||r.seq<seq){seq=r.seq; save(); return;}     // first look, or the dashboard was restarted
     (r.events||[]).forEach(show); seq=r.seq; save();
   }
