@@ -15,6 +15,15 @@ import pytest
 import config as C
 import web
 
+
+def test_a_cool_down_that_is_over_is_not_shown_as_holding_trades_back():
+    import datetime as dt
+    day = dt.date(2026, 11, 18)
+    assert web.active_cooldown({"cooldown_until": "2026-11-20"}, day) == "2026-11-20"
+    assert web.active_cooldown({"cooldown_until": "2026-11-18"}, day) is None      # the day it ends, trading is back
+    assert web.active_cooldown({"cooldown_until": "2026-11-14"}, day) is None
+    assert web.active_cooldown({}, day) is None and web.active_cooldown(None, day) is None
+
 IST = dt.timezone(dt.timedelta(hours=5, minutes=30))
 
 

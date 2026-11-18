@@ -1060,7 +1060,7 @@ def feed_line(s):
 
 
 def live_limits(s):
-    cooldown = s.get("cooldown_until")
+    cooldown = active_cooldown(s)
     lag_txt = candle_age_text(s)
     until = f" · <span class='warn'>until {html.escape(str(cooldown))}</span>" if cooldown else ""
     return (f"<details class='card' id='limits'><summary>Data &amp; limits</summary><dl class='facts'>"
@@ -1388,6 +1388,14 @@ def trading_mode_card(s):
 
 
 LIVE_REFRESH_SEC = ACCOUNT_REFRESH_SEC
+
+
+def active_cooldown(s, today=None):
+    """The cool-down date if it is still ahead, else None. The bot's record keeps the last date after it has
+    passed; only a date still ahead holds new trades back (risk.State.can_enter uses the same test)."""
+    until = (s or {}).get("cooldown_until")
+    today = today or _now_ist().date()
+    return until if until and today.isoformat() < str(until) else None
 
 
 HEALTH_WORDS = {"ok": ("✓", "working", "in"), "warn": ("!", "needs a look", ""), "bad": ("✕", "NOT working", "dn"),
@@ -1921,7 +1929,7 @@ def render_kavach():
         usage += _kpi("Risk per trade now", _inr(float(eq) * C.RISK_PER_TRADE_PCT / 100),
                       f"{C.RISK_PER_TRADE_PCT:g}% of {_inr(eq)}")
     checks = "".join(f"<li><b>{i}. {name}</b>: {html.escape(what)}</li>" for i, (name, what) in enumerate(KAVACH_CHECKS, 1))
-    cooldown = s.get("cooldown_until")
+    cooldown = active_cooldown(s)
     cool = (f"<div class='banner' role='status'><b>Cool-down:</b> no new trades until {html.escape(str(cooldown))} "
             f"after {C.LOSS_STREAK_LIMIT} losses in a row.</div>" if cooldown else "")
     body = f"""
