@@ -819,11 +819,33 @@ def balance_notice(s):
             f"Open positions are still managed.</div>")
 
 
+def watchdog_notices():
+    """Today's crashes and automatic restarts for the popups and the Live page. Never raises."""
+    try:
+        import watchdog
+        return watchdog.notices()
+    except Exception:  # noqa: BLE001 - a problem reading the record must not break a page
+        return []
+
+
+def watchdog_banner():
+    """What the watchdog did today, newest first (at most 4 lines): shown on the Live page all day."""
+    items = [n for n in watchdog_notices() if n.get("tone") in ("dn", "warn")][-4:][::-1]
+    if not items:
+        return ""
+    rows = "".join(f"<li><b>{html.escape(n['at'][11:16])}</b> {html.escape(n['title'])}: "
+                   f"{html.escape(n['body'])}</li>" for n in items)
+    bad = any(n["tone"] == "dn" for n in items)
+    return (f"<div class='banner wd' role='status' style='border-color:var(--{'dn' if bad else 'warn'})'>"
+            f"<b>Watchdog today</b><ul style='margin:4px 0 0 18px;padding:0'>{rows}</ul></div>")
+
+
 def live_notice(s, running):
     if running:
-        return balance_notice(s)
+        return watchdog_banner() + balance_notice(s)
     when = (s.get("time") or "")
-    return (f"<div class='banner'><b>Bot is not running</b> ({T.name('not_running')}: markets closed, weekend, or stopped). "
+    return (watchdog_banner() +
+            f"<div class='banner'><b>Bot is not running</b> ({T.name('not_running')}: markets closed, weekend, or stopped). "
             f"Showing the last saved state{' from ' + html.escape(when[:16].replace('T', ' ')) if when else ''}. "
             f"See <a href='/review'>{T.term('review')}</a> for how the last trading day played out, "
             f"or <a href='/trades'>{T.term('trades')}</a> for history.</div>")
@@ -2489,6 +2511,7 @@ class Handler(BaseHTTPRequestHandler):
             out = accounts.zerodha_events(since)
             w = watch_timing(read_status())       # "No updates" warning for the popups (watchlist timing)
             out["watch"] = {"state": w["state"], "key": w["key"], "text": w["text"]}
+            out["notices"] = watchdog_notices()   # crashes and automatic restarts today (watchdog.py)
             self._send(json.dumps(out), ctype="application/json; charset=utf-8")
         elif u.path == "/api/jobs":
             # read-only: progress of the Review and Scanner background builds

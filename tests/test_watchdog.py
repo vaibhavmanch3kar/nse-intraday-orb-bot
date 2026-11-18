@@ -298,3 +298,60 @@ def test_scheduled_tasks_script():
                               f"'{os.path.join(ROOT, 'register_task.ps1')}',[ref]$null,[ref]$e);$e.Count"],
                              capture_output=True, text=True, timeout=60)
         assert out.stdout.strip() == "0", out.stdout + out.stderr
+
+
+# ---------------------------------------------------------------- item 5: crash and restart alerts
+def crash_and_restart(monkeypatch, at="10:00"):
+    monkeypatch.setattr(watchdog, "now_ist", lambda: t(at))
+    try:
+        boom()
+    except PermissionError as e:
+        watchdog.record_crash(e, now=t(at), mode="live")
+    watchdog.after_exit(1, now=t(at))
+
+
+def test_notices_list_todays_crashes_and_restarts(monkeypatch):
+    crash_and_restart(monkeypatch)
+    watchdog.mark_stopped("Stop button", now=t("10:05"))        # not an alert
+    ns = watchdog.notices(t("10:06"))
+    assert [n["tone"] for n in ns] == ["dn", "warn"] and len({n["key"] for n in ns}) == 2
+    assert ns[0]["title"] == "The bot stopped with an error" and "crash_2026-11-18_100000.txt" in ns[0]["body"]
+    assert ns[1]["title"] == "The bot was started again" and "1 of 5" in ns[1]["body"]
+    assert watchdog.notices(t("10:06", dt.date(2026, 11, 19))) == []       # a new day starts clean
+
+
+def test_restarted_bot_says_why_in_its_own_log(monkeypatch):
+    crash_and_restart(monkeypatch)
+    b = run_bot_until_stopped(monkeypatch, lambda b: open(C.STOP_FILE, "w").close())
+    text = " | ".join(b.events)
+    assert "Watchdog at 10:00:00: PermissionError" in text and "starting it again (1 of 5 today)" in text
+
+
+def test_live_page_and_popup_feed_carry_the_watchdog_record(monkeypatch):
+    import threading
+    import urllib.request
+    import accounts
+    import web
+    import webui
+    crash_and_restart(monkeypatch)
+    banner = web.watchdog_banner()
+    assert "Watchdog today" in banner and "The bot stopped with an error" in banner and "var(--dn)" in banner
+    assert "Watchdog today" in web.live_notice({}, running=True) and "Watchdog today" in web.live_notice({}, running=False)
+    assert "notices(r.notices)" in webui.ALERTS_JS and "ayodhya-notices-seen" in webui.ALERTS_JS
+    accounts.reset_zerodha_events()
+    monkeypatch.setattr(accounts, "_kite_client", lambda: (_ for _ in ()).throw(accounts.LoginNeeded("x")))
+    monkeypatch.setattr(web, "STATUS_FILE", C.DATA_DIR + "/status.json")
+    srv = web.ThreadingHTTPServer(("127.0.0.1", 0), web.Handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{srv.server_address[1]}/api/zerodha/events?since=-1") as r:
+            d = json.loads(r.read().decode())
+        assert [n["tone"] for n in d["notices"]] == ["dn", "warn"]
+    finally:
+        srv.shutdown()
+        accounts.reset_zerodha_events()
+
+
+def test_no_watchdog_events_means_no_banner():
+    import web
+    assert web.watchdog_banner() == "" and web.watchdog_notices() == []

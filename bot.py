@@ -809,6 +809,8 @@ class Bot:
         self.write_status(now_ist())
         self.check_restarted()
         watchdog.bot_started(now_ist(), os.getpid())    # any start ends "stopped on purpose today"
+        for e in watchdog.last_events(now_ist()):       # why this start happened, if the watchdog caused it
+            self.note(f"Watchdog at {e['at'][11:19]}: {e['text']}", logging.WARNING)
         waiting_login_logged = False
         while True:
             if os.path.exists(C.STOP_FILE):

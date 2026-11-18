@@ -343,6 +343,18 @@ ALERTS_JS = """
       toast({tone:'up',title:'Updates are back',body:w.text,meta:'Watchlist timing'},'ayodhya-late-ok',null);
     }
   }
+  var NK='ayodhya-notices-seen';           // watchdog: crashes and automatic restarts, once per browser
+  function notices(list){
+    if(!list||!list.length)return;
+    var seen=[]; try{seen=JSON.parse(localStorage.getItem(NK)||'[]')}catch(e){}
+    if(!Array.isArray(seen))seen=[];
+    list.forEach(function(n){
+      if(seen.indexOf(n.key)>=0)return; seen.push(n.key);
+      if(Date.now()-Date.parse(n.at)<30*60*1000)       // older ones stay on the Live page's banner only
+        toast({tone:n.tone,title:n.title,body:n.body,meta:'Watchdog'},'ayodhya-wd-'+n.key,null);
+    });
+    try{localStorage.setItem(NK,JSON.stringify(seen.slice(-80)))}catch(e){}
+  }
   function toast(d,tag,e){
     var el=document.createElement('div');
     el.className='alert'+(d.tone?' '+d.tone:'');
@@ -365,7 +377,7 @@ ALERTS_JS = """
   function handle(r){
     if(!r||typeof r.seq!=='number')return;
     idle=(r.login_needed?6:0);
-    watch(r.watch);
+    watch(r.watch); notices(r.notices);
     if(seq===null||r.seq<seq){seq=r.seq; save(); return;}     // first look, or the dashboard was restarted
     (r.events||[]).forEach(show); seq=r.seq; save();
   }
