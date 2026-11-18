@@ -34,6 +34,7 @@ import risk
 import safefile
 import strategy
 import theme as T
+import watchdog
 from broker import LiveBroker, PaperBroker
 
 IST = dt.timezone(dt.timedelta(hours=5, minutes=30))
@@ -919,11 +920,48 @@ def main():
     if not dashboard_listening():
         log.info(f"Dashboard not running - double-click 3-DASHBOARD.bat to open it "
                  f"(http://{C.WEB_HOST}:{C.WEB_PORT}); the bot trades the same without it")
-    b = Bot()
-    b.launcher_gone = watch_launcher(sys.argv)
-    rc = b.run()
+    enable_fault_log()
+    b = None
+    try:
+        b = Bot()
+        b.launcher_gone = watch_launcher(sys.argv)
+        rc = b.run()
+    except KeyboardInterrupt:
+        # Ctrl+C in the bot's window is a deliberate stop: say so, and the watchdog leaves the bot stopped today
+        log.warning(f"{T.APP} stopped with Ctrl+C (open positions stay protected by exchange stops in live mode)")
+        watchdog.mark_stopped("Ctrl+C in the bot's window")
+        return
+    except Exception as e:  # noqa: BLE001 - the last line of defence: nothing may end the bot without a record
+        # An error that reaches here ends the bot. It used to be shown only in the bot's window, which then
+        # closed; now the full error goes to the log and to data/logs/crash_<time>.txt, and the exit code tells
+        # run_bot.ps1 (which asks watchdog.py whether to start the bot again).
+        path = watchdog.record_crash(e, mode=getattr(b, "mode", None),
+                                     version=(getattr(b, "build", None) or {}).get("version"),
+                                     positions=list(b.state.positions) if b is not None else None)
+        log.critical(f"{T.APP} ENDED WITH AN ERROR: {type(e).__name__}: {e} "
+                     f"(full details: {path or 'could not be saved'}; open positions stay protected by exchange "
+                     f"stops in live mode)", exc_info=True)
+        sys.exit(EXIT_CRASH)
     if rc:
         sys.exit(rc)   # restart.EXIT_RESTART: run_bot.ps1 starts the bot again
+
+
+EXIT_CRASH = 1          # ended with an error (also what Python itself uses); 0 = ended normally, 3 = restart
+_fault_file = None
+
+
+def enable_fault_log():
+    """A crash below Python (in a C library) leaves at least its stack in data/logs/fault.log."""
+    global _fault_file
+    try:
+        import faulthandler
+        if faulthandler.is_enabled():      # someone else (e.g. the test runner) already listens
+            return
+        os.makedirs(os.path.join(C.DATA_DIR, "logs"), exist_ok=True)
+        _fault_file = open(os.path.join(C.DATA_DIR, "logs", "fault.log"), "a", encoding="utf-8")
+        faulthandler.enable(file=_fault_file)
+    except (OSError, RuntimeError, ValueError):
+        pass
 
 
 def watch_launcher(argv):

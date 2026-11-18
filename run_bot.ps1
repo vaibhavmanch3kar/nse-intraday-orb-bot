@@ -31,6 +31,19 @@ if ($running) {
     exit 0
 }
 
+function Write-LauncherLog([string]$text) {
+    # One line per bot start and per bot exit (with its exit code) in data\logs\launcher.log, so "why did it
+    # stop?" has an answer even when this window is gone. A logging problem never stops the launcher.
+    try {
+        $dir = if ($env:DATA_DIR) { $env:DATA_DIR } else { "data" }
+        if (-not [System.IO.Path]::IsPathRooted($dir)) { $dir = Join-Path $PSScriptRoot $dir }
+        $logs = Join-Path $dir "logs"
+        New-Item -ItemType Directory -Force -Path $logs | Out-Null
+        $line = "{0} launcher {1}: {2}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $PID, $text
+        Add-Content -Path (Join-Path $logs "launcher.log") -Value $line -Encoding UTF8
+    } catch { }
+}
+
 Start-Dashboard
 Start-Job -ScriptBlock { Start-Sleep 4; Start-Process "http://127.0.0.1:5000" } | Out-Null
 # Exit code 3 = the bot restarted itself to load an update, after "Restart when safe" on the dashboard
@@ -39,7 +52,10 @@ $restarts = 0
 while ($true) {
     # --launcher-pid: if this window is ended (e.g. Stop on the "Kite ORB Bot" task), the bot stops by itself
     # the same way as with the STOP file, instead of trading on with nobody watching (as v1.8.0 did).
+    Write-LauncherLog "starting the bot"
     & $py bot.py --launcher-pid $PID
+    $code = $LASTEXITCODE
+    Write-LauncherLog "the bot ended with exit code $code (0 = normal end, 3 = restart to load an update, anything else = error)"
     if ($LASTEXITCODE -eq 3 -and $restarts -lt 3) {
         $restarts++
         Write-Host "[i] Restarting Ayodhya ORB to load the update ($restarts)..."
