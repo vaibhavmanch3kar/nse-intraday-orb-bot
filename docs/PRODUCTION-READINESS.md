@@ -1,6 +1,6 @@
 # Ayodhya ORB 2.0: production-readiness report
 
-Built 2026-11-18 16:42 by `readiness.py` from the evidence listed here. Code version `v1.9.0-50-g0ce50d8`.
+Built 2026-11-19 01:33 by `readiness.py` from the evidence listed here. Code version `v1.9.0-58-gef5f2c5`.
 
 This report states what the evidence shows. It is not advice on whether to trade.
 
@@ -15,13 +15,13 @@ This report states what the evidence shows. It is not advice on whether to trade
 ### Platform
 
 - **PASS** 25 of 25 requirements have passing tests
-- **PASS** paper replay of 237 days: the trading loop and the backtest took the same trade 100.0% of the time (328 shared, 0 only in the loop, 0 only in the backtest), 0 errors
+- **PASS** paper replay of 238 days: the trading loop and the backtest took the same trade 100.0% of the time (330 shared, 0 only in the loop, 0 only in the backtest), 0 errors
 - **PASS** nothing is NOT working right now
 - **PASS** no risk limit is looser than its built-in value
 
 ### Strategy
 
-- **FAIL** one-year backtest of the present rules: 334 trades, -16.18%, average -0.20R (range -0.25 to -0.15)
+- **FAIL** one-year backtest of the present rules: 336 trades, -16.31%, average -0.20R (range -0.25 to -0.15)
 - **FAIL** lab: 6 ideas tested by walk-forward, none passed
 - **FAIL** forward test on unseen data: nothing has passed (0 registered)
 - **OPEN** real-money record: 1 closed trade(s), net ₹-3.96; the checkpoint needs 30 trades and even then is not proof
@@ -35,7 +35,7 @@ This report states what the evidence shows. It is not advice on whether to trade
 
 ## Tests
 
-843 passed, 0 failed, 0 skipped, in 71 test files.
+844 passed, 0 failed, 0 skipped, in 71 test files.
 
 | | Area | Requirement | Tests passed | Result |
 |---|---|---|---|---|
@@ -67,15 +67,15 @@ This report states what the evidence shows. It is not advice on whether to trade
 
 ## Paper replay of the trading loop
 
-The real trading loop (`bot.Bot.cycle`) was driven through 237 archived trading days (2025-12-03 to 2026-11-17, 5925 rounds) on virtual money, with a simulated clock, and compared with the backtest of the same days.
+The real trading loop (`bot.Bot.cycle`) was driven through 238 archived trading days (2025-12-03 to 2026-11-18, 5950 rounds) on virtual money, with a simulated clock, and compared with the backtest of the same days.
 
 | | Trading loop | Backtest |
 |---|---|---|
-| Trades | 328 | 328 |
-| Net result | ₹-15,773.21 | ₹-15,770.51 |
+| Trades | 330 | 330 |
+| Net result | ₹-15,907.42 | ₹-15,904.74 |
 
-- The same trade (day, stock, direction) in both: 328 (100.0% agreement).
-- Of those, same quantity: 313; same exit reason: 328.
+- The same trade (day, stock, direction) in both: 330 (100.0% agreement).
+- Of those, same quantity: 315; same exit reason: 330.
 - Only in the loop: 0. Only in the backtest: 0.
 - Rounds that raised an error: 0.
 - What a replay cannot show: real order fills, a broker outage, or delays in live prices.
@@ -111,7 +111,7 @@ The real trading loop (`bot.Bot.cycle`) was driven through 237 archived trading 
 
 ## The running system when this was built
 
-- Health: warn; needs a look: recon.
+- Health: ok.
 - Zerodha login on disk: protected.
 - Risk limits looser than built: none.
 - Where this PC keeps its secrets is shown on the dashboard's Readiness page, not in this file.
