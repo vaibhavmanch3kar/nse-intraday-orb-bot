@@ -346,7 +346,8 @@ def test_live_page_and_popup_feed_carry_the_watchdog_record(monkeypatch):
     try:
         with urllib.request.urlopen(f"http://127.0.0.1:{srv.server_address[1]}/api/zerodha/events?since=-1") as r:
             d = json.loads(r.read().decode())
-        assert [n["tone"] for n in d["notices"]] == ["dn", "warn"]
+        wd = [n for n in d["notices"] if not n["key"].startswith("health-")]      # health alerts follow (health.py)
+        assert [n["tone"] for n in wd] == ["dn", "warn"] and d["notices"][:2] == wd
     finally:
         srv.shutdown()
         accounts.reset_zerodha_events()
