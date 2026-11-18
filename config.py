@@ -32,6 +32,21 @@ def load_user_env():
                     pass
     except OSError:
         pass
+    load_secret_store()
+
+
+def load_secret_store():
+    """A secret that is NOT in the Windows settings is taken from the protected store (secretbox.py), if it was
+    moved there with secure_secrets.py. A value in the Windows settings always wins. Never raises."""
+    try:
+        import secretbox
+        for name in secretbox.names():
+            if name in _SECRET_VARS and not os.environ.get(name):
+                value = secretbox.get(name)
+                if value:
+                    os.environ[name] = value
+    except Exception:  # noqa: BLE001 - a store problem must look like "key not set", never stop the program
+        pass
 
 
 load_user_env()

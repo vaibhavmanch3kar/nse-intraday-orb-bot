@@ -76,9 +76,9 @@ def logged_in():
         return False
 
 
-def checks(now=None, status=None, login=None, disk_free_gb=None):
+def checks(now=None, status=None, login=None, disk_free_gb=None, store=None):
     """Every check, in the order shown. `status` is the bot's saved status (read from the file when not given);
-    `login` and `disk_free_gb` are only passed by tests."""
+    `login`, `disk_free_gb` and `store` are only passed by tests."""
     now = now or now_ist()
     s = status if status is not None else (_read(os.path.join(C.DATA_DIR, "status.json")) or {})
     session = watchdog.in_session(now)
@@ -151,6 +151,20 @@ def checks(now=None, status=None, login=None, disk_free_gb=None):
                           "not logged in today: Kite prices and real-money trading need it"))
     else:
         out.append(_check("login", "Zerodha login", OFF, "not logged in; not needed right now"))
+
+    # 5b. how the saved login is kept on disk
+    try:
+        import kite_proxy
+        kept = kite_proxy.token_storage() if store is None else store
+    except BaseException:  # noqa: BLE001
+        kept = "none"
+    if kept == "plain":
+        out.append(_check("login_store", "Login kept safely", WARN, "the saved login is in plain text; it is "
+                          "protected by Windows the next time it is read or you log in"))
+    elif kept == "protected":
+        out.append(_check("login_store", "Login kept safely", OK, "protected by Windows for this user on this PC"))
+    else:
+        out.append(_check("login_store", "Login kept safely", OFF, "no login is saved"))
 
     # 6. the bot's books against Zerodha (real money only)
     recon = s.get("recon") or {}

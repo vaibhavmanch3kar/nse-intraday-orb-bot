@@ -55,9 +55,13 @@ def test_everything_working_reads_ok(isolated):
     beat(isolated)
     rows = health.checks(NOW, good(), login=True, disk_free_gb=40.0)
     st = states(rows)
-    assert [r["key"] for r in rows] == ["bot", "heartbeat", "watchdog", "feed", "login", "recon", "entries",
-                                        "day_loss", "crashes", "backup", "disk"]
-    assert {k: v for k, v in st.items() if k != "backup"} == {k: "ok" for k in st if k != "backup"}
+    assert [r["key"] for r in rows] == ["bot", "heartbeat", "watchdog", "feed", "login", "login_store", "recon",
+                                        "entries", "day_loss", "crashes", "backup", "disk"]
+    skip = ("backup", "login_store")
+    assert {k: v for k, v in st.items() if k not in skip} == {k: "ok" for k in st if k not in skip}
+    kept = {k: states(health.checks(NOW, good(), login=True, disk_free_gb=40.0, store=k))["login_store"]
+            for k in ("protected", "plain", "none")}
+    assert kept == {"protected": "ok", "plain": "warn", "none": "off"}
     assert st["backup"] == "warn"                                 # no backup has been made in this empty folder
     assert "REAL MONEY" in rows[0]["detail"] and health.overall(rows) == "warn"
 

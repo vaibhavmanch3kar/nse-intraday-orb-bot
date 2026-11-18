@@ -119,25 +119,60 @@ def _last_token_reset(now):
     return reset if now >= reset else reset - dt.timedelta(days=1)
 
 
+def _write_token_file(data):
+    tmp = TOKEN_FILE.with_name(TOKEN_FILE.name + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2))
+    os.replace(tmp, TOKEN_FILE)
+
+
 def load_token():
+    """Today's access token, or None (no login, yesterday's login, or a file this Windows user cannot read).
+    The token is kept protected by Windows (secretbox.py). A file from before that, with the token in plain
+    text, is still read, and is rewritten protected the first time it is read."""
     if not TOKEN_FILE.exists():
         return None
     try:
         data = json.loads(TOKEN_FILE.read_text())
         created = dt.datetime.fromisoformat(data["created"])
-    except (ValueError, KeyError, json.JSONDecodeError):
+    except (ValueError, KeyError, TypeError, json.JSONDecodeError, OSError):
         return None
     if created < _last_token_reset(dt.datetime.now(IST)):
         return None
-    return data["access_token"]
+    import secretbox
+    if "enc" in data:
+        try:
+            return secretbox.unprotect(data["enc"])
+        except (secretbox.Unavailable, ValueError, UnicodeDecodeError):
+            return None                      # protected by another user or PC, or damaged: log in again
+    token = data.get("access_token")
+    if token and secretbox.available():
+        try:                                 # an older, plain file: protect it now; on any problem leave it as it is
+            _write_token_file({"enc": secretbox.protect(token), "user_id": data.get("user_id"),
+                               "created": data["created"]})
+        except (secretbox.Unavailable, OSError):
+            pass
+    return token or None
 
 
 def save_token(access_token, user_id):
-    TOKEN_FILE.write_text(json.dumps({
-        "access_token": access_token,
-        "user_id": user_id,
-        "created": dt.datetime.now(IST).isoformat(),
-    }, indent=2))
+    """Save today's login with the token protected by Windows. Only where Windows protection is not usable
+    (not Windows, or Windows refuses) is it saved as before, in plain text; token_storage() says which."""
+    import secretbox
+    data = {"user_id": user_id, "created": dt.datetime.now(IST).isoformat()}
+    try:
+        data["enc"] = secretbox.protect(access_token)
+    except secretbox.Unavailable:
+        data["access_token"] = access_token
+    _write_token_file(data)
+
+
+def token_storage():
+    """'protected', 'plain' or 'none': how the saved login is stored. The token itself is not read."""
+    try:
+        data = json.loads(TOKEN_FILE.read_text())
+    except (OSError, ValueError):
+        return "none"
+    return "protected" if "enc" in data else "plain" if data.get("access_token") else "none"
 
 
 # ---------------------------------------------------------------- kite client
