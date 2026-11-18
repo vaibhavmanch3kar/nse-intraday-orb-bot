@@ -2316,8 +2316,9 @@ def render_rajya(q=None):
     budget = (
         "<div class='kgrid'>"
         + _kpi("At risk to stops", _inr(b["at_risk"]), f"{_pct(b['at_risk_pct'], 2)} of the bot's {_inr(b.get('base'))}")
-        + _kpi("Daily loss limit", f"{_inr(b['day_left'])} <small>left of {_inr(b['day_limit'])}</small>",
-               _meter((b["day_limit"] - b["day_left"]) / b["day_limit"] * 100) if b["day_limit"] else "")
+        + _kpi("Daily loss limit left", _inr(b["day_left"]),
+               (_meter((b["day_limit"] - b["day_left"]) / b["day_limit"] * 100) if b["day_limit"] else "")
+               + f"of today's {_inr(b['day_limit'])}")
         + _kpi("In the market", f"{_pct(b['exposure_pct'], 0)} <small>of {b['exposure_limit_pct']:g}%</small>",
                _meter((b["exposure_pct"] or 0) / b["exposure_limit_pct"] * 100) if b["exposure_limit_pct"] else "")
         + _kpi("Open intraday positions", f"{b['open']} <small>of {b['open_limit']}</small>")
