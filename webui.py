@@ -211,6 +211,11 @@ input[type=number],input[type=search],select{background:var(--surface);color:var
   .kgrid{grid-template-columns:repeat(3,minmax(0,1fr))}
   .tabs a small{display:none}
 }
+/* eight tabs do not fit beside the brand and the account switch below this width: give them their own row */
+@media (max-width:1500px){
+  .top-in{flex-wrap:wrap;row-gap:4px}
+  .tabs{order:3;flex:1 0 100%}
+}
 /* ---------- phone ---------- */
 @media (max-width:760px){
   body{font-size:14.5px}

@@ -59,3 +59,4 @@ def test_swarajya_names_are_addresses_and_the_bar_scrolls_to_the_current_page():
     assert "u.path in PAGE_ALIASES" in src
     page = web.render()
     assert webui.NAV_JS in page and "overflow-x:auto" in webui.css()
+    assert ".tabs{order:3;flex:1 0 100%}" in webui.css()        # own row when the header is too narrow for eight
