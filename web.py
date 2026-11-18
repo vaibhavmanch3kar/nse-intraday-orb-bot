@@ -980,10 +980,42 @@ def live_notice(s, running):
             f"or <a href='/trades'>{T.term('trades')}</a> for history.</div>")
 
 
+def start_mode(now=None):
+    """(live, sentence): the mode a bot started now would trade in. Decided exactly as the bot decides it: the
+    two Windows settings plus today's arming on this dashboard. Start never changes any of them."""
+    import livemode
+    env_live = (livemode.windows_setting("DRY_RUN").strip().lower() == "false"
+                and livemode.windows_setting("CONFIRM_LIVE").strip() == "YES")
+    live, note = livemode.bot_mode(env_live, now)
+    if live:
+        return True, "REAL MONEY (the Windows settings are on and real money was armed today)"
+    return False, "PAPER (virtual money)" + ("; real money is not armed today" if note else "")
+
+
+def start_bot():
+    """Start the bot the way the watchdog does (run_bot.ps1 as its own process). Returns a sentence for the
+    page. A bot that is already running is left alone."""
+    import watchdog
+    probe = watchdog.RealProbe()
+    if probe.bot_running():
+        return "The bot is already running."
+    ok = probe.start_bot()
+    watchdog.log("dashboard: Start pressed - " + ("bot start requested" if ok else "the start request FAILED"))
+    return ("Starting the bot. It appears here within a minute." if ok else
+            "The bot could not be started. Start it with 2-START.bat and look at data\\logs\\launcher.log.")
+
+
 def live_controls(s, running):
-    """Pause/Resume and Stop (both ask first). Shown only while the bot runs."""
+    """Start (while the bot is not running), or Pause/Resume and Stop (while it runs). All ask first."""
     if not running:
-        return ""
+        live, mode = start_mode()
+        ask = (f"Start the bot now? It will trade in {mode.split(' (')[0]} mode."
+               + (" REAL orders can be placed." if live else ""))
+        return (f"<section class='card'><div class='hd'><span class='theme'>{T.term('controls')}</span></div>"
+                + _post_btn("/start", "▶ Start bot", ask, "red" if live else "ghost")
+                + f"<div class='muted small'>It would start in <b>{html.escape(mode)}</b>. Start only starts the "
+                  f"program: the mode comes from your own settings and today's arming, never from this button."
+                  f"</div></section>")
     paused = s.get("paused")
     ask = "Resume new entries?" if paused else "Pause new entries? Open positions keep being managed."
     label = "▶ Resume new entries" if paused else f"⏸ {T.name('pause')} · Pause new entries"
@@ -3606,6 +3638,13 @@ class Handler(BaseHTTPRequestHandler):
             msg = (zerodha_logout() if form.get("confirm", [""])[0] == "yes"
                    else "Not logged out: the logout needs your confirmation.")
             self._redirect("/?msg=" + quote(msg))
+            return
+        if self.path == "/start":
+            from urllib.parse import quote
+            if (form.get("confirm") or [""])[0] != "yes":
+                self._redirect("/?msg=" + quote("Not started: starting the bot needs your confirmation."))
+                return
+            self._redirect("/?msg=" + quote(start_bot()))
             return
         if self.path == "/pause":
             open(C.PAUSE_FILE, "w").close()
