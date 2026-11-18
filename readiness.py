@@ -103,6 +103,17 @@ COMPLIANCE = [
 ]
 
 
+# Things the testing itself turned up that need the owner's decision (each with the date it was found).
+FINDINGS = [
+    ("2026-11-18", "The cool-down count depends on the order in which same-candle exits are recorded",
+     "When a winning and a losing position close on the same candle, the 'three losses in a row' count depends on "
+     "which is recorded first. The trading loop records them in the order they were opened, the backtest in another "
+     "order. This is the cause of every difference in the one-year paper replay (6 trades: twice in the year one of "
+     "the two went into a cool-down and the other did not). The rule needs one stated order; that is a risk-rule "
+     "decision and was not changed."),
+]
+
+
 def now_ist():
     return dt.datetime.now(IST)
 
@@ -290,6 +301,8 @@ def verdicts(reqs, replay, strategy, state):
         ops.append((OPEN, f"{g['unpushed']} commits exist only on this PC (not pushed)"))
     if g.get("uncommitted"):
         ops.append((OPEN, f"{g['uncommitted']} changed file(s) are not committed"))
+    for found, name, text in FINDINGS:
+        ops.append((OPEN, f"Found {found}: {name}. {text}"))
     for name, text, checked in COMPLIANCE:
         if checked is None:
             ops.append((OPEN, f"{name}: {text}"))

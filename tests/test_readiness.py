@@ -104,6 +104,7 @@ def test_operations_lists_what_the_owner_still_has_to_decide():
     text = " | ".join(t for _, t in verdict()["operations"]["reasons"])
     assert "1 secret(s) are kept as plain text" in text and "KITE_API_KEY" in text and "40 commits exist only on this PC" in text
     assert "7 Dec 2026" in text and "phone" in text
+    assert "The cool-down count depends on the order in which same-candle exits are recorded" in text
     clean = " | ".join(t for _, t in verdict(st=state(plain=(), unpushed=0))["operations"]["reasons"])
     assert "plain text" not in clean and "commits" not in clean
 
