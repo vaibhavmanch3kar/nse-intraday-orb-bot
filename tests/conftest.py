@@ -70,6 +70,9 @@ def isolated(tmp_path, monkeypatch):
         monkeypatch.setattr(bot.Bot, "price_source", lambda self: "kite")
         import web
         monkeypatch.setattr(web, "STATUS_POLL_SEC", 0.0)      # tests rewrite the status file and read it at once
+        # web.STATUS_FILE is fixed when web is first imported, so without this a page drawn in a test read the
+        # REAL data/status.json: two tests failed in the main folder once the real bot had traded real money.
+        monkeypatch.setattr(web, "STATUS_FILE", str(tmp_path / "status.json"))
     except ImportError:
         pass
     yield tmp_path
