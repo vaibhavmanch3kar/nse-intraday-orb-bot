@@ -1512,7 +1512,9 @@ def job_strip(name, result, fresh, refresh_url, unit):
         button = btn("Retry")
     else:
         state, icon, cls = "Completed", "✓", "ok"
-        text = f"updated {_hm(built)}, {_ago(built)}"
+        took = (f" · took {_mmss(s['elapsed_sec'])} for {s['done']} {unit}"
+                if s.get("elapsed_sec") and s.get("finished") else "")
+        text = f"updated {_hm(built)}, {_ago(built)}{took}"
     data = (f" data-running='1' data-job='{name}' data-unit='{html.escape(unit)}' data-tail='{html.escape(tail)}'"
             if running else "")
     return (f"<div class='jobstrip {cls}' role='status' aria-live='polite'{data}>"
@@ -1593,6 +1595,7 @@ built {built} from 15-min data</span></div>{note}
 {_kpi("Total", f"{total:+.2f}R", "after slippage and charges", _cls(total))}
 {_kpi(f"At {C.RISK_PER_TRADE_PCT:g}% risk on {_inr(cap)}", _signed(at_risk),
       f"about · {html.escape(cap_label)} · less when a position limit applies", _cls(at_risk))}</div>{progress_note}
+{review_funnel(r)}
 <section class="card flush"><div class="hd">Stocks <span class="end"><span class="tag">chart = 15-min closes ·
 {T.ui('band_colour')} band = opening range</span></span></div><table class="rt">
 <tr><th>Stock</th><th>Day</th><th class="r">Opening range</th><th class="r">Day %</th><th>Signal → outcome</th>
@@ -1605,6 +1608,33 @@ should beat these odds. The replays also inherit the stock's recent intraday dri
 The verdict compares target-first vs stop-first at 1R with break-even (50%): within 5 points is a coin flip.<br>
 {T.SCROLL} History is the real record: the bot's same rules (same direction) run on each earlier session.</div></details>"""
     return page("Session review", "/review", body)
+
+
+def review_funnel(r):
+    """One line under the Review's figures: of N stocks, how many gave a signal and why the others did not
+    (taken from each stock's own note), so 'only 3 signals' explains itself."""
+    rows = r.get("rows") or {}
+    if not rows:
+        return ""
+    groups, signals = {}, 0
+    for x in rows.values():
+        if x.get("signal_time") or x.get("direction"):
+            signals += 1
+            continue
+        note = (x.get("note") or "").strip()
+        why = note.split(" ", 1)[1] if note[:2].isdigit() and " " in note else note     # drop the leading HH:MM
+        low = why.lower()
+        key = ("volume too low" if low.startswith("volume") else
+               "opening range too wide or too narrow" if low.startswith("range") else
+               "breakout came after the last entry time" if "after" in low else
+               "never closed outside the opening range" if "inside" in low or not low else
+               "price on the wrong side of VWAP" if "vwap" in low else
+               "index moving the other way" if "index" in low or "nifty" in low else why)
+        groups[key] = groups.get(key, 0) + 1
+    parts = [f"<b>{signals}</b> gave a signal"] + [f"{n} {html.escape(k)}" for k, n in
+                                                     sorted(groups.items(), key=lambda kv: -kv[1])]
+    return (f"<div class='muted small' role='note' style='margin:0 0 14px'>Of {len(rows)} stocks: "
+            f"{' · '.join(parts)}. Each stock's own reason is in the table below.</div>")
 
 
 def sizing_capital(s=None):

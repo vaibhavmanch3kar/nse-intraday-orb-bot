@@ -202,3 +202,32 @@ def test_no_signal_yet_is_explained(monkeypatch):
     assert "no signal yet" in card and "close outside the opening range" in card and "before 12:00" in card
     assert "costs more than" not in card                          # nothing is out of reach with Rs 1,00,000
     assert "signals" in web.live_regions("paper", s)
+
+
+# ---------------------------------------------------------------- 5/6. Review explains its count; jobs say how long
+def test_review_says_why_the_other_stocks_gave_no_signal():
+    def none(note):
+        return {"signal_time": None, "direction": None, "note": note}
+
+    r = {"rows": {"A": {"signal_time": "09:45", "direction": "LONG", "note": ""},
+                  "B": {"signal_time": "10:15", "direction": "SHORT", "note": ""},
+                  "C": {"signal_time": "10:00", "direction": "LONG", "note": ""},
+                  "D": none("09:30 volume 0.5x < 1.2x"), "E": none("09:45 volume 0.9x < 1.2x"),
+                  "F": none("12:15 SHORT after 12:00"), "G": none("range 1.61% > 1.5%"),
+                  "H": none("inside range"), "I": none("")}}
+    line = web.review_funnel(r)
+    assert "Of 9 stocks: <b>3</b> gave a signal" in line
+    assert "2 volume too low" in line and "1 breakout came after the last entry time" in line
+    assert "1 opening range too wide or too narrow" in line and "2 never closed outside the opening range" in line
+    assert web.review_funnel({"rows": {}}) == ""
+
+
+def test_finished_job_says_how_long_it_took(monkeypatch):
+    class Done:
+        def snapshot(self):
+            return {"state": "idle", "done": 50, "total": 50, "elapsed_sec": 14.2, "step": "",
+                    "finished": "2026-11-18T10:00:14+05:30", "error": ""}
+
+    monkeypatch.setattr(web.jobs, "get", lambda name: Done())
+    strip = web.job_strip("scanner", {"built": "2026-11-18T10:00:14+05:30"}, {"stale": False}, "/scanner?refresh=1", "stocks")
+    assert "Completed" in strip and "took 0:14 for 50 stocks" in strip
