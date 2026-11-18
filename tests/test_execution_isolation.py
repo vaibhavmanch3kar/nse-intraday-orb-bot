@@ -16,7 +16,7 @@ ORDER_CALLS = {"place_order", "modify_order", "cancel_order", "exit_order", "pla
                "convert_position", "place_mf_order", "cancel_mf_order", "place_mf_sip", "modify_mf_sip", "cancel_mf_sip",
                "initiate_holdings_authorisation"}
 ANALYSIS = ("chanakya.py", "rajya.py", "yantra.py", "yantra_strategies.py", "bakhar.py", "scanner.py", "review.py",
-            "health.py", "edge.py", "timemachine.py", "eventlog.py", "secretbox.py", "secure_secrets.py")
+            "health.py", "edge.py", "timemachine.py", "eventlog.py", "secretbox.py", "secure_secrets.py", "readiness.py")
 
 
 def project_files():
@@ -61,7 +61,10 @@ def test_only_the_broker_module_can_send_change_or_cancel_an_order():
 
 def test_only_the_bot_loads_the_broker_module():
     assert [n for n in project_files() if "broker" in imports(n)] == ["bot.py"]
-    assert [n for n in project_files() if "bot" in imports(n) and n != "bot.py"] == []
+    # paper_replay.py drives the real loop on purpose, on virtual money only (tests/test_paper_replay.py proves it
+    # refuses to run live); nothing else may load the bot, and nothing the dashboard loads may load paper_replay
+    assert [n for n in project_files() if "bot" in imports(n) and n != "bot.py"] == ["paper_replay.py"]
+    assert [n for n in project_files() if "paper_replay" in imports(n)] == []
 
 
 @pytest.mark.parametrize("name", ANALYSIS + ("web.py", "webui.py", "accounts.py", "jobs.py"))
