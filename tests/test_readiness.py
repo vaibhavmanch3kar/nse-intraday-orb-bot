@@ -104,7 +104,8 @@ def test_operations_lists_what_the_owner_still_has_to_decide():
     text = " | ".join(t for _, t in verdict()["operations"]["reasons"])
     assert "1 secret(s) are kept as plain text" in text and "KITE_API_KEY" in text and "40 commits exist only on this PC" in text
     assert "7 Dec 2026" in text and "phone" in text
-    assert "The cool-down count depends on the order in which same-candle exits are recorded" in text
+    assert "cool-down count" not in text                       # settled findings are not open items...
+    assert all(len(f) == 4 for f in R.FINDINGS) and R.FINDINGS[0][3].startswith("Settled 2026-11-18")
     clean = " | ".join(t for _, t in verdict(st=state(plain=(), unpushed=0))["operations"]["reasons"])
     assert "plain text" not in clean and "commits" not in clean
 
@@ -121,7 +122,8 @@ def test_build_writes_the_result_and_the_report_and_changes_nothing_else(isolate
     for text in ("# Ayodhya ORB 2.0: production-readiness report", "It is not advice on whether to trade.",
                  "| PLATFORM: is the software safe and correct? | **PASS** |", "| STRATEGY: do the trading rules have a proven edge? | **FAIL** |",
                  "There is NO evidence that the present trading rules make money.", "## Paper replay of the trading loop",
-                 "| K1 | Capital protection (Kavach) |", "Closing session change on 7 Dec 2026", "**not yet**", "## How to repeat this"):
+                 "| K1 | Capital protection (Kavach) |", "Closing session change on 7 Dec 2026", "**not yet**", "## How to repeat this",
+                 "## What the testing itself found", "counted losses first"):     # ...but stay in the report
         assert text in md, text
     assert "KITE_API_KEY: Windows settings (plain text)" in md and "s3cr3t" not in md
 

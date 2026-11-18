@@ -42,7 +42,7 @@ REQUIREMENTS = [
     ("K1", "Capital protection (Kavach)", "One risk engine decides every new position, in paper, real money and backtests alike",
      ["test_kavach", "test_backtest_engine"]),
     ("K2", "Capital protection (Kavach)", "Risk per trade, open positions, trades per day, daily loss limit and the cool-down after losses are enforced",
-     ["test_kavach_limits", "test_risk_costs"]),
+     ["test_kavach_limits", "test_risk_costs", "test_cooldown_order"]),
     ("K3", "Capital protection (Kavach)", "No real-money entry on delayed, stale, missing or invalid prices",
      ["test_kavach_data", "test_data_outage"]),
     ("K4", "Capital protection (Kavach)", "Positions are sized from the real balance and skipped when not even one share is affordable",
@@ -103,14 +103,16 @@ COMPLIANCE = [
 ]
 
 
-# Things the testing itself turned up that need the owner's decision (each with the date it was found).
+# Things the testing itself turned up: (date found, what, detail, how it was settled or None while it is open).
 FINDINGS = [
-    ("2026-11-18", "The cool-down count depends on the order in which same-candle exits are recorded",
-     "When a winning and a losing position close on the same candle, the 'three losses in a row' count depends on "
-     "which is recorded first. The trading loop records them in the order they were opened, the backtest in another "
-     "order. This is the cause of every difference in the one-year paper replay (6 trades: twice in the year one of "
-     "the two went into a cool-down and the other did not). The rule needs one stated order; that is a risk-rule "
-     "decision and was not changed."),
+    ("2026-11-18", "The cool-down count depended on the order in which same-candle exits were recorded",
+     "When a winning and a losing position closed on the same candle, the 'three losses in a row' count depended on "
+     "which was recorded first. The trading loop recorded them in the order they were opened, the backtest in "
+     "another order. This was the cause of every difference in the first one-year paper replay (6 trades: twice in "
+     "the year one of the two went into a cool-down and the other did not).",
+     "Settled 2026-11-18 by the owner's decision: exits recorded at the same moment are counted losses first "
+     "(risk.State._count_streak, tests/test_cooldown_order.py). One-year backtest before: 333 trades, -16.46%; "
+     "after: 334 trades, -16.18%."),
 ]
 
 
@@ -301,8 +303,9 @@ def verdicts(reqs, replay, strategy, state):
         ops.append((OPEN, f"{g['unpushed']} commits exist only on this PC (not pushed)"))
     if g.get("uncommitted"):
         ops.append((OPEN, f"{g['uncommitted']} changed file(s) are not committed"))
-    for found, name, text in FINDINGS:
-        ops.append((OPEN, f"Found {found}: {name}. {text}"))
+    for found, name, text, settled in FINDINGS:
+        if not settled:
+            ops.append((OPEN, f"Found {found}: {name}. {text}"))
     for name, text, checked in COMPLIANCE:
         if checked is None:
             ops.append((OPEN, f"{name}: {text}"))
@@ -331,6 +334,7 @@ def build(tests=None, now=None, replay=None, write=True, code=0):
                                                                "failures": {f: t["failures"] for f, t in tests.items() if t["failures"]}},
            "requirements": reqs, "replay": replay, "strategy": strategy, "state": state,
            "compliance": [{"name": n, "text": t, "checked": c} for n, t, c in COMPLIANCE],
+           "findings": [{"found": f, "name": n, "text": t, "settled": s} for f, n, t, s in FINDINGS],
            "verdicts": verdicts(reqs, replay, strategy, state)}
     if write:
         os.makedirs(C.DATA_DIR, exist_ok=True)
@@ -394,6 +398,11 @@ def markdown(res):
               "- What a replay cannot show: real order fills, a broker outage, or delays in live prices."]
     else:
         L.append("Not run.")
+    if res.get("findings"):
+        L += ["", "## What the testing itself found", ""]
+        for f in res["findings"]:
+            L += [f"- **{f['name']}** (found {f['found']}). {f['text']}",
+                  f"  - {'**' + f['settled'] + '**' if f['settled'] else '**Open: needs a decision.**'}"]
     s = res["strategy"]
     L += ["", "## What is known about the trading rules", ""]
     if s.get("lab"):
