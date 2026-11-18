@@ -70,15 +70,28 @@ On a weekday (not an NSE holiday), **before 9:15 AM IST**:
    its figures update by themselves every 10 seconds, without reloading the page.
 3. The bot takes trades from about 9:45 AM, closes everything by **3:10 PM**, and **stops by itself at 3:35 PM**.
 
-To stop early, click **Stop bot** on the dashboard, double-click **`7-STOP-BOT.bat`** (it waits until the bot has
-really stopped), or close the bot's black window. Stopping the "Kite ORB Bot" task in Task Scheduler stops the bot
-too. The dashboard keeps running after the bot stops.
+To stop early, click **Stop bot** on the dashboard or double-click **`7-STOP-BOT.bat`** (it waits until the bot has
+really stopped). Stopping the "Kite ORB Bot" task in Task Scheduler stops the bot too. The dashboard keeps running
+after the bot stops. **Don't stop it by closing the black window:** with the watchdog on (Step 6) that looks like
+an accident, and the bot is started again within 5 minutes.
 
 ### Step 6 (optional): Start automatically every weekday
 
 **Double-click `4-SCHEDULE.bat`.** Windows will start the bot at 9:00 AM Monday to Friday.
 Your PC must be **on, logged in and not sleeping** during market hours (set *Sleep* to *Never* in Windows power settings).
 To undo it, double-click `5-UNSCHEDULE.bat`.
+
+It also adds the **watchdog** ("Kite ORB Watchdog" task, `watchdog.py`), which keeps the bot running on a trading day:
+
+- If the bot ends with an error, it is started again after 10 seconds. The full error is saved in
+  `data\logs\crash_<time>.txt`; every start and exit is listed in `data\logs\launcher.log`.
+- Every 5 minutes from 9:05 AM to 3:45 PM it checks that the bot and the dashboard are running and starts whichever
+  is missing. It also ends a bot that has not responded for 5 minutes, so that it starts again.
+- It gives up after 5 automatic starts in a day, and it never starts a bot you stopped on purpose that day
+  (Stop button, `7-STOP-BOT.bat`, or stopping the task) until you start it yourself or the next 9:00 AM start.
+- A bot started by the watchdog is an ordinary start: paper unless real money was armed that day, and it re-checks
+  its positions against Zerodha first. The dashboard shows a popup for every crash and restart.
+- It can't help when the PC is off, asleep or offline. `python watchdog.py status` shows today's record.
 
 ---
 

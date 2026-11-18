@@ -808,12 +808,14 @@ class Bot:
         self.apply_paper_capital()
         self.write_status(now_ist())
         self.check_restarted()
+        watchdog.bot_started(now_ist(), os.getpid())    # any start ends "stopped on purpose today"
         waiting_login_logged = False
         while True:
             if os.path.exists(C.STOP_FILE):
                 self.note("STOP file found - Ayodhya ORB shutting down (open positions stay protected by exchange stops in live mode)")
                 self.journal_finish(now_ist(), "stopped")
                 os.remove(C.STOP_FILE)
+                watchdog.mark_stopped("Stop button or STOP file")   # the watchdog leaves it stopped today
                 break
             if self.launcher_gone():
                 # Stopping the "Kite ORB Bot" task (or killing run_bot.ps1) ends only the launcher; v1.8.0
@@ -821,6 +823,7 @@ class Bot:
                 self.note("The launcher (run_bot.ps1 / the scheduled task) was stopped - Ayodhya ORB shutting down "
                           "(open positions stay protected by exchange stops in live mode)")
                 self.journal_finish(now_ist(), "stopped")
+                watchdog.mark_stopped("the launcher or the scheduled task was stopped")
                 break
             rc = self.apply_if_requested(now_ist()) or self.switch_mode_if_requested(now_ist())
             if rc:

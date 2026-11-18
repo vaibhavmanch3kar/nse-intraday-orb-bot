@@ -194,3 +194,107 @@ def test_launcher_really_starts_a_crashed_bot_again(tmp_path):
     log_text = (tmp_path / "data" / "logs" / "launcher.log").read_text(encoding="utf-8-sig")
     assert log_text.count("starting the bot") == 3 and log_text.count("exit code 1") == 2
     assert "watchdog says: RESTART test" in log_text and "exit code 0" in log_text
+
+
+# ---------------------------------------------------------------- item 4: the five-minute check
+class Probe:
+    def __init__(self, bot=True, dash=True):
+        self.bot, self.dash, self.did = bot, dash, []
+
+    def bot_running(self):
+        return self.bot
+
+    def dashboard_listening(self):
+        return self.dash
+
+    def start_bot(self):
+        self.did.append("bot")
+
+    def start_dashboard(self):
+        self.did.append("dashboard")
+
+    def kill(self, pid):
+        self.did.append(("kill", pid))
+
+
+def test_check_does_nothing_when_all_is_well_or_outside_market_hours():
+    p = Probe()
+    assert watchdog.check(t("10:00"), p) == [] and p.did == []
+    for when in (t("08:55"), t("15:31"), t("11:00", dt.date(2026, 11, 21))):
+        p = Probe(bot=False, dash=False)
+        assert watchdog.check(when, p) == [] and p.did == []
+
+
+def test_check_starts_a_missing_bot_and_dashboard():
+    p = Probe(bot=False, dash=False)
+    assert watchdog.check(t("10:00"), p) == ["started dashboard", "started bot"]
+    assert p.did == ["dashboard", "bot"]
+    d = watchdog.load(t("10:01"))
+    assert d["restarts"] == 1 and [e["kind"] for e in d["events"]] == ["dashboard", "restart"]
+
+
+def test_check_respects_a_deliberate_stop_but_still_keeps_the_dashboard():
+    watchdog.mark_stopped("Stop button or STOP file", now=t("09:50"))
+    p = Probe(bot=False, dash=False)
+    assert watchdog.check(t("10:00"), p) == ["started dashboard"] and p.did == ["dashboard"]
+    watchdog.bot_started(t("10:20"))                            # someone starts the bot by hand
+    assert not watchdog.stopped_on_purpose(t("10:21"))
+    p = Probe(bot=False)
+    assert watchdog.check(t("10:25"), p) == ["started bot"]
+
+
+def test_check_gives_up_after_five_starts_and_says_so_once():
+    for i in range(5):
+        assert watchdog.check(t(f"10:{i * 5:02d}"), Probe(bot=False)) == ["started bot"]
+    for i in range(2):
+        p = Probe(bot=False)
+        assert watchdog.check(t(f"10:{30 + i * 5:02d}"), p) == [] and p.did == []
+    assert [e["kind"] for e in watchdog.load(t("10:40"))["events"]].count("gave_up") == 1
+
+
+def test_crash_restarts_and_watchdog_starts_share_one_daily_limit():
+    for _ in range(3):
+        watchdog.after_exit(1, now=t("10:00"))
+    for i in range(2):
+        watchdog.check(t(f"10:{10 + i * 5:02d}"), Probe(bot=False))
+    assert watchdog.after_exit(1, now=t("10:30"))[0] == "STOP"
+
+
+def run_bot_until_stopped(monkeypatch, stop):
+    b = bot.Bot()
+    b.build = {"version": "test"}
+    monkeypatch.setattr(bot, "now_ist", lambda: t("10:00"))
+    monkeypatch.setattr(watchdog, "now_ist", lambda: t("10:00"))
+    monkeypatch.setattr(b, "cycle", lambda: None)
+    monkeypatch.setattr(b, "nap", lambda s: stop(b))
+    assert b.run() is None
+    return b
+
+
+def test_stop_button_marks_the_day_and_a_new_start_clears_it(monkeypatch):
+    run_bot_until_stopped(monkeypatch, lambda b: open(C.STOP_FILE, "w").close())
+    assert "Stop button" in watchdog.load(t("10:01"))["stopped"]
+    assert watchdog.after_exit(1, now=t("10:02"))[0] == "STOP"
+    run_bot_until_stopped(monkeypatch, lambda b: setattr(b, "launcher_gone", lambda: True))
+    d = watchdog.load(t("10:03"))
+    assert "launcher" in d["stopped"] and any(e["kind"] == "started" for e in d["events"])
+
+
+def test_real_probe_checks_without_touching_anything():
+    p = watchdog.RealProbe()
+    assert p.bot_running() in (True, False) and p.dashboard_listening(timeout=0.2) in (True, False)
+    assert "Win32_Process" in p.WMI_START and "WATCHDOG_CMD" in p.WMI_START     # started by Windows, not as a child
+
+
+def test_scheduled_tasks_script():
+    import subprocess
+    ps = open(os.path.join(ROOT, "register_task.ps1"), encoding="utf-8").read()
+    assert '"Kite ORB Bot"' in ps and '"Kite ORB Watchdog"' in ps and "watchdog.py check" in ps
+    assert "pythonw.exe" in ps and "-RepetitionInterval (New-TimeSpan -Minutes 5)" in ps
+    assert "-NoWatchdog" in ps and all(ord(c) < 128 for c in ps)
+    if os.name == "nt":
+        out = subprocess.run(["powershell", "-NoProfile", "-Command",
+                              "$e=$null;[void][System.Management.Automation.Language.Parser]::ParseFile("
+                              f"'{os.path.join(ROOT, 'register_task.ps1')}',[ref]$null,[ref]$e);$e.Count"],
+                             capture_output=True, text=True, timeout=60)
+        assert out.stdout.strip() == "0", out.stdout + out.stderr

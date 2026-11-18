@@ -114,7 +114,6 @@ def bot_started(now=None, pid=None):
         d["stopped"] = None
         add_event(d, "started", "bot started again after a deliberate stop", now)
     _save(d)
-    beat(now, pid)
     return d
 
 
@@ -234,14 +233,6 @@ def check(now=None, probe=None):
             add_event(d, "restart", f"the bot was not running: started it "
                                     f"({d['restarts']} of {MAX_RESTARTS} today)", now)
             done.append("started bot")
-    else:
-        age, pid = heartbeat(now)
-        trading = now >= _at(now.date(), C.MARKET_OPEN) + dt.timedelta(seconds=HANG_SEC)
-        if age is not None and pid and age > HANG_SEC and trading:
-            probe.kill(pid)
-            add_event(d, "hang", f"the bot had not responded for {age / 60:.0f} minutes: ended it so that it "
-                                 f"starts again (open positions keep their exchange stop-loss)", now)
-            done.append(f"ended hung bot {pid}")
     _save(d)
     return done
 
@@ -297,21 +288,35 @@ class RealProbe:
         except OSError:
             return False
 
-    def _spawn(self, args):
+    # A program started from inside a scheduled task belongs to that task: Windows can end it with the task, and
+    # the task counts as still running while it lives. So the watchdog asks Windows (WMI) to start the bot and
+    # the dashboard: they then run on their own, as the same user with the saved Windows settings, minimized.
+    WMI_START = ("$si = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ShowWindow=[uint16]7}; "
+                 "$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments "
+                 "@{CommandLine=$env:WATCHDOG_CMD; CurrentDirectory=$env:WATCHDOG_CWD; ProcessStartupInformation=$si}; "
+                 "exit [int]$r.ReturnValue")
+
+    def _spawn(self, command_line):
         import subprocess
-        si = subprocess.STARTUPINFO()
-        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        si.wShowWindow = 7                                   # SW_SHOWMINNOACTIVE: minimized, doesn't take focus
-        subprocess.Popen(args, cwd=ROOT, startupinfo=si, creationflags=subprocess.CREATE_NEW_CONSOLE,
-                         close_fds=True)
+        env = dict(os.environ, WATCHDOG_CMD=command_line, WATCHDOG_CWD=ROOT)
+        try:
+            r = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", self.WMI_START],
+                               env=env, capture_output=True, timeout=60,
+                               creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            ok = r.returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            ok = False
+        if not ok:
+            log(f"could not start through Windows (WMI): {command_line}")
+        return ok
 
     def start_bot(self):
-        self._spawn(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
-                     os.path.join(ROOT, "run_bot.ps1"), "-NoBrowser"])
+        return self._spawn(f'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "{os.path.join(ROOT, "run_bot.ps1")}" '
+                           f'-NoBrowser')
 
     def start_dashboard(self):
         py = os.path.join(ROOT, ".venv", "Scripts", "python.exe")
-        self._spawn([py if os.path.exists(py) else sys.executable, "web.py", "--no-browser"])
+        return self._spawn(f'"{py if os.path.exists(py) else sys.executable}" web.py --no-browser')
 
     def kill(self, pid):
         import subprocess
