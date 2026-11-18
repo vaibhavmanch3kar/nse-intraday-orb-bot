@@ -559,11 +559,16 @@ def _status_chips(s, running, view, ok_login, lag):
     src = "Kite" if ds.get("using") == "kite" else ("Yahoo" if ds.get("using") else None)
     data_chip = ""
     if src:
-        late = lag is not None and lag > 20
-        tip = f" title='{html.escape(ds.get('reason') or '')}'" if ds.get("reason") else ""
-        delay = "" if lag is None else f" · {lag:.0f} min behind"
+        # Prices arrive as 15-minute candles, so the newest finished candle is normally 0-16 minutes old. That
+        # age used to be shown as "N min behind", which read like a broken feed. Now: the candle's time, and a
+        # warning only when a candle is really late (watch_timing).
+        w = watch_timing(s)
+        late = w["state"] == "late" or (lag is not None and lag > 20)
+        why = ds.get("reason") or CANDLE_AGE_TIP
+        tip = f" title='{html.escape(why)}'"
+        delay = " · candle LATE" if late else (f" · last candle {w['last']}" if w["last"] else "")
         data_chip = (f"<span class='chip {'amber' if late or ds.get('reason') else 'ok'}'{tip}><i></i>"
-                     f"{src} data{delay}</span>")
+                     f"{src} data{html.escape(delay)}</span>")
     login_chip = (f"<span class='chip {'ok' if ok_login else ''}'><i></i>Zerodha: "
                   f"{'logged in' if ok_login else 'not logged in'}</span>")
     when = (s.get("time") or "")[11:19]
@@ -867,16 +872,31 @@ def live_controls(s, running):
             f"<div class='muted small'>Both ask before acting. Open positions keep their stop.</div></section>")
 
 
+CANDLE_AGE_TIP = ("Prices arrive as 15-minute candles. The newest finished candle is normally up to 16 minutes "
+                  "old: that is its age, not a delay in the data.")
+
+
+def candle_age_text(s, now=None):
+    """'finished 9 min ago · on time' / '... · LATE: ...' for the Data & limits card."""
+    lag = s.get("data_lag_min")
+    if lag is None:
+        return "-"
+    w = watch_timing(s, now)
+    if w["state"] == "late" or lag > 20:
+        return (f"finished {lag:.0f} min ago · <span class='warn'>LATE: a newer candle should have arrived</span>")
+    return (f"finished {lag:.0f} min ago · <span class='up'>on time</span> "
+            f"<span class='muted'>(a new candle every {C.INTERVAL_MIN} min; up to {C.INTERVAL_MIN + 1} min old is normal)</span>")
+
+
 def live_limits(s):
     cooldown = s.get("cooldown_until")
-    lag = s.get("data_lag_min")
-    lag_txt = "-" if lag is None else f"{lag:.0f} min"
+    lag_txt = candle_age_text(s)
     until = f" · <span class='warn'>until {html.escape(str(cooldown))}</span>" if cooldown else ""
     return (f"<details class='card' id='limits'><summary>Data &amp; limits</summary><dl class='facts'>"
             f"<dt>Loss streak</dt><dd>{_fmt(s.get('loss_streak'))} <span class='muted'>· {T.name('cooldown')} after "
             f"{C.LOSS_STREAK_LIMIT}</span>{until}</dd>"
             f"<dt>Price data</dt><dd>{data_source_text(s)}</dd>"
-            f"<dt>Data delay</dt><dd>{lag_txt}</dd>"
+            f"<dt>Newest candle</dt><dd>{lag_txt}</dd>"
             f"<dt>Per trade</dt><dd>{C.RISK_PER_TRADE_PCT:g}% risk · at most {C.MAX_OPEN_POSITIONS} positions, "
             f"{C.MAX_TRADES_PER_DAY} trades a day</dd>"
             f"<dt>{T.name('daily_loss')}</dt><dd>stop new trades at −{C.MAX_DAILY_LOSS_PCT:g}% in a day (booked + open)</dd>"
