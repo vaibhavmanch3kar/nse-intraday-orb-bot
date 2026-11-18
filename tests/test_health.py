@@ -64,6 +64,10 @@ def test_everything_working_reads_ok(isolated):
     assert kept == {"protected": "ok", "plain": "warn", "none": "off"}
     assert st["backup"] == "warn"                                 # no backup has been made in this empty folder
     assert "REAL MONEY" in rows[0]["detail"] and health.overall(rows) == "warn"
+    # ages are said in whole minutes: seconds would change the page on every refresh for no reason
+    assert rows[0]["detail"].endswith("status under a minute old") and rows[1]["detail"] == "last beat under a minute ago"
+    assert (health._mins(59), health._mins(60), health._mins(125), health._mins(601)) == (
+        "under a minute", "1 minute", "2 minutes", "10 minutes")
 
 
 def test_a_bot_that_is_down_in_market_hours_is_bad_but_a_deliberate_stop_is_not(isolated):

@@ -64,7 +64,8 @@ def _age(iso, now):
 
 
 def _mins(sec):
-    return f"{sec / 60:.0f} min" if sec >= 120 else f"{sec:.0f} s"
+    """An age in words. Whole minutes only: seconds would change on every refresh without telling anything."""
+    return "under a minute" if sec < 60 else "1 minute" if sec < 120 else f"{int(sec // 60)} minutes"
 
 
 def logged_in():
