@@ -27,6 +27,7 @@ import data_yahoo
 import marketdata
 import holidays
 import journal
+import kavach
 import livemode
 import reports
 import restart
@@ -518,34 +519,21 @@ class Bot:
         candidates.sort(key=lambda c: -(c[2]["vol_ratio"] or 0.0))
         for sym, closed, ev, row in candidates:
             last = closed[-1]
-            if now >= square_off_time:
-                continue
-            if paused:
-                row["reason"] += " (paused)"
-                continue
-            if not self.balance_ok:
-                row["reason"] += f" - skip: {self.balance_problem or 'Zerodha balance not read yet'}"
-                continue
-            ok, why = self.state.can_enter(sym, today, self.prices)
-            if not ok:
-                row["reason"] += f" - skip: {why}"
-                continue
             direction, stop = ev["signal"], ev["stop"]
             ref = self.prices.get(sym, last["c"])
-            risk_ps = abs(last["c"] - stop)
-            chased = (ref - last["c"]) if direction == "LONG" else (last["c"] - ref)
-            if chased > C.MAX_CHASE_R * risk_ps:
-                row["reason"] += f" - skip: price ran {chased / risk_ps:.1f}R past signal"
-                continue
-            if (direction == "LONG" and ref <= stop) or (direction == "SHORT" and ref >= stop):
-                row["reason"] += " - skip: price already at stop"
-                continue
             mult = strategy.vix_multiplier(self.vix) if C.VIX_SIZING else 1.0
-            qty, why = risk.size_position(self.state.equity(self.prices), ref, stop, direction,
-                                          self.state.open_notional(), mult)
-            if qty <= 0:
-                row["reason"] += f" - skip: {why}"
+            # Kavach decides every entry: time, pause, balance, account limits, price, sector, size (kavach.py)
+            decision = kavach.pre_trade(
+                self.state, sym, direction, ref, stop, today, prices=self.prices, risk_mult=mult, now=now,
+                square_off=square_off_time, paused=paused, balance_ok=self.balance_ok,
+                balance_problem=self.balance_problem, signal_close=last["c"], sector_of=strategy.index_for)
+            if not decision.ok:
+                if decision.check == "paused":
+                    row["reason"] += " (paused)"
+                elif decision.check != "time":          # after square-off: nothing to say, as before
+                    row["reason"] += f" - skip: {decision.reason}"
                 continue
+            qty = decision.qty
             filled, fill_price, extra = self.broker.enter(sym, direction, qty, ref, stop)
             if filled <= 0:
                 self.note(f"{sym}: entry not filled", logging.WARNING)

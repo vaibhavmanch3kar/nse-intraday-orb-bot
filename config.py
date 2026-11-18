@@ -141,6 +141,10 @@ RISK_PER_TRADE_PCT = _env("RISK_PER_TRADE_PCT", 0.5, float)   # % of equity lost
 MAX_POSITION_PCT = _env("MAX_POSITION_PCT", 25.0, float)      # max notional per stock, % of equity
 MAX_EXPOSURE_PCT = _env("MAX_EXPOSURE_PCT", 75.0, float)      # max notional all stocks (no leverage)
 MAX_OPEN_POSITIONS = _env("MAX_OPEN_POSITIONS", 3, int)
+# Kavach (kavach.py), added in 2.0. Each can only make the bot stricter than it was.
+MAX_SIGNAL_AGE_MIN = _env("MAX_SIGNAL_AGE_MIN", 5.0, float)   # a signal older than this is stale: skip (0 = off)
+MAX_PER_SECTOR = _env("MAX_PER_SECTOR", 0, int)               # open positions per sector and direction (0 = off)
+MAX_BAR_VOLUME_PCT = _env("MAX_BAR_VOLUME_PCT", 2.0, float)   # one order <= this % of the signal candle's volume
 MAX_TRADES_PER_DAY = _env("MAX_TRADES_PER_DAY", 4, int)
 MAX_DAILY_LOSS_PCT = _env("MAX_DAILY_LOSS_PCT", 2.0, float)
 LOSS_STREAK_LIMIT = _env("LOSS_STREAK_LIMIT", 3, int)

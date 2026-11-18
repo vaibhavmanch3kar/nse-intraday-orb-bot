@@ -20,6 +20,7 @@ import tempfile
 
 import config as C
 import data_yahoo
+import kavach
 import marketdata
 import risk
 import strategy
@@ -96,17 +97,19 @@ def simulate(data, start_cash, verbose=True, index_data=None, vix=None, trades_p
             b = bars[i]
             pending.pop(s)
             if b["t"].date() == sig["day"] and s not in st.positions:
-                ok, _ = st.can_enter(s, day, last_close)  # open losses count toward the daily limit
                 d, stop = sig["direction"], sig["stop"]
                 beyond = (d == "LONG" and b["o"] <= stop) or (d == "SHORT" and b["o"] >= stop)
-                if ok and not beyond:
+                if not beyond:
                     slip = b["o"] * C.SLIPPAGE_PCT / 100
                     entry = b["o"] + slip if d == "LONG" else b["o"] - slip
                     mult = strategy.vix_multiplier(prev_vix(vix, day)) if C.VIX_SIZING else 1.0
-                    qty, _ = risk.size_position(st.equity(), entry, stop, d, st.open_notional(), mult)
-                    if qty > 0:
-                        st.record_entry(s, d, qty, entry, stop, strategy.target_for(entry, stop, d), b["t"],
-                                        {"held": 0, **(sig["context"] or {})})
+                    # the same Kavach checks as the live bot (kavach.py). Open losses count toward the daily
+                    # limit (prices=last_close); the size comes from booked equity, as before.
+                    decision = kavach.pre_trade(st, s, d, entry, stop, day, prices=last_close, equity=st.equity(),
+                                                risk_mult=mult, sector_of=strategy.index_for)
+                    if decision.ok:
+                        st.record_entry(s, d, decision.qty, entry, stop, strategy.target_for(entry, stop, d),
+                                        b["t"], {"held": 0, **(sig["context"] or {})})
         for s, bars in data.items():
             i = idx[s].get(t)
             if i is None:
