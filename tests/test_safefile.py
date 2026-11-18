@@ -73,6 +73,36 @@ def test_real_reader_in_another_program(tmp_path):
     assert path.read_text() == "new" and time.perf_counter() - t < 1.5
 
 
+@pytest.mark.skipif(os.name != "nt", reason="the busy-file error is a Windows behaviour")
+def test_retrying_save_always_gets_through_a_constant_reader(tmp_path):
+    """Far worse than any dashboard: another program opens and reads the file in a tight loop. A plain
+    os.replace fails often here; the bot's retrying save must get through every time."""
+    path = tmp_path / "status.json"
+    path.write_text("{}")
+    reader = subprocess.Popen([sys.executable, "-c", (
+        "import json, time\nprint('go', flush=True)\nt = time.time()\n"
+        "while time.time() - t < 6:\n"
+        "    try:\n"
+        f"        json.load(open(r'{path}', encoding='utf-8'))\n"
+        "    except Exception:\n        pass\n")], stdout=subprocess.PIPE, text=True)
+    assert reader.stdout.readline().strip() == "go"
+    plain_failed = saved = 0
+    for i in range(120):
+        tmp = str(path) + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"n": i, "pad": "y" * 6000}, f)
+        try:
+            os.replace(tmp, str(path))
+        except PermissionError:
+            plain_failed += 1
+            safefile.replace(tmp, str(path))                  # what the bot does now: must not raise
+        saved += 1
+        time.sleep(0.01)
+    reader.kill()
+    assert saved == 120 and plain_failed > 0                    # the clash is real, and every save still landed
+    assert json.load(open(path, encoding="utf-8"))["n"] == 119
+
+
 def test_write_json_is_whole_or_not_at_all(tmp_path):
     path = str(tmp_path / "sub" / "a.json")
     safefile.write_json(path, {"a": 1}, indent=1)

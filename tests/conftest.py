@@ -68,6 +68,8 @@ def isolated(tmp_path, monkeypatch):
     try:
         import bot
         monkeypatch.setattr(bot.Bot, "price_source", lambda self: "kite")
+        import web
+        monkeypatch.setattr(web, "STATUS_POLL_SEC", 0.0)      # tests rewrite the status file and read it at once
     except ImportError:
         pass
     yield tmp_path

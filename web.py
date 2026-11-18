@@ -154,11 +154,35 @@ def mode_chips(status, extra=""):
             f"<span class='muted small'>The Paper | Zerodha switch only changes what you see.</span></div>")
 
 
+STATUS_POLL_SEC = 1.0     # the dashboard looks at status.json at most this often, however many pages poll
+_STATUS = {"key": None, "text": None, "checked": None}
+
+
 def read_status():
+    """The bot's last saved status.
+
+    On Windows, while any other program is touching a file (reading it, or even asking for its details), a
+    program replacing that file is refused ("Access is denied"). That is how the bot's save of status.json
+    failed on 18 Nov 2026 with dashboard pages polling it. The bot now retries a refused save (safefile.py),
+    which is the real fix; this side simply touches the file as little as possible: at most once every
+    STATUS_POLL_SEC it asks whether the file changed, and it opens it only when it did (about once a minute)."""
+    import time
+    now = time.monotonic()
+    fresh = (_STATUS["text"] is not None and _STATUS["key"] and _STATUS["key"][0] == STATUS_FILE
+             and _STATUS["checked"] is not None and now - _STATUS["checked"] < STATUS_POLL_SEC)
     try:
-        with open(STATUS_FILE, encoding="utf-8") as f:
-            return json.load(f)
-    except (OSError, ValueError):
+        if not fresh:
+            st = os.stat(STATUS_FILE)
+            key = (STATUS_FILE, st.st_mtime_ns, st.st_size)
+            if _STATUS["key"] != key:
+                with open(STATUS_FILE, encoding="utf-8") as f:
+                    text = f.read()
+                json.loads(text)                   # a half-written file is not kept
+                _STATUS.update(key=key, text=text)
+            _STATUS["checked"] = now
+        return json.loads(_STATUS["text"])         # a fresh copy each time: callers may change it
+    except (OSError, ValueError, TypeError):
+        _STATUS.update(key=None, text=None, checked=None)
         return {}
 
 
@@ -987,6 +1011,21 @@ def candle_age_text(s, now=None):
             f"<span class='muted'>(a new candle every {C.INTERVAL_MIN} min; up to {C.INTERVAL_MIN + 1} min old is normal)</span>")
 
 
+def feed_line(s):
+    """One line on the price feed's health for the Data & limits card (the bot records it each round)."""
+    f = s.get("feed") or {}
+    if not f:
+        return "-"
+    src = "Kite" if f.get("source") == "kite" else (str(f.get("source") or "none").capitalize())
+    pick = f.get("pickup_sec")
+    got = f" · picked up {pick:.0f} s after it closed" if isinstance(pick, (int, float)) else ""
+    bad = len(f.get("problems") or {}) + len(f.get("errors") or [])
+    health = (f"<span class='up'>{f.get('stocks_ok', 0)} of {f.get('stocks', 0)} stocks OK</span>" if not bad else
+              f"<span class='warn'>{f.get('stocks_ok', 0)} of {f.get('stocks', 0)} stocks OK · {bad} with a problem</span>")
+    block = (" · <b class='dn'>real-money entries blocked: not on Kite prices</b>" if f.get("live_needs_kite") else "")
+    return f"{html.escape(src)} · candle {html.escape(str(f.get('newest_candle') or '-'))}{got} · {health}{block}"
+
+
 def live_limits(s):
     cooldown = s.get("cooldown_until")
     lag_txt = candle_age_text(s)
@@ -996,12 +1035,14 @@ def live_limits(s):
             f"{C.LOSS_STREAK_LIMIT}</span>{until}</dd>"
             f"<dt>Price data</dt><dd>{data_source_text(s)}</dd>"
             f"<dt>Newest candle</dt><dd>{lag_txt}</dd>"
+            f"<dt>Price feed</dt><dd>{feed_line(s)}</dd>"
             f"<dt>Per trade</dt><dd>{C.RISK_PER_TRADE_PCT:g}% risk · at most {C.MAX_OPEN_POSITIONS} positions, "
             f"{C.MAX_TRADES_PER_DAY} trades a day</dd>"
             f"<dt>{T.name('daily_loss')}</dt><dd>stop new trades at −{C.MAX_DAILY_LOSS_PCT:g}% in a day (booked + open)</dd>"
             f"<dt>Exits</dt><dd>{T.term('stop')} · {T.term('trail')} · {T.term('time_stop')} · "
             f"{T.term('square_off')} at {C.SQUARE_OFF}</dd>"
-            f"</dl></details>")
+            f"</dl><div class='small' style='padding:0 14px 12px'><a href='/kavach'>Kavach · every risk check "
+            f"and limit →</a></div></details>")
 
 
 def live_positions_held(s):
@@ -1637,6 +1678,96 @@ def review_funnel(r):
                                                      sorted(groups.items(), key=lambda kv: -kv[1])]
     return (f"<div class='muted small' role='note' style='margin:0 0 14px'>Of {len(rows)} stocks: "
             f"{' · '.join(parts)}. Each stock's own reason is in the table below.</div>")
+
+
+KAVACH_CHECKS = (
+    ("time", "Not after the square-off time."),
+    ("paused", "Not while Pause, an Apply-Now restart or a Paper | Real Money switch is waiting."),
+    ("balance", "Real money: today's Zerodha balance has been read."),
+    ("data", "Real money trades only on Kite prices, never delayed Yahoo. The stock's candles passed validation, "
+             "the signal is not stale, and the index filter could be checked."),
+    ("account", "Cool-down after losses, daily loss limit (booked + open), trades a day, open positions, and one "
+                "trade per stock a day: so no averaging down and no second entry."),
+    ("price", "The price has not run past the signal, and is not already at the stop."),
+    ("sector", "Not too many open positions in one sector and direction (when switched on)."),
+    ("size", "Shares from the risk budget, the per-stock limit, the total exposure limit and charges. "
+             "If not even one share fits, the trade is skipped."),
+    ("liquidity", "The order is a small share of the signal candle's volume."),
+)
+
+
+def kavach_feed_card(s):
+    f = s.get("feed") or {}
+    if not f:
+        return ("<section class='card'><div class='hd'>Price feed</div><div class='muted'>The bot records feed "
+                "health each round from its next start (version 2.0). Nothing recorded yet.</div></section>")
+    rows = "".join(f"<tr><td class='first'><b>{html.escape(sym)}</b></td><td style='white-space:normal'>"
+                   f"<span class='st dn'>{html.escape(why)}</span></td></tr>"
+                   for sym, why in sorted((f.get("problems") or {}).items()))
+    rows += "".join(f"<tr><td class='first'><b>{html.escape(sym)}</b></td><td><span class='st dn'>no data this "
+                    f"round</span></td></tr>" for sym in f.get("errors") or [])
+    table = (f"<table class='rt'><tr><th>Stock</th><th>Problem (no new entry while it lasts)</th></tr>{rows}</table>"
+             if rows else "<div class='muted' style='padding:10px 14px'>No data problems this round.</div>")
+    return (f"<section class='card flush' id='feed'><div class='hd'>Price feed <span class='end'><span class='tag'>"
+            f"checked {html.escape(str(f.get('checked_at') or '')[11:19])}</span></span></div>"
+            f"<div style='padding:10px 14px'>{feed_line(s)}</div>{table}</section>")
+
+
+def render_kavach():
+    """Kavach: the limits in force, how much of today's limits is used, the checks every entry passes, what was
+    refused today and why, and the price feed's health. Read-only: nothing here changes a limit."""
+    import kavach
+    s = read_status()
+    lim = kavach.limits()
+    loose = {x["name"] for x in kavach.looser_than_default()}
+    rows = "".join(
+        f"<tr><td class='first' data-label='Limit' style='white-space:normal'><b>{html.escape(x['what'])}</b>"
+        f"<div class='muted small'>{x['name']}</div></td>"
+        f"<td data-label='Now' class='r'><b>{x['value']:g}</b></td>"
+        f"<td data-label='Built-in' class='r'>{x['default']:g}</td>"
+        f"<td data-label='Status'>" + (
+            "<span class='st dn'>LOOSER than built-in</span>" if x["name"] in loose else
+            "<span class='st'>changed (stricter)</span>" if x["changed"] else "<span class='st in'>as built</span>")
+        + "</td></tr>" for x in lim)
+    warn = (f"<div class='banner' role='alert' style='border-color:var(--dn)'><b>{len(loose)} limit(s) are set looser "
+            f"than the built-in value:</b> {html.escape(', '.join(sorted(loose)))}. They come from Windows settings "
+            f"(environment variables); remove them there to go back to the built-in values.</div>" if loose else "")
+    eq = s.get("equity")
+    notional = sum(float(p.get("entry") or 0) * float(p.get("qty") or 0) for p in s.get("positions") or [])
+    n_pos = len(s.get("positions") or [])
+    streak = int(s.get("loss_streak") or 0)
+    usage = (_limits_kpis(s)
+             + _kpi("Open positions", f"{n_pos} <small>of {C.MAX_OPEN_POSITIONS}</small>",
+                    _meter(n_pos / C.MAX_OPEN_POSITIONS * 100) if C.MAX_OPEN_POSITIONS else "")
+             + _kpi("In the market", (f"{notional / float(eq) * 100:.0f}% <small>of {C.MAX_EXPOSURE_PCT:g}%</small>"
+                                      if eq else "-"),
+                    _meter(notional / float(eq) * 100 / C.MAX_EXPOSURE_PCT * 100) if eq else "")
+             + _kpi("Losses in a row", f"{streak} <small>of {C.LOSS_STREAK_LIMIT}</small>",
+                    _meter(streak / C.LOSS_STREAK_LIMIT * 100) if C.LOSS_STREAK_LIMIT else ""))
+    if eq:
+        usage += _kpi("Risk per trade now", _inr(float(eq) * C.RISK_PER_TRADE_PCT / 100),
+                      f"{C.RISK_PER_TRADE_PCT:g}% of {_inr(eq)}")
+    checks = "".join(f"<li><b>{i}. {name}</b>: {html.escape(what)}</li>" for i, (name, what) in enumerate(KAVACH_CHECKS, 1))
+    cooldown = s.get("cooldown_until")
+    cool = (f"<div class='banner' role='status'><b>Cool-down:</b> no new trades until {html.escape(str(cooldown))} "
+            f"after {C.LOSS_STREAK_LIMIT} losses in a row.</div>" if cooldown else "")
+    body = f"""
+<div class="page-head"><h1>🛡 Kavach <span class="tag">risk controls</span></h1>
+<span class="sub">One set of checks decides every new position, in paper, real money and backtests alike ·
+read-only</span></div>
+{mode_chips(s)}{warn}{cool}
+<div class="kgrid">{usage}</div>
+{live_signals(s)}
+{kavach_feed_card(s)}
+<section class="card flush"><div class="hd">Limits in force</div>
+<table class="rt"><tr><th>Limit</th><th class="r">Now</th><th class="r">Built-in</th><th>Status</th></tr>{rows}</table>
+<div class="muted small" style="padding:8px 14px 12px">A limit can be changed only in the bot's own settings, never
+from this page. "Looser" means a larger risk than the built-in value.</div></section>
+<details class="card" open><summary>The nine checks every entry passes, in order</summary>
+<ol style="margin:6px 0 0 4px;padding-left:18px;line-height:1.6;list-style:none">{checks}</ol>
+<div class="muted small" style="margin-top:8px">The first check that fails stops the trade and names the rule in
+"Today's signals". A stop-loss limits the planned loss; it cannot guarantee the price it fills at.</div></details>"""
+    return page("Kavach", "/", body)
 
 
 def sizing_capital(s=None):
@@ -2668,6 +2799,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(render_journey(q.get("src", ["paper"])[0], idx))
         elif u.path == "/settings":
             self._settings(q)
+        elif u.path == "/kavach":
+            self._send(render_kavach())
         elif u.path == "/scanner":
             if q.get("refresh", ["0"])[0] == "1":
                 jobs.start("scanner")
