@@ -1357,6 +1357,48 @@ def trading_mode_card(s):
 LIVE_REFRESH_SEC = ACCOUNT_REFRESH_SEC
 
 
+HEALTH_WORDS = {"ok": ("✓", "working", "in"), "warn": ("!", "needs a look", ""), "bad": ("✕", "NOT working", "dn"),
+                "off": ("–", "not applicable now", "")}
+
+
+def health_card(s=None):
+    """Every health check in one card (health.py), closed while everything works, open when something does not;
+    under it, today's alert history. Read-only."""
+    import health
+    rows = health.checks(status=s)
+    health.observe(rows=rows)
+    worst = health.overall(rows)
+    bad = [r for r in rows if r["state"] == "bad"]
+    warn = [r for r in rows if r["state"] == "warn"]
+    if bad:
+        head = f"<span class='st dn'>✕ {len(bad)} NOT working</span>" + (f" · {len(warn)} need a look" if warn else "")
+    elif warn:
+        head = f"<span class='st'>! {len(warn)} need a look</span>"
+    else:
+        head = "<span class='st in'>✓ all working</span>"
+    body = "".join(
+        f"<tr><td class='first' data-label='Check'><b>{html.escape(r['name'])}</b></td>"
+        f"<td data-label='State'><span class='st {HEALTH_WORDS[r['state']][2]}'>{HEALTH_WORDS[r['state']][0]} "
+        f"{HEALTH_WORDS[r['state']][1]}</span></td>"
+        f"<td data-label='Detail' style='white-space:normal'>{html.escape(r['detail'])}</td></tr>" for r in rows)
+    hist = health.alerts()[-8:][::-1]
+    if hist:
+        lines = "".join(
+            f"<li><b>{html.escape(a['at'][11:16])}</b> {html.escape(a['name'])}: "
+            f"{'working again' if a['state'] == 'ok' else 'needs a look' if a['state'] == 'warn' else 'NOT working'}"
+            f" <span class='muted'>· {html.escape(a['detail'])}</span></li>" for a in hist)
+        history = (f"<div class='small' style='padding:8px 14px 12px'><b>Alerts today</b> (newest first)"
+                   f"<ul style='margin:4px 0 0 18px;padding:0'>{lines}</ul></div>")
+    else:
+        history = "<div class='muted small' style='padding:8px 14px 12px'>No alert today.</div>"
+    return (f"<details class='card flush' id='health'{' open' if worst != 'ok' else ''}><summary>System health "
+            f"<span class='end'>{head}</span></summary>"
+            f"<table class='rt'><tr><th>Check</th><th>State</th><th>Detail</th></tr>{body}</table>{history}"
+            f"<div class='muted small' style='padding:0 14px 12px'>These checks only read. The watchdog restarts a "
+            f"stopped bot; Kavach and the bot guard every trade. The same list is at <a href='/api/health'>"
+            f"/api/health</a>.</div></details>")
+
+
 def live_regions(view, s):
     """The parts of the Live page that change while the bot runs. /api/live sends the same parts and the
     page swaps them in place every few seconds (no reload; the opening-balance form is never touched)."""
@@ -1367,7 +1409,8 @@ def live_regions(view, s):
             "zpositions": zerodha_positions() if view == "zerodha" else "",
             "positions": live_positions(s, view), "signals": live_signals(s), "watchlist": live_watchlist(s),
             "controls": live_controls(s, running), "login": live_login(ok, login_msg, s),
-            "events": live_events(s), "limits": live_limits(s), "modebadge": mode_badge(s)}
+            "events": live_events(s), "limits": live_limits(s), "modebadge": mode_badge(s),
+            "health": health_card(s)}
 
 
 LIVE_JS = """
@@ -1417,6 +1460,7 @@ def render(msg="", q=None):
 {view_banner(view, s)}
 <div class="banner" id="offline" role="status" hidden>⚠ Can't reach the dashboard server: the figures below may be old. It keeps trying.</div>
 {R('notice')}
+{R('health')}
 {note}
 {update_banner(s)}
 {R('acct')}
@@ -3390,8 +3434,16 @@ class Handler(BaseHTTPRequestHandler):
             out = accounts.zerodha_events(since)
             w = watch_timing(read_status())       # "No updates" warning for the popups (watchlist timing)
             out["watch"] = {"state": w["state"], "key": w["key"], "text": w["text"]}
-            out["notices"] = watchdog_notices()   # crashes and automatic restarts today (watchdog.py)
+            import health
+            health.observe()                      # a check that just changed gets its alert line (health.py)
+            out["notices"] = watchdog_notices() + health.notices()   # restarts and crashes, and health alerts
             self._send(json.dumps(out), ctype="application/json; charset=utf-8")
+        elif u.path == "/api/health":
+            # read-only: every health check as JSON (states and plain sentences; no secrets, no account numbers)
+            import health
+            rep = health.report()
+            self._send(json.dumps(rep, ensure_ascii=False), 503 if rep["overall"] == "bad" else 200,
+                       "application/json; charset=utf-8")
         elif u.path == "/api/jobs":
             # read-only: progress of the Review and Scanner background builds
             self._send(json.dumps(jobs.snapshot_all()), ctype="application/json; charset=utf-8")
