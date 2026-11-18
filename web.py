@@ -1483,6 +1483,12 @@ def _rajya_job(target, job):
     rajya.build(target or "paper", job=job)
 
 
+def _bakhar_job(target, job):
+    import bakhar
+    bakhar.build(job=job)
+
+
+jobs.register("bakhar", _bakhar_job, REVIEW_LIMIT_SEC)
 jobs.register("chanakya", _chanakya_job, REVIEW_LIMIT_SEC)
 jobs.register("rajya", _rajya_job, REVIEW_LIMIT_SEC)
 
@@ -1594,7 +1600,7 @@ def render_review(day=None, refresh=False):
     """Draws straight away from the saved Review; builds in the background when it is missing,
     out of date or a refresh was asked for. Never waits for price downloads."""
     import review
-    h1 = f"<h1>{T.LAMP} {T.term('review')}</h1>"
+    h1 = f"{bakhar_tabs('/review')}<h1>{T.LAMP} {T.term('review')}</h1>"
     r = review.cached(day) if day else review.latest()
     if r and not r.get("day"):
         r = None
@@ -1860,6 +1866,65 @@ from this page. "Looser" means a larger risk than the built-in value.</div></sec
 <div class="muted small" style="margin-top:8px">The first check that fails stops the trade and names the rule in
 "Today's signals". A stop-loss limits the planned loss; it cannot guarantee the price it fills at.</div></details>"""
     return page("Kavach", "/kavach", body)
+
+
+def bakhar_tabs(active):
+    """The two parts of the Bakhar tab: one day replayed (the session review) and the whole year backtested."""
+    parts = (("/review", "One day · session review"), ("/backtest", "One year · backtest"))
+    return ("<div class='seg' role='group' aria-label='Review or backtest' style='margin-bottom:10px'>"
+            + "".join(f"<a class='{'on' if p == active else ''}' href='{p}'"
+                      f"{' aria-current=' + chr(39) + 'true' + chr(39) if p == active else ''}>{label}</a>"
+                      for p, label in parts) + "</div>")
+
+
+def render_backtest():
+    """The bot's present rules over every archived day, run as a background job by the same engine as every other
+    backtest. Read-only apart from its own two result files."""
+    import bakhar
+    r = bakhar.latest()
+    fresh = bakhar.status(r)
+    note = job_strip("bakhar", r, fresh, "/backtest?refresh=1", "steps")
+    head = (f"{bakhar_tabs('/backtest')}<div class='page-head'><h1>{T.FIRE} {T.term('backtest')} "
+            f"<span class='tag'>one year</span></h1><span class='sub'>The bot's present rules over every day in the "
+            f"candle archive · same fills, Kavach checks and charges as the bot · read-only</span></div>")
+    run = ("<form method='get' action='/backtest' style='margin:0 0 12px'><input type='hidden' name='refresh' "
+           "value='1'><button class='ghost'>▶ Run the backtest now</button> <span class='muted small'>takes about "
+           "10 seconds; it never touches the bot</span></form>")
+    if not r:
+        return page("Backtest", "/backtest", head + note + run + "<p class='muted'>No run is saved yet. Press Run; "
+                    "the result appears here by itself.</p>")
+    res, rng, arc = r["result"], r["range"], r["archive"]
+    net = res.get("net_pnl") or 0.0
+    lost = net < 0
+    proven = rng.get("r_low") is not None and (rng["r_high"] < 0 or rng["r_low"] > 0)
+    verdict = (
+        f"<div class='banner' role='note' style='border-color:var(--{'dn' if lost else 'warn'})'><b>"
+        + (f"Over this period these rules lost {_inr(-net)} ({res.get('return_pct'):+.2f}%) on {_inr(r['start_cash'])}, "
+           f"after {_inr(res.get('charges'))} of charges." if lost else
+           f"Over this period these rules made {_inr(net)} ({res.get('return_pct'):+.2f}%) on {_inr(r['start_cash'])}, "
+           f"after {_inr(res.get('charges'))} of charges.")
+        + f"</b> Simply holding the same stocks returned {res.get('buy_hold_pct'):+.2f}%. "
+        + (f"The average trade was {rng['avg_r']:+.2f}R, and the range that chance alone allows "
+           f"({rng['r_low']:+.2f} to {rng['r_high']:+.2f}) "
+           + ("is entirely below zero: the loss is not bad luck." if rng["r_high"] < 0 else
+              "is entirely above zero." if proven else "includes zero: this proves nothing either way.")
+           if rng.get("avg_r") is not None else "")
+        + " A past result is not a forecast.</div>")
+    kp = (_kpi("Period", f"{arc['from']} → {arc['to']}", f"{arc['days']} trading days · {len(arc['stocks'])} stocks")
+          + _kpi("Months that made money", f"{rng.get('months_positive')} <small>of {rng.get('months')}</small>")
+          + _kpi("Profit factor", _fmt(res.get("profit_factor")), "money won ÷ money lost; above 1 makes money")
+          + _kpi("Largest fall from a high", f"{_fmt(res.get('max_dd_pct'))}%", _inr(rng.get("max_drawdown"))))
+    rows = trade_rows(bakhar.NAME)
+    stale = ("" if not fresh["stale"] else f"<div class='banner' role='status'><b>This run is out of date:</b> "
+             f"{html.escape(fresh['why'])}. Press Run to bring it up to date.</div>")
+    foot = ("<div class='muted small' style='margin:10px 0'>How it is run: entries at the next candle's open after "
+            "a signal, with slippage and Zerodha's charges; position sizes and refusals come from Kavach, as in "
+            "live trading. It cannot show what a real order book would have filled, or a broker outage. The four "
+            "context columns of the trade list (range width, VWAP distance, index and gap) are left empty by this "
+            "fast run. Testing new ideas belongs in <a href='/yantrashala'>Yantrashala</a>.</div>")
+    body = (f"{head}{note}{stale}{verdict}<div class='kgrid'>{kp}</div>{run}"
+            + trade_section(rows, bakhar.NAME, "Backtest", r["start_cash"]) + foot)
+    return page("Backtest", "/backtest", f"<style>{TRADES_CSS}</style>" + body)
 
 
 # the pages' Swarajya names typed as addresses lead to the page
@@ -2354,7 +2419,7 @@ def _num(x):
         return 0.0
 
 
-TRADE_FILES = {"paper": "trades_paper.csv", "live": "trades_live.csv", "backtest": "backtest_trades.csv"}
+TRADE_FILES = {"paper": "trades_paper.csv", "live": "trades_live.csv", "backtest": "backtest_trades.csv", "bakhar": "trades_bakhar.csv"}
 
 
 def trade_rows(src):
@@ -3283,6 +3348,12 @@ class Handler(BaseHTTPRequestHandler):
             self._send(render_journey(q.get("src", ["paper"])[0], idx))
         elif u.path == "/settings":
             self._settings(q)
+        elif u.path == "/backtest":
+            if q.get("refresh", ["0"])[0] == "1":
+                jobs.start("bakhar")
+                self._redirect("/backtest")
+                return
+            self._send(render_backtest())
         elif u.path in PAGE_ALIASES:
             self._redirect(PAGE_ALIASES[u.path])
         elif u.path == "/kavach":
@@ -3452,11 +3523,12 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/jobs/cancel":
             # stop a running Review or Scanner build (nothing of it is saved); never touches the bot
             name = form.get("job", [""])[0]
-            if name in ("review", "scanner", "chanakya", "rajya"):
+            if name in ("review", "scanner", "chanakya", "rajya", "bakhar"):
                 job = jobs.get(name)
                 if job:
                     job.cancel()
-            self._redirect({"scanner": "/scanner", "chanakya": "/chanakya", "rajya": "/rajya"}.get(name, "/review"))
+            self._redirect({"scanner": "/scanner", "chanakya": "/chanakya", "rajya": "/rajya",
+                            "bakhar": "/backtest"}.get(name, "/review"))
             return
         if self.path in ("/bot/apply-now", "/bot/apply-after-close", "/bot/restart-cancel", "/bot/restart-dismiss",
                          "/bot/go-back", "/dashboard/restart"):
