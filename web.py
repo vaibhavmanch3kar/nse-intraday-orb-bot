@@ -781,8 +781,10 @@ def live_signals(s, now=None):
         for x in sigs)
     waiting = {}
     for r in (s.get("rows") or {}).values():
-        why = (r.get("reason") or "").split(" - skip")[0]
-        key = ("volume too low" if why.startswith("volume") else "range too wide or narrow" if why.startswith("range")
+        full = r.get("reason") or ""
+        why = full.split(" - skip")[0]
+        key = ("signal skipped (see above)" if " - skip" in full else
+               "volume too low" if why.startswith("volume") else "range too wide or narrow" if why.startswith("range")
                else why or "no data yet")
         waiting[key] = waiting.get(key, 0) + 1
     wait_txt = " · ".join(f"{n} {html.escape(k)}" for k, n in sorted(waiting.items(), key=lambda kv: -kv[1]))

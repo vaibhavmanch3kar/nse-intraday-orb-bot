@@ -189,6 +189,7 @@ def test_todays_signals_card_lists_each_signal_and_why(monkeypatch):
     assert "2 signals · 1 traded · 1 skipped" in card
     assert "RELIANCE" in card and "skipped" in card and "per-stock limit" in card and ">traded<" in card
     assert "Watchlist right now: 2 inside range" in card and "1 volume too low" in card
+    assert "1 signal skipped (see above)" in card and "SHORT breakout<" not in card
     assert "one share of <b>AXISBANK, RELIANCE</b> costs more than the 25% per-stock limit (₹1,217.65)" in card
     assert "SBIN" not in card.split("costs more than")[0].split("one share of")[1]      # 1,110.80 fits
 
