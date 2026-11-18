@@ -1044,6 +1044,7 @@ def live_limits(s):
             f"{T.term('square_off')} at {C.SQUARE_OFF}</dd>"
             f"</dl><div class='small' style='padding:0 14px 12px'><a href='/kavach'>Kavach · every risk check "
             f"and limit →</a> · <a href='/chanakya'>Chanakya · what speaks for and against each stock →</a> · "
+            f"<a href='/rajya'>Rajya · the whole account, measured →</a> · "
             f"<a href='/yantrashala'>Yantrashala · strategy lab →</a></div></details>")
 
 
@@ -1477,7 +1478,13 @@ def _chanakya_job(target, job):
 
 jobs.register("review", _review_job, REVIEW_LIMIT_SEC)
 jobs.register("scanner", _scan_job, SCAN_LIMIT_SEC)
+def _rajya_job(target, job):
+    import rajya
+    rajya.build(target or "paper", job=job)
+
+
 jobs.register("chanakya", _chanakya_job, REVIEW_LIMIT_SEC)
+jobs.register("rajya", _rajya_job, REVIEW_LIMIT_SEC)
 
 
 def auto_start(name, target=None):
@@ -1954,6 +1961,211 @@ as of {html.escape(str(r.get('as_of') or '')[11:16])} · account {_inr(r.get('eq
 <th>Bot's rule on this candle</th></tr>{''.join(rows)}</table></section>
 {details}{quiet_txt}"""
     return page("Chanakya", "/", body)
+
+
+def _pct(v, nd=1, signed=False):
+    return "-" if v is None else f"{v:+.{nd}f}%" if signed else f"{v:.{nd}f}%"
+
+
+def _rajya_rebalance(alloc, view, q):
+    """The rebalancing SIMULATION: arithmetic on a rule the user picks. The form is a plain GET; nothing is ordered."""
+    import rajya
+    rule = "equal" if (q.get("rule") or ["cap"])[0] == "equal" else "cap"
+    try:
+        cap = min(100.0, max(1.0, float((q.get("cap") or [C.MAX_POSITION_PCT])[0])))
+    except ValueError:
+        cap = float(C.MAX_POSITION_PCT)
+    sim = rajya.rebalance(alloc, rule, cap)
+    form = (f"<form method='get' action='/rajya' class='small' style='padding:8px 14px;display:flex;gap:10px;"
+            f"flex-wrap:wrap;align-items:center'><input type='hidden' name='view' value='{view}'>"
+            f"<label>Rule <select name='rule'><option value='cap'{' selected' if rule == 'cap' else ''}>No holding "
+            f"above a share of the account</option><option value='equal'{' selected' if rule == 'equal' else ''}>"
+            f"Every holding the same size</option></select></label>"
+            f"<label>Share limit % <input type='number' name='cap' min='1' max='100' step='1' value='{cap:g}' "
+            f"style='width:5em'></label><button class='ghost small'>Work it out</button></form>")
+    note = ("<div class='banner' role='note' style='margin:8px 14px'><b>Simulation only.</b> Rajya cannot place "
+            "orders. These rows are arithmetic on the rule you chose, not advice; nothing changes in your account "
+            "unless you decide to and place the orders yourself in Kite. Selling can create a tax bill, which is "
+            "not estimated here.</div>")
+    if not sim["holdings"]:
+        table = ("<p class='muted small' style='padding:0 14px 12px'>There are no delivery holdings to rebalance. "
+                 "The bot's intraday positions are closed the same day and are left out.</p>")
+    elif not sim["trades"]:
+        table = (f"<p class='small' style='padding:0 14px 12px'>Nothing to change: "
+                 + (f"no holding is above {cap:g}% of the account." if rule == "cap" else
+                    "the holdings are already as equal as whole shares allow.") + "</p>")
+    else:
+        rows = "".join(
+            f"<tr><td class='first' data-label='Stock'><b>{html.escape(t['symbol'])}</b></td>"
+            f"<td data-label='Would'>{'sell' if t['action'] == 'SELL' else 'buy'} {t['qty']}</td>"
+            f"<td data-label='Value' class='r'>{_inr(t['value'])}</td>"
+            f"<td data-label='Share before' class='r'>{_pct(t['before_pct'])}</td>"
+            f"<td data-label='Share after' class='r'>{_pct(t['after_pct'])}</td>"
+            f"<td data-label='Est. charges' class='r'>{_inr(t['charges'])}</td></tr>" for t in sim["trades"])
+        table = (f"<table class='rt'><tr><th>Stock</th><th>Would</th><th class='r'>Value</th><th class='r'>Share "
+                 f"before</th><th class='r'>Share after</th><th class='r'>Est. charges</th></tr>{rows}</table>"
+                 f"<div class='small' style='padding:8px 14px 12px'>Sold {_inr(sim['sold'])} · bought "
+                 f"{_inr(sim['bought'])} · estimated charges {_inr(sim['charges'])} · cash would change by "
+                 f"{_inr(sim['cash_change'], True)}. Prices are the last ones read; real fills differ.</div>")
+    return (f"<section class='card flush' id='rebalance'><div class='hd'>Rebalancing simulation <span class='muted "
+            f"small'>delivery holdings only · nothing is ordered</span></div>{note}{form}{table}</section>")
+
+
+def render_rajya(q=None):
+    """Rajya: the whole account measured (allocation, concentration, risk budget, past movement, correlation,
+    what-if arithmetic, rebalancing simulation). Read-only: the view only chooses which account is shown."""
+    import rajya
+    q = q or {}
+    s = read_status()
+    view = current_view(q, s)
+    r = rajya.latest(view)
+    fresh = rajya.status(r)
+    if fresh["stale"]:
+        auto_start("rajya", view)
+    note = job_strip("rajya", r, fresh, f"/rajya?view={view}&refresh=1", "steps")
+    head = (f"<div class='page-head'><h1>🏛 Rajya <span class='tag'>portfolio</span></h1>"
+            f"<span class='sub'>Everything in the account, measured · read-only</span></div>"
+            f"{view_switch('/rajya', view, s)}{view_banner(view, s)}"
+            f"<div class='banner' role='note'><b>How to read this.</b> Rajya measures what is already in the "
+            f"account. It is not advice, names nothing to buy and cannot place an order. Figures from past prices "
+            f"describe the past year; they are not forecasts, and real falls can be larger.</div>")
+    if not r:
+        return page("Rajya", "/", head + note + "<p class='muted'>The first picture appears here when it has been "
+                    "built. The page updates by itself.</p>")
+    if r.get("error"):
+        url = login_url() if r.get("login_needed") else ""
+        login = f" <a class='btn' href='{html.escape(url)}'>Log in to Zerodha</a>" if url else ""
+        return page("Rajya", "/", head + note + f"<div class='banner' role='alert'><b>The account could not be read."
+                    f"</b> {html.escape(str(r['error']))}{login}</div>")
+    a, c, b, h, rec = r["allocation"], r["concentration"], r["budget"], r["history"], r["record"]
+    warn = "".join(f"<div class='banner' role='status'>{html.escape(w)}</div>" for w in r.get("warnings") or [])
+    kp = (_kpi("Whole account", _inr(a["total"]), "cash side + delivery holdings")
+          + _kpi("Cash side", _inr(a["cash_equity"]), "cash with today's intraday result")
+          + _kpi("Delivery holdings", _inr(a["holdings_value"]),
+                 "your own sleeve" if r.get("holdings_known") else "could not be read")
+          + _kpi("In intraday positions", _inr(a["intraday_value"]), "the bot's sleeve")
+          + _kpi("Today so far", _pl(b["day_pnl"]), "open positions before exit charges")
+          + _kpi("Booked by the bot", _pl(rec["net"]),
+                 f"{rec['trades']} trade(s) after {_inr(rec['charges'])} charges" if rec["trades"] else "no closed trade yet"))
+    lev = ("<div class='banner' role='status'>Intraday positions are larger than the cash behind them: the "
+           "difference is intraday margin (borrowed for the day).</div>" if a.get("leveraged") else "")
+    rows = "".join(
+        f"<tr><td class='first' data-label='Stock'><b>{html.escape(str(x['symbol']))}</b> "
+        f"<span class='muted small'>{x['direction'].lower()}</span></td>"
+        f"<td data-label='Sleeve'>{'intraday · ' + ('the bot' if x['owner'] == 'bot' else 'not the bot') if x['sleeve'] == 'intraday' else 'delivery · yours'}</td>"
+        f"<td data-label='Sector'>{html.escape(x['sector'])}</td><td data-label='Qty' class='r'>{x['qty']}</td>"
+        f"<td data-label='Value' class='r'>{_inr(x['value'])}</td>"
+        f"<td data-label='Share of account' class='r'>{_pct(x['pct'])}</td>"
+        f"<td data-label='P&amp;L' class='r'>{_pl(x['pnl'])}</td></tr>" for x in a["rows"])
+    alloc = (f"<table class='rt'><tr><th>Stock</th><th>Sleeve</th><th>Sector</th><th class='r'>Qty</th>"
+             f"<th class='r'>Value</th><th class='r'>Share of account</th><th class='r'>P&amp;L</th></tr>{rows}</table>"
+             if rows else "<p class='muted small' style='padding:8px 14px'>Nothing is held right now: the whole "
+             "account is cash.</p>")
+
+    def split(title, parts):
+        cells = "".join(f"<tr><td class='first' data-label='{title}'>{html.escape(p['name'])}</td>"
+                        f"<td data-label='Value' class='r'>{_inr(p['value'])}</td>"
+                        f"<td data-label='Share' class='r'>{_pct(p['pct'])}</td></tr>" for p in parts)
+        return f"<table class='rt'><tr><th>{title}</th><th class='r'>Value</th><th class='r'>Share</th></tr>{cells}</table>"
+
+    if c.get("positions"):
+        over = (f" <b class='dn'>Above the {c['limit_pct']:g}% the bot allows itself per stock: "
+                f"{html.escape(', '.join(c['over_limit']))}.</b>" if c["over_limit"] else "")
+        conc = (f"Largest position <b>{html.escape(str(c['largest']))}</b> is {_pct(c['largest_pct'])} of the account; "
+                f"the largest three are {_pct(c['top3_pct'])}. By size, the {c['positions']} position(s) count as "
+                f"<b>{c['effective']:.1f}</b> equal-sized one(s).{over}")
+    else:
+        conc = "No position, so nothing is concentrated."
+    stops = "".join(
+        f"<tr><td class='first' data-label='Stock'><b>{html.escape(str(x['symbol']))}</b></td>"
+        f"<td data-label='Stop' class='r'>{_fmt(x['stop']) if x['stop'] else '<span class=\'st dn\'>no stop</span>'}</td>"
+        f"<td data-label='At risk to the stop' class='r'>{_inr(x['risk']) if x['risk'] is not None else 'whole value ' + _inr(x['value'])}</td></tr>"
+        for x in b["rows"])
+    budget = (
+        "<div class='kgrid'>"
+        + _kpi("At risk to stops", _inr(b["at_risk"]), f"{_pct(b['at_risk_pct'], 2)} of the bot's {_inr(b.get('base'))}")
+        + _kpi("Daily loss limit", f"{_inr(b['day_left'])} <small>left of {_inr(b['day_limit'])}</small>",
+               _meter((b["day_limit"] - b["day_left"]) / b["day_limit"] * 100) if b["day_limit"] else "")
+        + _kpi("In the market", f"{_pct(b['exposure_pct'], 0)} <small>of {b['exposure_limit_pct']:g}%</small>",
+               _meter((b["exposure_pct"] or 0) / b["exposure_limit_pct"] * 100) if b["exposure_limit_pct"] else "")
+        + _kpi("Open intraday positions", f"{b['open']} <small>of {b['open_limit']}</small>")
+        + _kpi("If every stop is hit today", _pl(b["worst_today"]), "today's result, stops and exit charges")
+        + "</div>"
+        + (f"<table class='rt'><tr><th>Stock</th><th class='r'>Stop</th><th class='r'>At risk to the stop</th></tr>"
+           f"{stops}</table>" if stops else "")
+        + (f"<div class='banner' role='status' style='margin:8px 14px'><b>No stop is known for: "
+           f"{html.escape(', '.join(b['no_stop']))}.</b> Rajya only knows the bot's own stops; a holding without "
+           f"one is exposed for its whole value.</div>" if b["no_stop"] else "")
+        + "<div class='muted small' style='padding:8px 14px 12px'>Limits are Kavach's and are worked out on the "
+          "balance the bot trades from. A stop limits the planned loss; a gap can fill beyond it.</div>")
+    per = "".join(
+        f"<tr><td class='first' data-label='Stock'><b>{html.escape(str(p['symbol']))}</b></td>"
+        + (f"<td data-label='Usual daily move' class='r'>{_pct(p['vol_day_pct'], 2)}</td>"
+           f"<td data-label='Over a year' class='r'>{_pct(p['vol_year_pct'], 0)}</td>"
+           f"<td data-label='Moves with NIFTY' class='r'>{'-' if p['beta'] is None else format(p['beta'], '.2f') + 'x'}</td>"
+           f"<td data-label='1 day in 20 lost more than' class='r'>{_inr(p['move_1in20'])}</td>"
+           if p["covered"] else "<td colspan='4' class='muted'>no price history found</td>") + "</tr>"
+        for p in h["per"])
+    mix = h.get("mix")
+    mix_txt = (f"<div class='small' style='padding:8px 14px 12px'><b>Today's positions, replayed over "
+               f"{mix['days']} past trading days</b> ({mix['from']} to {mix['to']}): a usual day moved the account by "
+               f"{_inr(mix['vol_day'])} ({_pct(mix['vol_day_pct'], 2)}); on 1 day in 20 it lost more than "
+               f"{_inr(mix['loss_1in20'])}; the worst day ({mix['worst_day']}) was {_inr(mix['worst_move'], True)}; "
+               f"held unchanged, the largest fall from a high was {_inr(mix['drawdown'])} "
+               f"({_pct(mix['drawdown_pct'], 1)}). Past movement, not a forecast."
+               + (f" <b>Left out, no price history: {html.escape(', '.join(mix['left_out']))}.</b>"
+                  if mix.get("left_out") else "") + "</div>" if mix else
+               "<p class='muted small' style='padding:8px 14px 12px'>Not enough price history to replay this mix.</p>")
+    moves = (f"<table class='rt'><tr><th>Stock</th><th class='r'>Usual daily move</th><th class='r'>Over a year</th>"
+             f"<th class='r'>Moves with NIFTY</th><th class='r'>1 day in 20 lost more than</th></tr>{per}</table>{mix_txt}"
+             if per else "<p class='muted small' style='padding:8px 14px 12px'>Nothing is held, so there is nothing "
+             "to measure.</p>")
+    if h["pairs"]:
+        prs = "".join(
+            f"<tr><td class='first' data-label='Pair'><b>{html.escape(p['a'])}</b> and <b>{html.escape(p['b'])}</b></td>"
+            f"<td data-label='Moved together' class='r'>{p['corr']:+.2f}</td>"
+            f"<td data-label='Reading'>{'<span class=\'st dn\'>close to one bet</span>' if p['high'] else '<span class=\'st in\'>separate enough</span>'}</td></tr>"
+            for p in h["pairs"][:15])
+        corr = (f"<table class='rt'><tr><th>Pair</th><th class='r'>Moved together</th><th>Reading</th></tr>{prs}</table>"
+                f"<div class='muted small' style='padding:8px 14px 12px'>+1 means the two always moved together, 0 "
+                f"not at all. At {rajya.CORR_HIGH:g} or more, two positions spread the risk much less than their "
+                f"count suggests. Average of all pairs: {h['avg_corr']:+.2f}.</div>")
+    else:
+        corr = ("<p class='muted small' style='padding:8px 14px 12px'>Correlation needs at least two positions with "
+                "price history.</p>")
+    st_rows = "".join(
+        f"<tr><td class='first' data-label='What if' style='white-space:normal'><b>{html.escape(x['name'])}</b>"
+        f"<div class='muted small'>{html.escape(x['what'])}</div></td>"
+        f"<td data-label='Result' class='r'>{_pl(-x['loss'])}</td>"
+        f"<td data-label='Of the account' class='r'>{_pct(-x['pct'] if x['pct'] is not None else None, 2, True)}</td></tr>"
+        for x in r["stress"])
+    stress = (f"<table class='rt'><tr><th>What if</th><th class='r'>Result</th><th class='r'>Of the account</th></tr>"
+              f"{st_rows}</table><div class='muted small' style='padding:8px 14px 12px'>Each row is one stated "
+              f"assumption applied to today's positions. None is a forecast, and none is a limit on what can happen."
+              f"</div>" if st_rows else "<p class='muted small' style='padding:8px 14px 12px'>Nothing is held, so "
+              "no scenario changes the account.</p>")
+    record = (f"{rec['trades']} closed trade(s) since {html.escape(str(rec['first']))}: {_inr(rec['gross'], True)} "
+              f"before charges, {_inr(rec['charges'])} charges, <b>{_inr(rec['net'], True)}</b> after. Largest fall "
+              f"from a high: {_inr(rec['drawdown'])}; now {_inr(rec['below_high'])} below its high. Today: "
+              f"{rec['today_trades']} closed, {_inr(rec['today_net'], True)}." if rec["trades"] else
+              "No closed trade in this account's log yet, so there is no booked result or drawdown to show.")
+    body = f"""{head}{note}{warn}
+<div class="kgrid">{kp}</div>{lev}
+<section class="card flush"><div class="hd">Where the money is <span class="muted small">as of
+{html.escape(str(r.get('built') or '')[11:16])}</span><span class="end"><a class="btn ghost small"
+href="/rajya?view={view}&amp;refresh=1">↻ Rebuild</a></span></div>{alloc}
+{split('Sleeve', a['by_sleeve'])}{split('Sector', a['by_sector']) if a['by_sector'] else ''}
+<div class="small" style="padding:8px 14px 12px"><b>Concentration.</b> {conc}</div></section>
+<section class="card flush"><div class="hd">Risk budget <span class="muted small">the bot's sleeve against
+Kavach's limits</span></div>{budget}</section>
+<section class="card flush"><div class="hd">How these positions have moved <span class="muted small">daily
+closes, past year</span></div>{moves}</section>
+<section class="card flush"><div class="hd">Do they move together?</div>{corr}</section>
+<section class="card flush"><div class="hd">What-if arithmetic</div>{stress}</section>
+<section class="card"><div class="hd">Booked result and drawdown <span class="muted small">after charges, from
+the trade log</span></div><div class="small">{record}</div></section>
+{_rajya_rebalance(a, view, q)}"""
+    return page("Rajya", "/", body)
 
 
 def _lab_row(label, m, judged=False):
@@ -3077,6 +3289,14 @@ class Handler(BaseHTTPRequestHandler):
                 self._redirect("/chanakya")
                 return
             self._send(render_chanakya())
+        elif u.path == "/rajya":
+            # read-only: the view only chooses which account is SHOWN; it never changes the trading mode
+            view = current_view(q, read_status())
+            if q.get("refresh", ["0"])[0] == "1":
+                jobs.start("rajya", view)
+                self._redirect(f"/rajya?view={view}")
+                return
+            self._send(render_rajya(q))
         elif u.path == "/scanner":
             if q.get("refresh", ["0"])[0] == "1":
                 jobs.start("scanner")
@@ -3226,11 +3446,11 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/jobs/cancel":
             # stop a running Review or Scanner build (nothing of it is saved); never touches the bot
             name = form.get("job", [""])[0]
-            if name in ("review", "scanner", "chanakya"):
+            if name in ("review", "scanner", "chanakya", "rajya"):
                 job = jobs.get(name)
                 if job:
                     job.cancel()
-            self._redirect({"scanner": "/scanner", "chanakya": "/chanakya"}.get(name, "/review"))
+            self._redirect({"scanner": "/scanner", "chanakya": "/chanakya", "rajya": "/rajya"}.get(name, "/review"))
             return
         if self.path in ("/bot/apply-now", "/bot/apply-after-close", "/bot/restart-cancel", "/bot/restart-dismiss",
                          "/bot/go-back", "/dashboard/restart"):
