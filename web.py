@@ -2044,7 +2044,8 @@ def render_rajya(q=None):
           + _kpi("Delivery holdings", _inr(a["holdings_value"]),
                  "your own sleeve" if r.get("holdings_known") else "could not be read")
           + _kpi("In intraday positions", _inr(a["intraday_value"]), "the bot's sleeve")
-          + _kpi("Today so far", _pl(b["day_pnl"]), "open positions before exit charges")
+          + _kpi("Today so far", _pl(b["day_pnl"]), "Zerodha's figure, before charges" if view == "zerodha" else
+                 "booked today after charges, plus open positions")
           + _kpi("Booked by the bot", _pl(rec["net"]),
                  f"{rec['trades']} trade(s) after {_inr(rec['charges'])} charges" if rec["trades"] else "no closed trade yet"))
     lev = ("<div class='banner' role='status'>Intraday positions are larger than the cash behind them: the "

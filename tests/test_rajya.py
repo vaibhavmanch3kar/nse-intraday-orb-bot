@@ -333,6 +333,7 @@ def test_page_shows_the_picture_and_the_simulation_and_has_nothing_that_trades(i
                  "NIFTY falls 10%", "delivery · yours", "intraday · the bot", "LIVE · REAL ZERODHA ACCOUNT"):
         assert text in page, text
     body = page.split("<main", 1)[1]
+    assert "Zerodha's figure, before charges" in body                  # why it can differ from the bot's booked result
     assert re.findall(r"<form[^>]*method='(\w+)'", body) == ["get"] and "method='post'" not in body.lower()
     assert "no holding is above 25% of the account" in body          # ITC is 23% of 18,198: nothing to do
     capped = web.render_rajya({"view": ["zerodha"], "cap": ["10"]}).split("id='rebalance'", 1)[1]
