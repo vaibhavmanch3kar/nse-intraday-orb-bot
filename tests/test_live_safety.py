@@ -51,6 +51,9 @@ def server(monkeypatch):
         raise SystemExit("no Kite settings in tests")
     monkeypatch.setattr(web, "_kite_proxy", no_kite)
     monkeypatch.setattr(livemode, "windows_setting", lambda n: "")
+    import watchdog
+    monkeypatch.setattr(watchdog.RealProbe, "bot_running", lambda self: False)   # same answer whether or not
+    # the real bot runs on this PC, so pressing Start always reaches the no_real_starts guard
     srv = web.ThreadingHTTPServer(("127.0.0.1", 0), web.Handler)
     monkeypatch.setattr(C, "WEB_PORT", srv.server_address[1])
     threading.Thread(target=srv.serve_forever, daemon=True).start()
@@ -92,19 +95,21 @@ def press_everything(port):
     assert (C.DRY_RUN, C.CONFIRM_LIVE, C.is_live(), dict(os.environ)) == flags   # settings never change
 
 
-def test_no_button_makes_the_bot_trade_real_money_without_the_settings(server):
+def test_no_button_makes_the_bot_trade_real_money_without_the_settings(server, no_real_starts):
     write_status()
     press_everything(server)
+    assert [c for c in no_real_starts if "run_bot.ps1" in c]      # Start was pressed; the guard held it
     assert not bot.Bot().live
     livemode.arm(login_at=dt.datetime.now(IST))      # even a valid arming alone is not enough
     assert not bot.Bot().live
 
 
-def test_no_button_arms_real_money_without_the_full_steps(server, monkeypatch):
+def test_no_button_arms_real_money_without_the_full_steps(server, monkeypatch, no_real_starts):
     monkeypatch.setattr(C, "DRY_RUN", False)
     monkeypatch.setattr(C, "CONFIRM_LIVE", "YES")
     write_status(live_env=True)
     press_everything(server)                          # typed words, but no login, no readiness: never armed
+    assert [c for c in no_real_starts if "run_bot.ps1" in c]      # Start was pressed; the guard held it
     assert not os.path.exists(livemode.arm_path())
     b = bot.Bot()
     assert not b.live and b.mode == "paper"

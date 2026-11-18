@@ -43,6 +43,21 @@ def no_background_jobs(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def no_real_starts(monkeypatch):
+    """No test may start the real bot or dashboard through Windows. On 19 Nov 2026 two tests that press every
+    dashboard button pressed Start without a stand-in, and the real run_bot.ps1 was started from the test run.
+    Every such request is recorded here instead and answered "not started"."""
+    import watchdog
+    asked = []
+
+    def refuse(self, command_line):
+        asked.append(command_line)
+        return False
+    monkeypatch.setattr(watchdog.RealProbe, "_spawn", refuse)
+    return asked
+
+
+@pytest.fixture(autouse=True)
 def isolated(tmp_path, monkeypatch):
     """Every test gets its own data dir and default strategy settings."""
     monkeypatch.setattr(C, "DATA_DIR", str(tmp_path))
