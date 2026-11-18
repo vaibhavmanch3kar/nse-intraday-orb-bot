@@ -6,6 +6,7 @@ import math
 import os
 
 import config as C
+import safefile
 import costs
 
 IST = dt.timezone(dt.timedelta(hours=5, minutes=30))
@@ -52,7 +53,7 @@ class State:
         tmp = self.path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(self.d, f, indent=2, default=str)
-        os.replace(tmp, self.path)
+        safefile.replace(tmp, self.path)
 
     # -- accessors
     @property

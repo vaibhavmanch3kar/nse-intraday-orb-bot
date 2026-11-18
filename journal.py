@@ -20,6 +20,7 @@ import json
 import os
 
 import config as C
+import safefile
 
 IST = dt.timezone(dt.timedelta(hours=5, minutes=30))
 
@@ -71,7 +72,7 @@ def _write_atomic(path, text):
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8", newline="") as f:
         f.write(text)
-    os.replace(tmp, path)   # raises PermissionError while Excel has the file open
+    safefile.replace(tmp, path)   # waits out a busy file; still raises PermissionError while Excel keeps it open
 
 
 def read_rows(mode):

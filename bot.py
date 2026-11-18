@@ -31,6 +31,7 @@ import livemode
 import reports
 import restart
 import risk
+import safefile
 import strategy
 import theme as T
 from broker import LiveBroker, PaperBroker
@@ -235,6 +236,7 @@ class Bot:
         self.balance_ok = not self.live   # REAL MONEY: no new trades until today's Zerodha balance is read
         self.balance_problem = None       # why the balance could not be used (shown on the dashboard)
         self.balance_tried = None         # monotonic time of the last read attempt (retry once a minute)
+        self.status_save_failed = False   # the last status.json save failed (warned once, see write_status)
         self.launcher_gone = lambda: False   # main() sets this when run_bot.ps1 passes --launcher-pid
         try:                    # what this bot runs: version and file/setting hashes, for the dashboard
             self.build = buildinfo.snapshot("bot")
@@ -582,10 +584,23 @@ class Bot:
                          "at": self.state.d.get("balance_at"), "problem": self.balance_problem}
                         if self.live else None),
         }
-        tmp = os.path.join(C.DATA_DIR, "status.json.tmp")
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(status, f, default=str, indent=1)
-        os.replace(tmp, os.path.join(C.DATA_DIR, "status.json"))
+        # The status file only feeds the dashboard. If it can't be saved (another program holds it even after
+        # safefile's retries, the disk is full, ...) that is a warning, said once, never a reason to stop: an
+        # unsaved status used to end the bot outside market hours, with the error shown only in its window.
+        try:
+            tmp = os.path.join(C.DATA_DIR, "status.json.tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(status, f, default=str, indent=1)
+            safefile.replace(tmp, os.path.join(C.DATA_DIR, "status.json"))
+        except OSError as e:
+            if not self.status_save_failed:
+                log.warning(f"could not save the dashboard status file ({type(e).__name__}: {e}) - "
+                            "the bot keeps running and tries again next round")
+            self.status_save_failed = True
+        else:
+            if self.status_save_failed:
+                log.info("dashboard status file saved again")
+            self.status_save_failed = False
 
     def _balance(self):
         import capital

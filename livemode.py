@@ -22,6 +22,7 @@ import re
 import secrets
 
 import config as C
+import safefile
 
 IST = dt.timezone(dt.timedelta(hours=5, minutes=30))
 CONFIRM_WORDS = "REAL MONEY"
@@ -59,7 +60,7 @@ def _write(path, obj):
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(obj, f, indent=1)
-    os.replace(tmp, path)
+    safefile.replace(tmp, path)
 
 
 def _read(path):

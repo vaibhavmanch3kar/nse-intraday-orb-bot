@@ -17,6 +17,7 @@ import json
 import os
 
 import config as C
+import safefile
 
 PRESETS = (10_000, 25_000, 50_000, 100_000, 500_000)
 MIN_INR = 10_000
@@ -54,7 +55,7 @@ def _write_json(path, data):
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
-    os.replace(tmp, path)
+    safefile.replace(tmp, path)
 
 
 def load():

@@ -29,6 +29,7 @@ import re
 import secrets
 
 import config as C
+import safefile
 
 EXIT_RESTART = 3
 COME_BACK_SEC = 90
@@ -68,7 +69,7 @@ def _write(path, obj):
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(obj, f, indent=1, default=str)
-    os.replace(tmp, path)
+    safefile.replace(tmp, path)
 
 
 def _read(path):
