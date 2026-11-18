@@ -1,6 +1,6 @@
 # Ayodhya ORB 2.0: production-readiness report
 
-Built 2026-11-18 14:50 by `readiness.py` from the evidence listed here. Code version `v1.9.0-43-gf6815e4`.
+Built 2026-11-18 15:16 by `readiness.py` from the evidence listed here. Code version `v1.9.0-46-g744b38e`.
 
 This report states what the evidence shows. It is not advice on whether to trade.
 
@@ -15,13 +15,13 @@ This report states what the evidence shows. It is not advice on whether to trade
 ### Platform
 
 - **PASS** 25 of 25 requirements have passing tests
-- **PASS** paper replay of 237 days: the trading loop and the backtest took the same trade 98.2% of the time (326 shared, 5 only in the loop, 1 only in the backtest), 0 errors
+- **PASS** paper replay of 237 days: the trading loop and the backtest took the same trade 100.0% of the time (328 shared, 0 only in the loop, 0 only in the backtest), 0 errors
 - **PASS** nothing is NOT working right now
 - **PASS** no risk limit is looser than its built-in value
 
 ### Strategy
 
-- **FAIL** one-year backtest of the present rules: 333 trades, -16.46%, average -0.21R (range -0.26 to -0.16)
+- **FAIL** one-year backtest of the present rules: 334 trades, -16.18%, average -0.20R (range -0.25 to -0.15)
 - **FAIL** lab: 6 ideas tested by walk-forward, none passed
 - **FAIL** forward test on unseen data: nothing has passed (0 registered)
 - **OPEN** real-money record: 1 closed trade(s), net ₹-3.96; the checkpoint needs 30 trades and even then is not proof
@@ -29,20 +29,19 @@ This report states what the evidence shows. It is not advice on whether to trade
 ### Operations
 
 - **OPEN** 4 secret(s) are kept as plain text in the Windows settings (KITE_API_KEY, KITE_API_SECRET, TRUEIP_USER, TRUEIP_PASS); secure_secrets.py move protects them
-- **OPEN** 43 commits exist only on this PC (not pushed)
-- **OPEN** Found 2026-11-18: The cool-down count depends on the order in which same-candle exits are recorded. When a winning and a losing position close on the same candle, the 'three losses in a row' count depends on which is recorded first. The trading loop records them in the order they were opened, the backtest in another order. This is the cause of every difference in the one-year paper replay (6 trades: twice in the year one of the two went into a cool-down and the other did not). The rule needs one stated order; that is a risk-rule decision and was not changed.
+- **OPEN** 46 commits exist only on this PC (not pushed)
 - **OPEN** Closing session change on 7 Dec 2026: NOT yet verified: trading hours and MIS timings change that day and must be checked again before it.
 - **OPEN** alerts reach only the dashboard; nothing reaches a phone when the PC is unattended
 - **OPEN** prices are polled as 15-minute candles; Kite's live tick stream is not used
 
 ## Tests
 
-807 passed, 0 failed, 2 skipped, in 70 test files.
+837 passed, 0 failed, 2 skipped, in 71 test files.
 
 | | Area | Requirement | Tests passed | Result |
 |---|---|---|---|---|
 | K1 | Capital protection (Kavach) | One risk engine decides every new position, in paper, real money and backtests alike | 22 | PASS |
-| K2 | Capital protection (Kavach) | Risk per trade, open positions, trades per day, daily loss limit and the cool-down after losses are enforced | 13 | PASS |
+| K2 | Capital protection (Kavach) | Risk per trade, open positions, trades per day, daily loss limit and the cool-down after losses are enforced | 43 | PASS |
 | K3 | Capital protection (Kavach) | No real-money entry on delayed, stale, missing or invalid prices | 23 | PASS |
 | K4 | Capital protection (Kavach) | Positions are sized from the real balance and skipped when not even one share is affordable | 27 | PASS |
 | E1 | Execution | Paper and real money are separate; real money needs both Windows settings and the day's arming | 81 | PASS |
@@ -73,14 +72,19 @@ The real trading loop (`bot.Bot.cycle`) was driven through 237 archived trading 
 
 | | Trading loop | Backtest |
 |---|---|---|
-| Trades | 331 | 327 |
-| Net result | ₹-15,927.09 | ₹-16,095.60 |
+| Trades | 328 | 328 |
+| Net result | ₹-15,773.21 | ₹-15,770.51 |
 
-- The same trade (day, stock, direction) in both: 326 (98.2% agreement).
-- Of those, same quantity: 310; same exit reason: 326.
-- Only in the loop: 5. Only in the backtest: 1.
+- The same trade (day, stock, direction) in both: 328 (100.0% agreement).
+- Of those, same quantity: 313; same exit reason: 328.
+- Only in the loop: 0. Only in the backtest: 0.
 - Rounds that raised an error: 0.
 - What a replay cannot show: real order fills, a broker outage, or delays in live prices.
+
+## What the testing itself found
+
+- **The cool-down count depended on the order in which same-candle exits were recorded** (found 2026-11-18). When a winning and a losing position closed on the same candle, the 'three losses in a row' count depended on which was recorded first. The trading loop recorded them in the order they were opened, the backtest in another order. This was the cause of every difference in the first one-year paper replay (6 trades: twice in the year one of the two went into a cool-down and the other did not).
+  - **Settled 2026-11-18 by the owner's decision: exits recorded at the same moment are counted losses first (risk.State._count_streak, tests/test_cooldown_order.py). One-year backtest before: 333 trades, -16.46%; after: 334 trades, -16.18%.**
 
 ## What is known about the trading rules
 
