@@ -1258,7 +1258,7 @@ def switch_to_paper():
         n = live_positions_held(s)
         if n:
             return (f"Switching to PAPER: no new real-money trades from now. The bot keeps managing its {n} open "
-                    f"position(s) (stop orders, trailing stop, 15:10 close) and switches when they have closed.")
+                    f"position(s) (stop orders, trailing stop, square-off close) and switches when they have closed.")
         return "Switching to PAPER: the bot restarts in paper within a minute."
     return "Real money is not armed any more: the bot trades PAPER."
 
@@ -1300,7 +1300,7 @@ def trading_mode_card(s):
             out.append(f"<p class='warn'>{html.escape(sw)}</p>")
         if s.get("switch") != "to_paper":
             ask = ("Switch back to PAPER?\\n\\nNo new real-money trades from now. Open positions are still managed "
-                   "(stop orders, trailing stop, 15:10 close); the bot switches when they have closed.")
+                   "(stop orders, trailing stop, square-off close); the bot switches when they have closed.")
             out.append(f"<form method='post' action='/mode/paper' onsubmit=\"return confirm('{ask}')\">{csrf_field()}"
                        f"<button class='wide'>◐ Switch back to Paper</button></form>")
         n = len(s.get("positions") or []) if live else 0

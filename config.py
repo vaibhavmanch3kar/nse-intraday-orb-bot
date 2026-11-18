@@ -96,7 +96,8 @@ DATA_SOURCE = _env("DATA_SOURCE", "yahoo")
 MARKET_OPEN = _env("MARKET_OPEN", "09:15")
 OR_MINUTES = _env("OR_MINUTES", 15, int)            # opening range = first N minutes
 LAST_ENTRY = _env("LAST_ENTRY", "12:00")            # no new entries on bars starting after this
-SQUARE_OFF = _env("SQUARE_OFF", "15:10")            # close everything (Zerodha auto-squares MIS ~15:20)
+SQUARE_OFF = _env("SQUARE_OFF", "15:00")            # close everything. Zerodha force-closes MIS in F&O stocks at
+                                                    # 15:12 (Rs 50 + GST per order), so 15:10 left only 2 minutes
 MARKET_CLOSE = _env("MARKET_CLOSE", "15:30")
 
 # ── Strategy: opening range breakout ───────────────────────────────────────

@@ -16,7 +16,7 @@
 | Stop | Other side of the opening range. In live mode it is **placed at the exchange as an SL order** |
 | Time stop | After 1 hour (4 bars), exit unless the trade is at least 0.5R in profit |
 | Trail | Exit when a 15-min close crosses the 21 EMA. **No fixed target**: winners run until the trail or square-off |
-| Square-off | 15:10 (Zerodha auto-squares MIS around 15:20 as a backstop, with a fee) |
+| Square-off | 15:00 (Zerodha force-closes MIS in F&O stocks at 15:12, with a fee of Rs 50 + GST per order) |
 | More signals than slots | Taken in order of breakout volume (strongest first) |
 
 R = profit or loss as a multiple of the risk (entry to stop). +1R means you made what you risked.
@@ -73,10 +73,10 @@ Each can be switched on or off in `config.py`. The last row is the current defau
 ## Time Machine
 
 Replays a trade 10,000 times using **this stock's own 5-minute moves** from the same time of day
-(±10 minutes) over the last 60 days, shuffled, from entry to 15:10. The random seed is fixed, so the
+(±10 minutes) over the last 60 days, shuffled, from entry to the square-off time. The random seed is fixed, so the
 same data always gives the same numbers. It reports:
 
-- how often a 1R or 2R target is hit before the stop, the average result with no target, and the price range at 15:10;
+- how often a 1R or 2R target is hit before the stop, the average result with no target, and the price range at the square-off time;
 - a **verdict**: of the replays that hit a side, how often the target came first, compared with break-even
   (50% at 1R). Within 5 points is a *coin flip*; 5–15 points *leans*; 15+ *strongly*;
 - the **real history**: the bot's own rules run on every earlier session in the 60 days for that stock and direction.

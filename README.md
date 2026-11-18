@@ -68,7 +68,7 @@ On a weekday (not an NSE holiday), **before 9:15 AM IST**:
    browser, and the bot starts in **PAPER** mode.
 2. Leave the black window open and the PC awake. Look at the dashboard whenever you like:
    its figures update by themselves every 10 seconds, without reloading the page.
-3. The bot takes trades from about 9:45 AM, closes everything by **3:10 PM**, and **stops by itself at 3:35 PM**.
+3. The bot takes trades from about 9:45 AM, closes everything by **3:00 PM**, and **stops by itself at 3:35 PM**.
 
 To stop early, click **Stop bot** on the dashboard or double-click **`7-STOP-BOT.bat`** (it waits until the bot has
 really stopped). Stopping the "Kite ORB Bot" task in Task Scheduler stops the bot too. The dashboard keeps running
@@ -219,7 +219,7 @@ always shown next to the themed name (for example **Lakshman Rekha · stop**), a
 | **Lakshya** | target | the aim |
 | **Anusaran** | 21 EMA trailing exit | "following" the price |
 | **Muhurat** | 1-hour time stop | the trade's window has passed |
-| **Sandhya** | 15:10 square-off | dusk: everything is closed |
+| **Sandhya** | 15:00 square-off | dusk: everything is closed |
 | **Maryada** | 2% daily loss limit | Rama's self-imposed limits |
 | **Vanvas** | 2-day cool-down after 3 losses | exile from the market |
 | **Vanar Sena** | index filter | trade with the army (the sector index), not against it |
@@ -329,7 +329,7 @@ Common ones:
 | `MAX_DAILY_LOSS_PCT` | `2.0` | Stop new trades for the day once booked + open losses reach this % |
 | `WATCHLIST` | 12 stocks | Which stocks the bot trades (NSE symbols) |
 | `DATA_SOURCE` | `yahoo` | `kite` for real-time Zerodha data (paid Connect plan, see above) |
-| `LAST_ENTRY` / `SQUARE_OFF` | `12:00` / `15:10` | No new trades after this time / close everything at this time |
+| `LAST_ENTRY` / `SQUARE_OFF` | `12:00` / `15:00` | No new trades after this time / close everything at this time |
 
 Each December, add next year's NSE holidays to `nse_holidays.json` (the list is on nseindia.com).
 

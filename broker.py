@@ -6,7 +6,7 @@ Paper and live (Kite) execution. Both expose the same methods:
   stopped_out(symbol, pos)                         -> avg exit price if the exchange stop filled, else None
 
 Live mode places a real SL (stop-limit) order at the exchange right after entry, so the
-stop works even if this PC or the bot stops. Targets and the 15:10 square-off are handled
+stop works even if this PC or the bot stops. Targets and the square-off (SQUARE_OFF, 15:00) are handled
 by the bot (a resting target order could double-fill with the stop).
 
 Execution safety (2.0), all in LiveBroker, the ONLY place that sends an order to Zerodha:

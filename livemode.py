@@ -9,7 +9,7 @@ Real money needs ALL of these, every day:
 Without the arming the bot trades PAPER whatever the settings say, including the 9:00 scheduled task.
 
 Switching back to paper: the dashboard deletes the arming at once and leaves data/switch_to_paper.json. A live bot
-then opens no new trades, keeps managing the open ones (stop orders, trailing stop, the 15:10 close) and restarts in
+then opens no new trades, keeps managing the open ones (stop orders, trailing stop, the square-off close) and restarts in
 paper only when all of them have closed. "Close all positions now" (data/close_all.json) is a separate request.
 
 Nothing here places an order or talks to Zerodha; readiness() only runs the read-only probes it is given.

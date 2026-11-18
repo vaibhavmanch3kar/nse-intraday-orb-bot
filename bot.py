@@ -796,7 +796,7 @@ class Bot:
     def switch_mode_if_requested(self, now):
         """Paper | Real Money (livemode.py). The mode is fixed while the bot runs, so a switch is a restart.
         To paper: no new real-money trades at once; the open ones are managed as usual (stop orders, trailing stop,
-        15:10 close); the restart waits until all of them have closed. To real money: only with both Windows
+        square-off close); the restart waits until all of them have closed. To real money: only with both Windows
         settings in this bot's own environment AND today's arming; it waits for no open paper position and holds
         new paper entries meanwhile. Returns restart.EXIT_RESTART when it is time (run_bot.ps1 starts the bot again
         with the same settings, and livemode.bot_mode decides the new mode). After the close it never restarts:
