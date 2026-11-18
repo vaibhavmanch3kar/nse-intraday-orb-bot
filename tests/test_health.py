@@ -148,6 +148,19 @@ def test_watchdog_record_is_reported(isolated):
     assert states(health.checks(NOW, good(), login=True, disk_free_gb=40.0))["watchdog"] == "bad"
 
 
+def test_the_bots_normal_end_after_the_close_raises_no_heartbeat_alert(isolated):
+    after = dt.datetime(2026, 11, 18, 15, 38, tzinfo=IST)         # the bot ended at 15:35; its status is 3 min old
+    beat(isolated, after, ago=health.BEAT_WARN_SEC + 20)
+    s = good(after, time=(after - dt.timedelta(seconds=170)).isoformat())
+    rows = health.checks(after, s, login=True, disk_free_gb=40.0)
+    hb = next(r for r in rows if r["key"] == "heartbeat")
+    assert hb["state"] == "off" and hb["detail"] == "not watched outside market hours"
+    assert [a for a in health.observe(after, rows) if a["key"] == "heartbeat"] == []
+    inside = dt.datetime(2026, 11, 18, 14, 0, tzinfo=IST)         # the same silence in market hours is still caught
+    beat(isolated, inside, ago=health.BEAT_WARN_SEC + 20)
+    assert states(health.checks(inside, good(inside), login=True, disk_free_gb=40.0))["heartbeat"] == "warn"
+
+
 # ---------------------------------------------------------------- alerts
 def row(key, state, detail="x"):
     return {"key": key, "name": key.title(), "state": state, "detail": detail}

@@ -108,6 +108,10 @@ def checks(now=None, status=None, login=None, disk_free_gb=None, store=None):
     beat, _pid = watchdog.heartbeat(now)
     if not running:
         out.append(_check("heartbeat", "Bot heartbeat", OFF, "the bot is not running"))
+    elif not session:
+        # The bot ends by itself after the close while its last status is still minutes fresh. Its heartbeat
+        # stopping then is the normal end of the day, not a stuck bot (it raised a false alert on 18 Nov 2026).
+        out.append(_check("heartbeat", "Bot heartbeat", OFF, "not watched outside market hours"))
     elif beat is None:
         out.append(_check("heartbeat", "Bot heartbeat", WARN, "no heartbeat file"))
     elif beat > watchdog.HANG_SEC:
