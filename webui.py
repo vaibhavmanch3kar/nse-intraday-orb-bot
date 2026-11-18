@@ -12,7 +12,14 @@ import theme as T
 
 # page tabs in the order shown: path, TERMS key, icon name (the icon comes from the theme in use), short label
 NAV = [("/", "live_page", "BOW", "Live"), ("/trades", "trades", "SCROLL", "Trades"),
-       ("/review", "review", "LAMP", "Review"), ("/scanner", "scanner", "FLAG", "Scanner")]
+       ("/review", "review", "LAMP", "Review"), ("/scanner", "scanner", "FLAG", "Scanner"),
+       ("/chanakya", "chanakya", "🧭", "Research"), ("/kavach", "kavach", "🛡", "Risk"),
+       ("/rajya", "rajya", "🏛", "Portfolio"), ("/yantrashala", "yantrashala", "🧪", "Lab")]
+# The four 2.0 pages keep one name in every theme: key -> (name, what it is)
+PAGE_NAMES = {"chanakya": ("Chanakya", "Research assistant"), "kavach": ("Kavach", "Risk controls"),
+              "rajya": ("Rajya", "Portfolio"), "yantrashala": ("Yantrashala", "Strategy lab")}
+# pages that belong under a tab without being one (the tab stays lit on them)
+PARENT = {"/backtest": "/review", "/journey": "/trades"}
 VIEW_PAGES = ("/", "/trades")      # pages with the Paper Account | Zerodha Account switch
 THEME_KEY = "ayodhya-theme"        # the browser remembers your light/dark choice (per browser, nothing else)
 
@@ -61,8 +68,9 @@ code{background:var(--surface-2);border:1px solid var(--border);border-radius:5p
  background:linear-gradient(135deg,var(--gold),var(--accent))}
 .brand b{font:600 18px var(--serif);color:var(--gold);letter-spacing:.3px;display:block;line-height:1.1}
 .brand small{color:var(--muted);font-size:11px;display:block}
-.tabs{display:flex;gap:4px}
-.tabs a{display:flex;flex-direction:column;padding:5px 12px;border-radius:9px;color:var(--muted);text-decoration:none;line-height:1.2}
+.tabs{display:flex;gap:2px;min-width:0;flex:1 1 auto;overflow-x:auto;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tabs a{display:flex;flex-direction:column;padding:5px 10px;border-radius:9px;color:var(--muted);text-decoration:none;line-height:1.2;white-space:nowrap;flex:0 0 auto}
 .tabs a b{color:var(--text);font-weight:600;font-size:13px} .tabs a small{font-size:11px}
 .tabs a:hover{background:var(--surface-2);text-decoration:none}
 .tabs a.on{background:var(--surface-2);box-shadow:inset 0 -2px 0 var(--accent)} .tabs a.on b{color:var(--gold)}
@@ -237,11 +245,12 @@ input[type=number],input[type=search],select{background:var(--surface);color:var
   .card.flush table.rt tr{padding:8px 14px}
   table.rt td.block{display:block;text-align:left}
   table.rt td.block::before{display:block;max-width:none;margin-bottom:2px}
-  .bottom{display:grid;grid-template-columns:repeat(4,1fr);position:fixed;left:0;right:0;bottom:0;z-index:12;
+  .bottom{display:flex;overflow-x:auto;scrollbar-width:none;scroll-snap-type:x proximity;position:fixed;left:0;right:0;bottom:0;z-index:12;
    background:color-mix(in srgb,var(--surface) 94%,transparent);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);
    border-top:1px solid var(--border);padding:6px 4px calc(6px + env(safe-area-inset-bottom))}
+  .bottom::-webkit-scrollbar{display:none}
   .bottom a{display:flex;flex-direction:column;align-items:center;gap:2px;text-decoration:none;color:var(--muted);font-size:11px;
-   min-height:48px;justify-content:center;border-radius:10px}
+   min-height:48px;justify-content:center;border-radius:10px;flex:0 0 22%;scroll-snap-align:start}
   .bottom a span{font-size:19px;line-height:1}
   .bottom a.on{color:var(--gold);background:var(--surface-2)}
   .bottom a:hover{text-decoration:none}
@@ -417,19 +426,29 @@ def css():
     return _tokens() + BASE_CSS + ALERTS_CSS + skin
 
 
+# With eight pages the tab row and the phone's bottom bar scroll sideways: bring the current page into view.
+NAV_JS = ("(function(){document.querySelectorAll('nav.tabs a.on,nav.bottom a.on').forEach(function(a){"
+          "var n=a.parentNode;n.scrollLeft=Math.max(0,a.offsetLeft-(n.clientWidth-a.offsetWidth)/2);});})();")
+
+
 def nav_links(active, view, cls):
     """Page tabs (desktop) or bottom navigation (phone). The current account view carries over."""
     out = []
+    active = PARENT.get(active, active)
     for path, key, icon_name, short in NAV:
-        icon = getattr(T, icon_name)
+        if key in PAGE_NAMES:
+            icon, (name, what) = icon_name, PAGE_NAMES[key]
+            title = f"{name} · {what}"
+        else:
+            icon, name, title = getattr(T, icon_name), T.name(key), T.term(key)
         href = path + (f"?view={view}" if view and path in VIEW_PAGES else "")
         on = " on" if path == active else ""
         cur = " aria-current='page'" if path == active else ""
         if cls == "tabs":
-            out.append(f"<a class='{on.strip()}' href='{href}'{cur} title='{html.escape(T.term(key))}'><b>{short}</b>"
-                       f"<small>{html.escape(T.name(key), quote=False)}</small></a>")
+            out.append(f"<a class='{on.strip()}' href='{href}'{cur} title='{html.escape(title)}'><b>{short}</b>"
+                       f"<small>{html.escape(name, quote=False)}</small></a>")
         else:
-            out.append(f"<a class='{on.strip()}' href='{href}'{cur} title='{html.escape(T.term(key))}'>"
+            out.append(f"<a class='{on.strip()}' href='{href}'{cur} title='{html.escape(title)}'>"
                        f"<span aria-hidden='true'>{icon}</span>{short}</a>")
     return "".join(out)
 
@@ -461,4 +480,4 @@ def shell(title, active, body, view=None, switch="", extra_head="", mode=""):
             f"<script>{HEAD_JS}</script><style>{css()}{charts_css}</style>{extra_head}</head>"
             f"<body data-view='{html.escape(view or '')}'><a class='skip' href='#main'>Skip to content</a>{head}{phone_switch}"
             f"<main class='wrap' id='main'>{body}{foot}</main>{bottom}"
-            f"<script>{THEME_JS}</script><script>{ALERTS_JS}</script>{charts_js}</body></html>")
+            f"<script>{THEME_JS}</script><script>{NAV_JS}</script><script>{ALERTS_JS}</script>{charts_js}</body></html>")

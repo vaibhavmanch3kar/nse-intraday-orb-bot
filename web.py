@@ -1859,8 +1859,11 @@ from this page. "Looser" means a larger risk than the built-in value.</div></sec
 <ol style="margin:6px 0 0 4px;padding-left:18px;line-height:1.6;list-style:none">{checks}</ol>
 <div class="muted small" style="margin-top:8px">The first check that fails stops the trade and names the rule in
 "Today's signals". A stop-loss limits the planned loss; it cannot guarantee the price it fills at.</div></details>"""
-    return page("Kavach", "/", body)
+    return page("Kavach", "/kavach", body)
 
+
+# the pages' Swarajya names typed as addresses lead to the page
+PAGE_ALIASES = {"/gad": "/", "/daftar": "/trades", "/bakhar": "/review", "/buruj": "/scanner", "/buruj-watch": "/scanner"}
 
 CHECK_WORDS = {"for": ("agrees", "sig"), "against": ("disagrees", "dn"), "neutral": ("says nothing", ""),
                "n/a": ("not available", "")}
@@ -1908,7 +1911,7 @@ def render_chanakya():
             f"not a probability and not advice. Chanakya cannot place an order and cannot overrule Kavach. "
             f"The past record is shown with its sample size, and says so when it proves nothing.</div>")
     if not r:
-        return page("Chanakya", "/", head + note + "<p class='muted'>The first assessment appears here when it has "
+        return page("Chanakya", "/chanakya", head + note + "<p class='muted'>The first assessment appears here when it has "
                     "been built. The page updates by itself.</p>")
     rec = (r.get("record") or {}).get("ALL") or {}
     period = (r.get("record") or {}).get("period") or ["", ""]
@@ -1960,7 +1963,7 @@ as of {html.escape(str(r.get('as_of') or '')[11:16])} · account {_inr(r.get('eq
 <table class="rt"><tr><th>Stock</th><th>Now</th><th>Checks</th><th>Kavach</th><th>Past record (this stock and direction)</th>
 <th>Bot's rule on this candle</th></tr>{''.join(rows)}</table></section>
 {details}{quiet_txt}"""
-    return page("Chanakya", "/", body)
+    return page("Chanakya", "/chanakya", body)
 
 
 def _pct(v, nd=1, signed=False):
@@ -2030,12 +2033,12 @@ def render_rajya(q=None):
             f"account. It is not advice, names nothing to buy and cannot place an order. Figures from past prices "
             f"describe the past year; they are not forecasts, and real falls can be larger.</div>")
     if not r:
-        return page("Rajya", "/", head + note + "<p class='muted'>The first picture appears here when it has been "
+        return page("Rajya", "/rajya", head + note + "<p class='muted'>The first picture appears here when it has been "
                     "built. The page updates by itself.</p>")
     if r.get("error"):
         url = login_url() if r.get("login_needed") else ""
         login = f" <a class='btn' href='{html.escape(url)}'>Log in to Zerodha</a>" if url else ""
-        return page("Rajya", "/", head + note + f"<div class='banner' role='alert'><b>The account could not be read."
+        return page("Rajya", "/rajya", head + note + f"<div class='banner' role='alert'><b>The account could not be read."
                     f"</b> {html.escape(str(r['error']))}{login}</div>")
     a, c, b, h, rec = r["allocation"], r["concentration"], r["budget"], r["history"], r["record"]
     warn = "".join(f"<div class='banner' role='status'>{html.escape(w)}</div>" for w in r.get("warnings") or [])
@@ -2166,7 +2169,7 @@ closes, past year</span></div>{moves}</section>
 <section class="card"><div class="hd">Booked result and drawdown <span class="muted small">after charges, from
 the trade log</span></div><div class="small">{record}</div></section>
 {_rajya_rebalance(a, view, q)}"""
-    return page("Rajya", "/", body)
+    return page("Rajya", "/rajya", body)
 
 
 def _lab_row(label, m, judged=False):
@@ -2248,7 +2251,7 @@ trades, an average result per trade whose whole 95% range is above zero, a profi
 {yantra.PASS_MONTHS:.0%} of months positive. A pass is only a ticket to the forward test on future data.
 {f'With {tried} variants tried, the best one looking good is expected by luck alone.' if tried else ''}</div>
 {head}{empty}{''.join(cards)}{reg_card}"""
-    return page("Yantrashala", "/", body)
+    return page("Yantrashala", "/yantrashala", body)
 
 
 def sizing_capital(s=None):
@@ -3280,6 +3283,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(render_journey(q.get("src", ["paper"])[0], idx))
         elif u.path == "/settings":
             self._settings(q)
+        elif u.path in PAGE_ALIASES:
+            self._redirect(PAGE_ALIASES[u.path])
         elif u.path == "/kavach":
             self._send(render_kavach())
         elif u.path == "/yantrashala":
