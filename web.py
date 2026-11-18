@@ -1077,6 +1077,7 @@ def live_limits(s):
             f"</dl><div class='small' style='padding:0 14px 12px'><a href='/kavach'>Kavach · every risk check "
             f"and limit →</a> · <a href='/chanakya'>Chanakya · what speaks for and against each stock →</a> · "
             f"<a href='/rajya'>Rajya · the whole account, measured →</a> · "
+            f"<a href='/readiness'>Readiness report →</a> · "
             f"<a href='/yantrashala'>Yantrashala · strategy lab →</a></div></details>")
 
 
@@ -1942,6 +1943,84 @@ from this page. "Looser" means a larger risk than the built-in value.</div></sec
 <div class="muted small" style="margin-top:8px">The first check that fails stops the trade and names the rule in
 "Today's signals". A stop-loss limits the planned loss; it cannot guarantee the price it fills at.</div></details>"""
     return page("Kavach", "/kavach", body)
+
+
+READY_WORDS = {"pass": ("✓ PASS", "in"), "fail": ("✕ FAIL", "dn"), "open": ("• OPEN", "")}
+
+
+def render_readiness():
+    """The production-readiness result saved by readiness.py: three verdicts with their reasons, every
+    requirement with its tests, the paper replay and what is known about the rules. Read-only."""
+    import readiness
+    r = readiness.latest()
+    head = ("<div class='page-head'><h1>📋 Readiness <span class='tag'>from evidence</span></h1><span class='sub'>"
+            "What the tests, the paper replay and the running system show · read-only</span></div>"
+            "<div class='banner' role='note'><b>How to read this.</b> Three separate questions, each answered by a "
+            "rule fixed in advance. It states what the evidence shows; it is not advice on whether to trade.</div>")
+    if not r:
+        return page("Readiness", "/kavach", head + "<p class='muted'>No result is saved yet. Run "
+                    "<code>.venv\\Scripts\\python.exe readiness.py run</code> (about 4 minutes).</p>")
+    v, t = r["verdicts"], r["tests"]
+    names = {"platform": ("Platform", "Is the software safe and correct?"),
+             "strategy": ("Strategy", "Do the trading rules have a proven edge?"),
+             "operations": ("Operations", "What is still open?")}
+    cards = ""
+    for k in ("platform", "strategy", "operations"):
+        word, cls = READY_WORDS[v[k]["state"]]
+        reasons = "".join(f"<li><span class='st {READY_WORDS[s][1]}'>{READY_WORDS[s][0]}</span> {html.escape(text)}</li>"
+                          for s, text in v[k]["reasons"])
+        cards += (f"<section class='card'><div class='hd'>{names[k][0]} <span class='muted small'>{names[k][1]}</span>"
+                  f"<span class='end'><span class='st {cls}'>{word}</span></span></div>"
+                  f"<div class='small'><b>{html.escape(readiness.HEADLINES[(k, v[k]['state'])])}</b></div>"
+                  f"<ul class='small' style='margin:8px 0 0 0;padding:0;list-style:none;line-height:1.9'>{reasons}</ul>"
+                  f"</section>")
+    reqs = "".join(
+        f"<tr><td class='first' data-label='No.'>{x['id']}</td><td data-label='Area'>{html.escape(x['area'])}</td>"
+        f"<td data-label='Requirement' style='white-space:normal'>{html.escape(x['text'])}</td>"
+        f"<td data-label='Tests passed' class='r'>{x['passed']}"
+        + (f" <b class='dn'>({x['failed']} failed)</b>" if x["failed"] else "") + "</td>"
+        f"<td data-label='Result'><span class='st {READY_WORDS[x['state']][1]}'>{READY_WORDS[x['state']][0]}</span></td></tr>"
+        for x in r["requirements"])
+    rp = r.get("replay")
+    if rp:
+        c = rp["compare"]
+        replay = (f"<div class='small' style='padding:8px 14px 12px'>The real trading loop was driven through "
+                  f"<b>{rp['days'][2]}</b> archived days ({rp['days'][0]} to {rp['days'][1]}, {rp['rounds']} rounds) "
+                  f"on virtual money and compared with the backtest of the same days. Trades: loop "
+                  f"<b>{c['loop_trades']}</b>, backtest <b>{c['backtest_trades']}</b>; the same trade in both: "
+                  f"<b>{c['same_trade']}</b> ({c['agreement_pct']:.1f}%); same quantity {c['same_quantity']}, same "
+                  f"exit reason {c['same_exit_reason']}. Net: loop {_inr(c['loop_net'], True)}, backtest "
+                  f"{_inr(c['backtest_net'], True)}. Rounds with an error: {len(rp.get('errors') or [])}. A replay "
+                  f"cannot show real fills, a broker outage or live price delays.</div>")
+    else:
+        replay = ("<p class='muted small' style='padding:8px 14px 12px'>Not run. <code>paper_replay.py --out "
+                  "data\\paper_replay.json</code></p>")
+    lab = "".join(
+        f"<tr><td class='first' data-label='Idea'>{html.escape(str(x['strategy']))}</td>"
+        f"<td data-label='Walk-forward trades' class='r'>{x['trades'] if x['trades'] is not None else '-'}</td>"
+        f"<td data-label='Average R' class='r'>{format(x['avg_r'], '+.2f') if x.get('avg_r') is not None else '-'}</td>"
+        f"<td data-label='Verdict'>{html.escape(str(x['verdict']))}</td></tr>" for x in r["strategy"].get("lab") or [])
+    rules = "".join(
+        f"<tr><td class='first' data-label='Rule' style='white-space:normal'><b>{html.escape(c['name'])}</b></td>"
+        f"<td data-label='How the bot stands' style='white-space:normal'>{html.escape(c['text'])}</td>"
+        f"<td data-label='Checked'>{html.escape(c['checked']) if c['checked'] else '<span class=\'st dn\'>not yet</span>'}</td></tr>"
+        for c in r["compliance"])
+    body = f"""{head}
+<div class="muted small" style="margin:0 0 10px">Built {html.escape(str(r['built'])[:16].replace('T', ' '))} ·
+code {html.escape(str((r['state'].get('git') or {}).get('version')))} · tests: {t['passed']} passed, {t['failed']} failed,
+{t['skipped']} skipped · the same report as a file: docs\\PRODUCTION-READINESS.md · refresh with
+<code>readiness.py run</code></div>
+{cards}
+<section class="card flush"><div class="hd">Requirements and the tests that prove them</div>
+<table class="rt"><tr><th>No.</th><th>Area</th><th>Requirement</th><th class="r">Tests passed</th><th>Result</th></tr>{reqs}</table></section>
+<section class="card flush"><div class="hd">Paper replay of the trading loop</div>{replay}</section>
+<section class="card flush"><div class="hd">Ideas tested in the lab</div>
+<table class="rt"><tr><th>Idea</th><th class="r">Walk-forward trades</th><th class="r">Average R</th><th>Verdict</th></tr>{lab}</table>
+<div class="muted small" style="padding:8px 14px 12px">Details in <a href="/yantrashala">Yantrashala</a> and the
+<a href="/backtest">one-year backtest</a>. Thirty real trades are an early checkpoint, not proof.</div></section>
+<section class="card flush"><div class="hd">Rules for trading through the Kite API</div>
+<table class="rt"><tr><th>Rule</th><th>How the bot stands</th><th>Checked</th></tr>{rules}</table></section>"""
+    return page("Readiness", "/kavach", body)
 
 
 def bakhar_tabs(active):
@@ -3430,6 +3509,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._redirect("/backtest")
                 return
             self._send(render_backtest())
+        elif u.path == "/readiness":
+            self._send(render_readiness())
         elif u.path in PAGE_ALIASES:
             self._redirect(PAGE_ALIASES[u.path])
         elif u.path == "/kavach":
