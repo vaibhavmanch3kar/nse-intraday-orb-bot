@@ -294,10 +294,26 @@ def view_switch(path, view, status):
             f"the bot is trading {html.escape(bot_mode)})'>{''.join(links)}</div>")
 
 
-def view_banner(view):
-    if view == "zerodha":
-        return ("<div class='viewbar zerodha'>LIVE · REAL ZERODHA ACCOUNT · real money · read-only view</div>")
-    return "<div class='viewbar paper'>PAPER ACCOUNT · virtual money</div>"
+def view_banner(view, s=None):
+    """Which account the page shows, and, when that is not the account the bot is trading right now, a plain
+    line saying so. The view only changes what is shown; it never changes the trading mode."""
+    bar = ("<div class='viewbar zerodha'>LIVE · REAL ZERODHA ACCOUNT · real money · read-only view</div>"
+           if view == "zerodha" else "<div class='viewbar paper'>PAPER ACCOUNT · virtual money</div>")
+    s = s or {}
+    if not bot_running(s):
+        return bar
+    live = s.get("mode") == "live"
+    if live and view == "paper":
+        return bar + ("<div class='banner' role='status' style='border-color:var(--dn)'><b>You are looking at the "
+                      "PAPER account, but the bot is trading REAL MONEY on Zerodha right now.</b> These paper "
+                      "figures are not today's trading. <a href='?view=zerodha'>Show the Zerodha account</a> "
+                      "(switching views never changes the trading mode).</div>")
+    if not live and view == "zerodha":
+        return bar + ("<div class='banner' role='status'><b>You are looking at your real Zerodha account, but the "
+                      "bot is trading PAPER (virtual money) right now.</b> It places no real orders. "
+                      "<a href='?view=paper'>Show the Paper account</a> (switching views never changes the "
+                      "trading mode).</div>")
+    return bar
 
 
 def zerodha_card(acct):
@@ -1298,7 +1314,7 @@ def render(msg="", q=None):
     body = f"""<style>{LIVE_CSS}</style>
 <div class="page-head"><h1>{T.BOW} {T.name('live_page')}</h1><span class="sub">{T.plain('live_page')} · updates in place every {LIVE_REFRESH_SEC} s</span></div>
 {R('status')}
-{view_banner(view)}
+{view_banner(view, s)}
 <div class="banner" id="offline" role="status" hidden>⚠ Can't reach the dashboard server: the figures below may be old. It keeps trying.</div>
 {R('notice')}
 {note}
@@ -1931,7 +1947,7 @@ def render_trades(q=None):
     body = (f"<style>{TRADES_CSS}</style>"
             f"<div class='page-head'><h1>{T.SCROLL} {T.term('trades')}</h1>"
             f"<span class='sub'>{html.escape(T.ui('trades_sub'), quote=False)}</span></div>"
-            + mode_chips(s) + view_banner(view) + trade_kpis(st, label, view) + note
+            + mode_chips(s) + view_banner(view, s) + trade_kpis(st, label, view) + note
             + f"<nav class='ptabs' role='tablist' aria-label='Trades sections'>{tabs}</nav>"
             + "".join(f"<section class='panel' id='{pid}' role='tabpanel' aria-label='{name}'>{html_}</section>"
                       for pid, name, html_ in panels)

@@ -64,3 +64,31 @@ def test_no_note_about_added_money_on_an_ordinary_day():
     low = accounts.summarise_zerodha({"net": 3000.0, "available": {"opening_balance": 5000.0, "live_balance": 3000.0}},
                                      {"net": []})
     assert low["sizing"] == 3000.0                                # money taken out counts at once
+
+
+# ---------------------------------------------------------------- 3. the view is not the trading mode
+def running(mode):
+    return {"time": dt.datetime.now(IST).isoformat(), "mode": mode}
+
+
+def test_view_that_differs_from_the_trading_mode_says_so():
+    live_paper = web.view_banner("paper", running("live"))
+    assert "PAPER ACCOUNT" in live_paper and "the bot is trading REAL MONEY on Zerodha right now" in live_paper
+    assert "?view=zerodha" in live_paper and "never changes the trading mode" in live_paper
+    paper_zerodha = web.view_banner("zerodha", running("paper"))
+    assert "the bot is trading PAPER" in paper_zerodha and "?view=paper" in paper_zerodha
+
+
+def test_matching_view_or_a_stopped_bot_has_no_extra_line():
+    assert "right now" not in web.view_banner("zerodha", running("live"))
+    assert "right now" not in web.view_banner("paper", running("paper"))
+    old = {"time": "2026-11-17T15:30:00+05:30", "mode": "live"}
+    assert "right now" not in web.view_banner("paper", old) and "right now" not in web.view_banner("paper")
+
+
+def test_the_default_view_follows_the_bot_and_a_view_never_sets_the_mode():
+    assert web.current_view({}, {"mode": "live"}) == "zerodha" and web.current_view({}, {"mode": "paper"}) == "paper"
+    assert web.current_view({"view": ["paper"]}, {"mode": "live"}) == "paper"
+    before = (C.DRY_RUN, C.CONFIRM_LIVE, C.is_live())
+    web.view_banner("zerodha", running("paper")); web.view_banner("paper", running("live"))
+    assert (C.DRY_RUN, C.CONFIRM_LIVE, C.is_live()) == before
