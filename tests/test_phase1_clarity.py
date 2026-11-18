@@ -92,3 +92,36 @@ def test_the_default_view_follows_the_bot_and_a_view_never_sets_the_mode():
     before = (C.DRY_RUN, C.CONFIRM_LIVE, C.is_live())
     web.view_banner("zerodha", running("paper")); web.view_banner("paper", running("live"))
     assert (C.DRY_RUN, C.CONFIRM_LIVE, C.is_live()) == before
+
+
+# ---------------------------------------------------------------- 4. plans use the real capital
+def test_sizing_capital_is_the_account_the_bot_trades(monkeypatch):
+    import capital
+    monkeypatch.setattr(capital, "current_opening_balance", lambda *a: 10000.0)
+    assert web.sizing_capital({"mode": "paper"}) == (10000.0, "the paper opening balance")
+    cap, label = web.sizing_capital({"mode": "live", "balance": {"inr": 4870.6}})
+    assert cap == 4870.6 and "Zerodha balance" in label
+    assert web.sizing_capital({"mode": "live", "balance": {"inr": None}})[0] == 10000.0   # not read yet: paper figure
+
+
+def test_plan_quantity_follows_the_capital():
+    # close 300, stop 291: Rs 9 risk a share
+    assert web.plan_qty(300, 291, 100000) == 55          # Rs 500 risk -> 55 shares (the old fixed assumption)
+    assert web.plan_qty(300, 291, 4870.6) == 2           # Rs 24.35 risk -> 2 shares
+    assert web.plan_qty(1365, 1340, 4870.6) == 0         # 1 share costs more than 25% of the balance
+    assert web.plan_qty(300, 300, 4870.6) == 0 and web.plan_qty(None, 291, 4870.6) == 0
+
+
+def test_scanner_page_shows_the_real_risk_not_500(monkeypatch):
+    import scanner
+    row = {"setups": ["20-day high breakout"], "close": 300.0, "change_pct": 1.0, "rsi": 60.0, "stop": 291.0,
+           "target": 318.0, "qty": 55, "above_200dma": True, "from_52w_high_pct": -2.0, "closes": [290, 295, 300]}
+    big = dict(row, close=1365.0, stop=1340.0, target=1415.0)
+    monkeypatch.setattr(scanner, "latest", lambda: {"day": "2026-11-17", "built": "2026-11-18T10:00:14+05:30",
+                                                    "rows": {"ITC": row, "RELIANCE": big}, "counts": {}, "errors": {}})
+    monkeypatch.setattr(scanner, "status", lambda c, now=None: {"stale": False})
+    monkeypatch.setattr(web, "sizing_capital", lambda s=None: (4870.6, "your Zerodha balance, as the bot read it"))
+    page = web.render_scanner()
+    assert "Plan (₹24 risk)" in page and "₹500 risk" not in page and "qty 2" in page and "qty 55" not in page
+    assert "qty 0: 1 share doesn&#x27;t fit the limits" in page or "qty 0: 1 share doesn't fit the limits" in page
+    assert "0.5% of ₹4,870.60" in page and "your Zerodha balance" in page

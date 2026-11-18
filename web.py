@@ -1526,7 +1526,8 @@ def render_review(day=None, refresh=False):
     settings = " · ".join(f"{k}={v}" for k, v in st.items())
     total = r.get("total_r", 0.0)
     built = html.escape(str(r.get('built', ''))[:16].replace('T', ' '))
-    at_risk = total * C.PAPER_START_INR * C.RISK_PER_TRADE_PCT / 100
+    cap, cap_label = sizing_capital()
+    at_risk = total * cap * C.RISK_PER_TRADE_PCT / 100
     body = f"""
 <div class="page-head"><h1>{T.LAMP} {T.term('review')} <span class="tag">{r['day']}</span></h1>
 <span class="sub">The day replayed through the strategy rules, one stock at a time (portfolio limits not applied) ·
@@ -1536,7 +1537,8 @@ built {built} from 15-min data</span></div>{note}
 <input type="hidden" name="refresh" value="1"><button class="ghost small">↻ Refresh</button></form></div>
 <div class="kgrid k4">{_kpi("Signals", f"{r.get('signals', 0)}")}{_kpi("Winners", f"{r.get('wins', 0)}")}
 {_kpi("Total", f"{total:+.2f}R", "after slippage and charges", _cls(total))}
-{_kpi("At 0.5% risk on ₹1L", _signed(at_risk), "about", _cls(at_risk))}</div>{progress_note}
+{_kpi(f"At {C.RISK_PER_TRADE_PCT:g}% risk on {_inr(cap)}", _signed(at_risk),
+      f"about · {html.escape(cap_label)} · less when a position limit applies", _cls(at_risk))}</div>{progress_note}
 <section class="card flush"><div class="hd">Stocks <span class="end"><span class="tag">chart = 15-min closes ·
 {T.ui('band_colour')} band = opening range</span></span></div><table class="rt">
 <tr><th>Stock</th><th>Day</th><th class="r">Opening range</th><th class="r">Day %</th><th>Signal → outcome</th>
@@ -1549,6 +1551,25 @@ should beat these odds. The replays also inherit the stock's recent intraday dri
 The verdict compares target-first vs stop-first at 1R with break-even (50%): within 5 points is a coin flip.<br>
 {T.SCROLL} History is the real record: the bot's same rules (same direction) run on each earlier session.</div></details>"""
     return page("Session review", "/review", body)
+
+
+def sizing_capital(s=None):
+    """(rupees, plain label): the capital that plans on the Scanner and Review pages are sized from. It is the
+    account the bot trades: in real money the Zerodha balance the bot read (what it sizes its own trades from),
+    otherwise the paper opening balance. It used to be a fixed Rs 1,00,000 whatever the account held."""
+    s = read_status() if s is None else s
+    bal = s.get("balance") or {}
+    if s.get("mode") == "live" and bal.get("inr"):
+        return float(bal["inr"]), "your Zerodha balance, as the bot read it"
+    import capital
+    return float(capital.current_opening_balance()), "the paper opening balance"
+
+
+def plan_qty(close, stop, cap):
+    """Shares for a long plan: the risk rule, capped by the per-stock limit (the Scanner's own rule)."""
+    if not close or not stop or close <= stop:
+        return 0
+    return int(min(cap * C.RISK_PER_TRADE_PCT / 100 // (close - stop), cap * C.MAX_POSITION_PCT / 100 // close))
 
 
 def render_scanner(refresh=False):
@@ -1576,10 +1597,13 @@ def render_scanner(refresh=False):
     counts = "".join(_kpi(html.escape(k), f"{v}") for k, v in r.get("counts", {}).items())
     rows = []
     hits = [(s, x) for s, x in r.get("rows", {}).items() if x["setups"]]
+    cap, cap_label = sizing_capital()
     for s, x in sorted(hits, key=lambda kv: (-len(kv[1]["setups"]), kv[0])):
         trend = ("<span class='up'>above 200 DMA</span>" if x.get("above_200dma") else
                  "<span class='dn'>below 200 DMA</span>" if x.get("above_200dma") is False else "-")
-        plan = (f"stop {_fmt(x['stop'])} · target {_fmt(x['target'])} · qty {x['qty']}"
+        qty = plan_qty(x.get("close"), x.get("stop"), cap)
+        plan = (f"stop {_fmt(x['stop'])} · target {_fmt(x['target'])} · "
+                + (f"qty {qty}" if qty else "<span class='warn'>qty 0: 1 share doesn't fit the limits</span>")
                 if x.get("stop") else "-")
         rows.append(
             f"<tr><td class='first' data-label='Stock'><b>{html.escape(s)}</b></td>"
@@ -1591,7 +1615,7 @@ def render_scanner(refresh=False):
             f"<td data-label='Trend'><span>{trend} <span class='muted'>· {x['from_52w_high_pct']:+.1f}% vs 52w high</span></span></td>"
             f"<td data-label='Plan' class='block' style='white-space:normal'>{plan}</td></tr>")
     table = "".join(rows) or "<tr><td colspan=7 class='muted'>No setups on the last session.</td></tr>"
-    risk_rs = C.PAPER_START_INR * C.RISK_PER_TRADE_PCT / 100
+    risk_rs = cap * C.RISK_PER_TRADE_PCT / 100
     built = html.escape(str(r.get('built', ''))[:16].replace('T', ' '))
     errors = (' Data errors: ' + html.escape(', '.join(r['errors']))) if r.get('errors') else ''
     body = f"""
@@ -1607,8 +1631,8 @@ def render_scanner(refresh=False):
 <details class="card"><summary>How the setups and the plan work</summary><div class="small muted">
 Setups: 20-day high breakout · bull flag (≥8% pole, tight shallow flag) · 20-day MA reclaim ·
 oversold (RSI&lt;30) · oversold bounce (RSI&lt;30 in last 3 days, close above yesterday's high).
-Plan: stop = close − 1.5 × ATR(14), target = 2R, qty risks {C.RISK_PER_TRADE_PCT}% of ₹{C.PAPER_START_INR:,.0f}
-(capped at {C.MAX_POSITION_PCT:.0f}% of capital). The TWS interview's rule: prefer stocks in an uptrend (above the 200 DMA,
+Plan: stop = close − 1.5 × ATR(14), target = 2R, qty risks {C.RISK_PER_TRADE_PCT}% of {_inr(cap)}
+({html.escape(cap_label)}; capped at {C.MAX_POSITION_PCT:.0f}% of it per stock, so {_inr(cap * C.MAX_POSITION_PCT / 100)}). The TWS interview's rule: prefer stocks in an uptrend (above the 200 DMA,
 near highs).{errors}</div></details>"""
     return page("Swing scanner", "/scanner", body)
 
