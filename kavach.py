@@ -9,7 +9,8 @@ taken, with how many shares, and if not, which rule stopped it".
 
 The checks, in order (the first one that fails stops the trade):
    1. time           not after the square-off time
-   2. paused         Pause, an Apply-Now restart or a Paper | Real Money switch waiting
+   2. paused         Pause, an Apply-Now restart or a Paper | Real Money switch waiting; or on hold because an
+                     order's fate is unknown or the bot's positions don't match Zerodha's
    3. balance        real money: today's Zerodha balance was read
    4. data           real money needs Kite prices (never delayed Yahoo); the candles passed validation;
                      the signal is not older than MAX_SIGNAL_AGE_MIN; the index filter could be checked
@@ -76,8 +77,8 @@ def sector_count(state, symbol, direction, sector_of):
 
 
 def pre_trade(state, symbol, direction, entry, stop, today, *, prices=None, equity=None, risk_mult=1.0,
-              now=None, square_off=None, paused=False, balance_ok=True, balance_problem=None, data=None,
-              signal_close=None, bar_volume=None, sector_of=None):
+              now=None, square_off=None, paused=False, hold=None, balance_ok=True, balance_problem=None,
+              data=None, signal_close=None, bar_volume=None, sector_of=None):
     """Decide one new position. `state` is the account (risk.State); `entry` is the price it would be bought or
     sold at; `prices` are the latest prices (for the daily loss limit and the account's value); `equity`
     overrides the account value used for sizing (a backtest sizes from booked equity)."""
@@ -93,6 +94,8 @@ def pre_trade(state, symbol, direction, entry, stop, today, *, prices=None, equi
     # 2. paused
     if paused:
         return _stop(d, "paused", "paused")
+    if hold:                                  # the broker's state is unclear, or positions don't match Zerodha
+        return _stop(d, "paused", hold)
     passed("paused")
     # 3. balance (real money)
     if not balance_ok:

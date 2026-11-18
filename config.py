@@ -155,6 +155,9 @@ MIN_QTY = 1
 LIMIT_BUFFER_PCT = _env("LIMIT_BUFFER_PCT", 0.20, float)      # marketable limit offset
 ORDER_FILL_TIMEOUT_SEC = _env("ORDER_FILL_TIMEOUT_SEC", 30, int)
 EXIT_RETRIES = _env("EXIT_RETRIES", 5, int)
+CANCEL_WAIT_SEC = _env("CANCEL_WAIT_SEC", 10, int)            # wait this long for Zerodha to confirm a cancel
+MARGIN_CHECK = _env("MARGIN_CHECK", True, bool)               # ask Zerodha for the margin before each entry
+RECON_EVERY_SEC = _env("RECON_EVERY_SEC", 300, int)           # compare positions with Zerodha this often
 TICK = 0.05                                                   # valid for every NSE equity tick size
 
 # ── Loop / files ───────────────────────────────────────────────────────────
