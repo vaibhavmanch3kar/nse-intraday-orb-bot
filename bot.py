@@ -834,6 +834,10 @@ class Bot:
                 self.check_changes_at_close(now)
                 self.write_status(now)
                 break
+            # A trading day: start today's counters now (trades today, day P&L, the daily loss limit's base),
+            # not only at the first round after 09:15, so the dashboard never shows yesterday's numbers as
+            # today's before the open. Same reset as cycle() does; it runs once a day.
+            self.state.new_day_if_needed(today)
             if not self.ensure_live_broker():
                 if not waiting_login_logged:
                     self.note(f"{T.term('live')} mode: waiting for today's Kite login ({T.name('login')}) - open http://127.0.0.1:5000", logging.WARNING)
