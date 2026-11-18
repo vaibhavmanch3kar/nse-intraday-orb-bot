@@ -351,7 +351,12 @@ def main(argv):
         r = register(argv[2], params)
         print(f"registered {r['label']} on {r['registered']} (code {r['code']}); judged only on later candles")
     elif cmd == "forward":
-        for r in forward():
+        rows = forward()
+        os.makedirs(lab_dir(), exist_ok=True)
+        safefile.write_json(os.path.join(lab_dir(), "forward.json"),
+                            {"at": dt.datetime.now(IST).isoformat(timespec="seconds"), "rows": rows},
+                            indent=1, default=str)                     # the dashboard shows this file
+        for r in rows:
             print(f"\n{r['label']} registered {r['registered']}: {r['status']}")
             if r.get("result"):
                 print(_line(f"forward {r['from']} .. {r['to']}", r["result"]))

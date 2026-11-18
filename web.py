@@ -1043,7 +1043,7 @@ def live_limits(s):
             f"<dt>Exits</dt><dd>{T.term('stop')} · {T.term('trail')} · {T.term('time_stop')} · "
             f"{T.term('square_off')} at {C.SQUARE_OFF}</dd>"
             f"</dl><div class='small' style='padding:0 14px 12px'><a href='/kavach'>Kavach · every risk check "
-            f"and limit →</a></div></details>")
+            f"and limit →</a> · <a href='/yantrashala'>Yantrashala · strategy lab →</a></div></details>")
 
 
 def live_positions_held(s):
@@ -1536,6 +1536,13 @@ def job_strip(name, result, fresh, refresh_url, unit):
         tail = f" · {saved}" if saved else ""
         text = (f"{s['done']} of {s['total'] or '?'} {unit} · {_mmss(s['elapsed_sec'])}"
                 + (f" · {s['step']}" if s.get("step") else "") + tail)
+        button = (f"<form method='post' action='/jobs/cancel' style='margin:0'>"
+                  f"<input type='hidden' name='job' value='{html.escape(name)}'>{csrf_field()}"
+                  f"<button class='ghost small' aria-label='Cancel this build'>✕ Cancel</button></form>")
+    elif s["state"] == "cancelled":
+        state, icon, cls = "Cancelled", "⚠", "warn"
+        text = "the build was cancelled; nothing of it was saved" + (f" · {saved}" if saved else "")
+        button = btn("Refresh")
     elif s["state"] == "failed":
         state, icon, cls = "Failed", "✕", "bad"
         text = f"the last update failed: {s['error']}" + (f" · {saved}" if saved else "")
@@ -1837,6 +1844,88 @@ from this page. "Looser" means a larger risk than the built-in value.</div></sec
 <div class="muted small" style="margin-top:8px">The first check that fails stops the trade and names the rule in
 "Today's signals". A stop-loss limits the planned loss; it cannot guarantee the price it fills at.</div></details>"""
     return page("Kavach", "/", body)
+
+
+def _lab_row(label, m, judged=False):
+    if not m or not m.get("trades"):
+        return (f"<tr><td class='first' data-label='Run'>{html.escape(label)}</td>"
+                f"<td colspan='6' class='muted'>no trades</td></tr>")
+    pf = f"{m['profit_factor']:.2f}" if m.get("profit_factor") is not None else "-"
+    return (f"<tr{' class=judged' if judged else ''}><td class='first' data-label='Run' style='white-space:normal'>"
+            f"{'<b>' if judged else ''}{html.escape(label)}{'</b>' if judged else ''}</td>"
+            f"<td data-label='Trades' class='r'>{m['trades']}</td>"
+            f"<td data-label='Wins' class='r'>{m['win_rate']:.0%}</td>"
+            f"<td data-label='Average per trade' class='r {_cls(m['avg_r'])}'>{m['avg_r']:+.2f}R "
+            f"<span class='muted'>({m['r_low']:+.2f} to {m['r_high']:+.2f})</span></td>"
+            f"<td data-label='Profit factor' class='r'>{pf}</td>"
+            f"<td data-label='Net' class='r'>{_pl(m['net'])}</td>"
+            f"<td data-label='Months up' class='r'>{m['months_positive']} of {m['months']}</td></tr>")
+
+
+def render_yantrashala():
+    """Yantrashala, the strategy lab: the saved experiments (yantra.py), newest per strategy, with the rule they
+    were judged by. Read-only: this page runs nothing and changes nothing; the lab never trades."""
+    import yantra
+    exps = yantra.experiments()
+    latest = {}
+    for e in exps:                                   # newest first: keep the first seen per strategy
+        latest.setdefault(e["strategy"], e)
+    cards = []
+    for name, e in sorted(latest.items(), key=lambda kv: (kv[1]["verdict"] != "PASS", kv[0])):
+        rows = "".join(_lab_row(label + " · whole develop period", m) for label, m in e["in_sample"].items())
+        rows += _lab_row("Walk-forward (the part that is judged)", e["walk_forward"], judged=True)
+        ok = e["verdict"] == "PASS"
+        why = "".join(f"<li>{html.escape(w)}</li>" for w in e.get("why") or [])
+        cards.append(
+            f"<section class='card flush'><div class='hd'>{html.escape(name)} <span class='muted small'>"
+            f"{html.escape(e.get('what') or '')}</span><span class='end'><span class='tag {'up' if ok else 'dn'}'>"
+            f"{'PASS: forward-test candidate' if ok else 'FAIL'}</span></span></div>"
+            f"<table class='rt'><tr><th>Run</th><th class='r'>Trades</th><th class='r'>Wins</th>"
+            f"<th class='r'>Average per trade (95% range)</th><th class='r'>Profit factor</th><th class='r'>Net</th>"
+            f"<th class='r'>Months up</th></tr>{rows}</table>"
+            + (f"<ul class='small' style='margin:8px 0 10px 30px;padding:0'>{why}</ul>" if why else "")
+            + f"<div class='muted small' style='padding:0 14px 12px'>{e['variants_tried']} variant(s) tried · "
+              f"{html.escape(e['period'][0])} to {html.escape(e['period'][1])} · run "
+              f"{html.escape(str(e.get('at') or '')[:16].replace('T', ' '))} · code {html.escape(str(e.get('code')))}"
+              f"</div></section>")
+    reg = yantra.registered()
+    try:
+        with open(os.path.join(yantra.lab_dir(), "forward.json"), encoding="utf-8") as f:
+            fwd = json.load(f)
+    except (OSError, ValueError):
+        fwd = {}
+    frows = {r["label"]: r for r in fwd.get("rows") or []}
+    reg_rows = "".join(
+        f"<tr><td class='first'><b>{html.escape(r['label'])}</b></td><td>{html.escape(r['registered'])}</td>"
+        f"<td style='white-space:normal'>{html.escape((frows.get(r['label']) or {}).get('status') or 'not measured yet: run yantra.py forward')}"
+        + (f" · {(frows[r['label']]['result'] or {}).get('trades', 0)} trades · "
+           f"{html.escape(str(frows[r['label']].get('verdict')))}" if (frows.get(r['label']) or {}).get('result') else "")
+        + "</td></tr>" for r in reg)
+    reg_card = (f"<section class='card flush'><div class='hd'>Forward test <span class='muted small'>the only "
+                f"untouched data: candles recorded after a variant was frozen</span></div>"
+                + (f"<table class='rt'><tr><th>Variant</th><th>Frozen on</th><th>Result on later candles</th></tr>"
+                   f"{reg_rows}</table>" if reg else
+                   "<div class='muted' style='padding:10px 14px'>Nothing is registered. Only a variant that passes "
+                   "the walk-forward test is worth freezing for a forward test; none has passed.</div>")
+                + "</section>")
+    n_pass = sum(1 for e in latest.values() if e["verdict"] == "PASS")
+    tried = yantra.tests_so_far()
+    head = (f"<div class='kgrid k4'>{_kpi('Ideas tested', str(len(latest)))}{_kpi('Variants tried', str(tried))}"
+            f"{_kpi('Passed walk-forward', str(n_pass), cls='up' if n_pass else '')}"
+            f"{_kpi('In forward test', str(len(reg)))}</div>")
+    empty = ("" if cards else "<section class='card'><div class='muted'>No experiment has been run yet. Run "
+             "<code>.venv\\Scripts\\python.exe yantra.py test all</code> in the bot's folder.</div></section>")
+    body = f"""
+<div class="page-head"><h1>⚗ Yantrashala <span class="tag">strategy lab</span></h1>
+<span class="sub">Ideas under test. Nothing here is traded, and a backtest alone never puts a strategy into the bot ·
+read-only</span></div>
+<div class="banner" role="note"><b>How an idea is judged</b> (fixed before any result was seen): tested on the
+develop period only, walked forward month by month, and it passes only with at least {yantra.MIN_TRADES} walk-forward
+trades, an average result per trade whose whole 95% range is above zero, a profit factor above {yantra.PASS_PF} and
+{yantra.PASS_MONTHS:.0%} of months positive. A pass is only a ticket to the forward test on future data.
+{f'With {tried} variants tried, the best one looking good is expected by luck alone.' if tried else ''}</div>
+{head}{empty}{''.join(cards)}{reg_card}"""
+    return page("Yantrashala", "/", body)
 
 
 def sizing_capital(s=None):
@@ -2870,6 +2959,8 @@ class Handler(BaseHTTPRequestHandler):
             self._settings(q)
         elif u.path == "/kavach":
             self._send(render_kavach())
+        elif u.path == "/yantrashala":
+            self._send(render_yantrashala())
         elif u.path == "/scanner":
             if q.get("refresh", ["0"])[0] == "1":
                 jobs.start("scanner")
@@ -3015,6 +3106,15 @@ class Handler(BaseHTTPRequestHandler):
         os.makedirs(C.DATA_DIR, exist_ok=True)
         if self.path in ("/paper-capital", "/paper-capital/cancel"):
             self._paper_capital(form)
+            return
+        if self.path == "/jobs/cancel":
+            # stop a running Review or Scanner build (nothing of it is saved); never touches the bot
+            name = form.get("job", [""])[0]
+            if name in ("review", "scanner"):
+                job = jobs.get(name)
+                if job:
+                    job.cancel()
+            self._redirect("/scanner" if name == "scanner" else "/review")
             return
         if self.path in ("/bot/apply-now", "/bot/apply-after-close", "/bot/restart-cancel", "/bot/restart-dismiss",
                          "/bot/go-back", "/dashboard/restart"):

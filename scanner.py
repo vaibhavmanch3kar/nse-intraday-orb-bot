@@ -160,6 +160,7 @@ def scan(symbols=None, refresh=False, now=None, job=jobs.NO_JOB):
         res["partial"] = {"skipped": skipped, "why": data_yahoo.SKIPPED}
     os.makedirs(C.DATA_DIR, exist_ok=True)
     import review
+    job.stop_if_cancelled()                   # Cancel was pressed: keep the saved scan as it was
     review.write_json(_path(), res)
     return res
 

@@ -47,6 +47,10 @@ class TimeLimit(Exception):
     """Raised inside a job once its time limit has passed."""
 
 
+class Cancelled(Exception):
+    """Raised inside a job after Cancel was pressed: nothing of this build is saved."""
+
+
 class Job:
     def __init__(self, name, fn, limit_sec):
         self.name, self.fn, self.limit_sec = name, fn, limit_sec
@@ -61,6 +65,7 @@ class Job:
         self.skipped = 0
         self._t0 = None
         self._thread = None
+        self._cancelled = False
 
     # ------------------------------------------------------------------ control
     def start(self, target=None):
@@ -80,6 +85,7 @@ class Job:
     def _begin(self, target):  # caller holds the lock
         self.state, self.target, self.error, self.step = "running", target, "", "starting"
         self.done = self.total = self.skipped = 0
+        self._cancelled = False
         self.started, self.finished, self._t0 = dt.datetime.now(IST), None, time.monotonic()
         self._thread = threading.Thread(target=self._run, args=(target,), name=f"job-{self.name}", daemon=True)
         self._thread.start()
@@ -89,11 +95,15 @@ class Job:
             with background(True):
                 self.fn(target, self)
             ok, err = True, ""
+        except Cancelled:
+            ok, err = None, ""
         except Exception as e:  # a failed build must never take the dashboard down
             ok, err = False, f"{type(e).__name__}: {e}" if not str(e) else str(e)
         with self._lock:
+            if self._cancelled:
+                ok, err = None, ""        # Cancel was pressed: whatever the work did, this build does not count
             self.finished = dt.datetime.now(IST)
-            self.state = "completed" if ok else "failed"
+            self.state = "completed" if ok else ("cancelled" if ok is None else "failed")
             self.error = err
             if ok:
                 self.last_ok = self.finished
@@ -101,11 +111,29 @@ class Job:
             if nxt is not None:
                 self._begin(nxt[0])
 
-    def failed_recently(self, sec):
-        """True if the last build failed less than `sec` seconds ago (pages then don't retry by themselves,
-        so a data outage can't cause a rebuild on every visit; Retry still works)."""
+    def cancel(self):
+        """Stop the running build: the work sees it at its next check, saves nothing, and nothing queued runs.
+        Returns True if a build was running."""
         with self._lock:
-            return (self.state == "failed" and self.finished is not None
+            if self.state != "running":
+                return False
+            self._cancelled, self.queued, self.step = True, None, "cancelling"
+            return True
+
+    def cancelled(self):
+        return self._cancelled
+
+    def stop_if_cancelled(self):
+        """Called by the work just before it saves its result."""
+        if self._cancelled:
+            raise Cancelled("cancelled")
+
+    def failed_recently(self, sec):
+        """True if the last build failed or was cancelled less than `sec` seconds ago (pages then don't start one
+        by themselves, so a data outage can't cause a rebuild on every visit, and a cancelled build does not
+        start again the moment the page reloads; Retry / Refresh still work)."""
+        with self._lock:
+            return (self.state in ("failed", "cancelled") and self.finished is not None
                     and (dt.datetime.now(IST) - self.finished).total_seconds() < sec)
 
     def wait(self, timeout=None):
@@ -120,7 +148,8 @@ class Job:
             (self.finished - self.started).total_seconds() if self.finished and self.started else 0.0)
 
     def over_time(self):
-        return self._t0 is not None and time.monotonic() - self._t0 > self.limit_sec
+        """True once the time limit has passed, or Cancel was pressed: either way the work should stop now."""
+        return self._cancelled or (self._t0 is not None and time.monotonic() - self._t0 > self.limit_sec)
 
     def plan(self, total, step=""):
         with self._lock:
@@ -138,6 +167,7 @@ class Job:
 
     def check(self):
         """Raise TimeLimit once the time limit has passed (for work that cannot be partly kept)."""
+        self.stop_if_cancelled()
         if self.over_time():
             raise TimeLimit(f"stopped after the {self.limit_sec // 60}-minute time limit")
 
@@ -163,6 +193,8 @@ class NoJob:
     def note_skipped(self, *a, **k): pass
     def check(self): pass
     def over_time(self): return False
+    def cancelled(self): return False
+    def stop_if_cancelled(self): pass
 
 
 NO_JOB = NoJob()
