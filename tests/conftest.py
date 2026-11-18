@@ -58,7 +58,16 @@ def isolated(tmp_path, monkeypatch):
                  # rule tests switch these on explicitly; core tests use the original rules
                  "INDEX_FILTER": False, "TRAIL_EMA": 0, "TIME_STOP_BARS": 0, "TIME_STOP_MIN_R": 0.5,
                  "VIX_SIZING": False,
+                 # Kavach's newer limits (2.0) are off here too; tests/test_kavach_data.py switches them on
+                 "MAX_SIGNAL_AGE_MIN": 0.0, "MAX_PER_SECTOR": 0, "MAX_BAR_VOLUME_PCT": 0.0,
                  # tests fake data_yahoo; never reach real Kite even if the user saved DATA_SOURCE=kite
                  "DATA_SOURCE": "yahoo"}.items():
         monkeypatch.setattr(C, k, v)
+    # These tests feed the bot made-up candles through data_yahoo. In real money Kavach refuses entries on
+    # Yahoo prices, so by default the bot is told its prices are Kite's; the data tests say otherwise.
+    try:
+        import bot
+        monkeypatch.setattr(bot.Bot, "price_source", lambda self: "kite")
+    except ImportError:
+        pass
     yield tmp_path

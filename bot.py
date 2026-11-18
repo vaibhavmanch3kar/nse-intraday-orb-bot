@@ -24,6 +24,7 @@ import capital
 import config as C
 import costs
 import data_yahoo
+import datacheck
 import marketdata
 import holidays
 import journal
@@ -239,6 +240,8 @@ class Bot:
         self.balance_problem = None       # why the balance could not be used (shown on the dashboard)
         self.balance_tried = None         # monotonic time of the last read attempt (retry once a minute)
         self.status_save_failed = False   # the last status.json save failed (warned once, see write_status)
+        self.feed = {}                    # price-feed health of the last round (dashboard; see cycle)
+        self.feed_warned = set()          # (stock, data problem) already said in the log today
         self.launcher_gone = lambda: False   # main() sets this when run_bot.ps1 passes --launcher-pid
         try:                    # what this bot runs: version and file/setting hashes, for the dashboard
             self.build = buildinfo.snapshot("bot")
@@ -249,6 +252,11 @@ class Bot:
     def note(self, msg, level=logging.INFO):
         log.log(level, msg)
         self.events = ([f"{now_ist():%H:%M:%S} {msg}"] + self.events)[:30]
+
+    def price_source(self):
+        """'kite' or 'yahoo': where this round's prices really came from (marketdata falls back to Yahoo when
+        Kite can't be used). Kavach refuses real-money entries on anything but Kite."""
+        return (marketdata.status() or {}).get("using")
 
     def ensure_live_broker(self):
         """Live mode needs today's Kite token; returns False until the user logs in."""
@@ -420,6 +428,7 @@ class Bot:
         lags = []
         fetched = marketdata.fetch_many(C.WATCHLIST, C.INTERVAL_MIN, "10d", C.FETCH_WORKERS)
         watchdog.beat()                                 # the slow part of a round (price requests) is done
+        feed_problems = {}                              # symbol -> what is wrong with today's candles
         for sym in C.WATCHLIST:
             got = fetched.get(sym)
             if isinstance(got, Exception) or got is None:
@@ -436,6 +445,13 @@ class Bot:
             bars_by_sym[sym] = closed
             self.bars[sym] = closed
             self.prices[sym] = price
+            probs = datacheck.problems(closed, today, C.INTERVAL_MIN)
+            if probs:
+                feed_problems[sym] = probs
+                if (sym, probs[0]) not in self.feed_warned:      # said once per stock and problem
+                    self.feed_warned.add((sym, probs[0]))
+                    self.note(f"{T.WARN_ICON} {sym}: price data problem: {probs[0]} - no new entry in it "
+                              f"while this lasts", logging.WARNING)
             if closed[-1]["t"].date() == today:
                 lags.append((now - closed[-1]["t"]).total_seconds() / 60 - C.INTERVAL_MIN)
         self.data_lag_min = max(lags) if lags else None
@@ -503,18 +519,31 @@ class Bot:
         # 2) entries
         # Apply Now or a Paper | Real Money switch waiting: no new entries (open positions are still managed above)
         paused = os.path.exists(C.PAUSE_FILE) or self.restart_hold or self.switch is not None
-        candidates = []
+        candidates, pickups = [], []
         for sym, closed in bars_by_sym.items():
             last = closed[-1]
             if last["t"].date() != today or self.last_bar.get(sym) == last["t"]:
                 continue
             self.last_bar[sym] = last["t"]
+            pickups.append((now - last["t"]).total_seconds() - C.INTERVAL_MIN * 60)   # seconds after its close
             ev = strategy.evaluate(closed, index_bars=index_bars.get(strategy.index_for(sym)))
             row = {k: ev[k] for k in ("or_high", "or_low", "close", "vwap", "vol_ratio", "reason")}
             row["bar"] = f"{last['t']:%H:%M}"
             self.rows[sym] = self.good_rows[sym] = row
             if ev["signal"]:
                 candidates.append((sym, closed, ev, row))
+        source = self.price_source()
+        newest = max((b[-1]["t"] for b in bars_by_sym.values() if b[-1]["t"].date() == today), default=None)
+        # Feed health for the dashboard: where prices come from, the newest finished candle, how long after its
+        # close the bot got it, and what failed. Recording only.
+        self.feed = {"source": source, "checked_at": now.isoformat(timespec="seconds"),
+                     "newest_candle": f"{newest:%H:%M}" if newest else None,
+                     "pickup_sec": round(max(pickups), 1) if pickups else self.feed.get("pickup_sec"),
+                     "stocks_ok": len(bars_by_sym) - len(feed_problems), "stocks": len(C.WATCHLIST),
+                     "problems": {s: p[0] for s, p in feed_problems.items()},
+                     "errors": sorted(s for s in C.WATCHLIST if isinstance(fetched.get(s), Exception)
+                                      or fetched.get(s) is None),
+                     "live_needs_kite": bool(self.live and source != "kite")}
         # strongest breakout volume first, so scarce slots go to the best signals
         candidates.sort(key=lambda c: -(c[2]["vol_ratio"] or 0.0))
         for sym, closed, ev, row in candidates:
@@ -522,11 +551,19 @@ class Bot:
             direction, stop = ev["signal"], ev["stop"]
             ref = self.prices.get(sym, last["c"])
             mult = strategy.vix_multiplier(self.vix) if C.VIX_SIZING else 1.0
-            # Kavach decides every entry: time, pause, balance, account limits, price, sector, size (kavach.py)
+            # What the bot knows about this stock's prices right now. Kavach refuses the entry on delayed prices
+            # in real money, on candles that failed validation, on a stale signal, or when the index filter
+            # could not be checked (kavach.data_problem).
+            data = {"live": self.live, "source": source, "problems": feed_problems.get(sym),
+                    "signal_age_min": ((now - last["t"]).total_seconds() / 60) - C.INTERVAL_MIN,
+                    "index_missing": bool(C.INDEX_FILTER) and not datacheck.has_bar(
+                        index_bars.get(strategy.index_for(sym)), last["t"])}
+            # Kavach decides every entry: time, pause, balance, data, account limits, price, sector, size
             decision = kavach.pre_trade(
                 self.state, sym, direction, ref, stop, today, prices=self.prices, risk_mult=mult, now=now,
                 square_off=square_off_time, paused=paused, balance_ok=self.balance_ok,
-                balance_problem=self.balance_problem, signal_close=last["c"], sector_of=strategy.index_for)
+                balance_problem=self.balance_problem, data=data, signal_close=last["c"],
+                sector_of=strategy.index_for)
             if not decision.ok:
                 if decision.check == "paused":
                     row["reason"] += " (paused)"
@@ -564,7 +601,7 @@ class Bot:
             "day_pnl": self.state.d["day_pnl"], "realized_pnl": self.state.d["realized_pnl"],
             "charges_paid": self.state.d["charges_paid"], "trades_today": self.state.d["trades_today"],
             "loss_streak": self.state.d["loss_streak"], "cooldown_until": self.state.d["cooldown_until"],
-            "positions": positions, "rows": self.rows, "events": self.events,
+            "positions": positions, "rows": self.rows, "events": self.events, "feed": self.feed,
             "build": self.build,
             # Paper | Real Money (livemode.py): a switch waiting, whether this bot's own environment has both live
             # settings, and whether real money is armed today. Read by the dashboard; never changes the mode.

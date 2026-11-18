@@ -19,6 +19,14 @@ def t(hhmm):
     return dt.datetime.combine(DAY, dt.time(h, m), IST)
 
 
+@pytest.fixture(autouse=True)
+def real_defaults(monkeypatch):
+    """The shared test settings switch Kavach's newer limits off; here they have their real default values."""
+    for name, default, _ in kavach.LIMITS:
+        if name in ("MAX_SIGNAL_AGE_MIN", "MAX_PER_SECTOR", "MAX_BAR_VOLUME_PCT"):
+            monkeypatch.setattr(C, name, default)
+
+
 @pytest.fixture
 def st(tmp_path):
     s = risk.State(str(tmp_path / "state_paper.json"), 100000.0)
