@@ -125,6 +125,39 @@ class State:
         self.d["traded_symbols"].append(symbol)
         self.save()
 
+    def _count_streak(self, net, when):
+        """Losses in a row, and the cool-down after LOSS_STREAK_LIMIT of them.
+
+        Exits recorded at the same moment (positions closing on the same candle) are counted LOSSES FIRST,
+        whatever order they are recorded in: a win that closes on the same candle as a loss does not wipe that
+        loss out. Without this the count depended on which of the two happened to be recorded first, and the
+        bot and the backtest could disagree about a cool-down (found by the paper replay, 18 Nov 2026).
+        Exits at different moments are counted in the order they happen, as before."""
+        moment = str(when)
+        if self.d.get("streak_moment") != moment:
+            self.d["streak_moment"], self.d["streak_before_win"] = moment, None
+
+        def cool_down():
+            until = dt.date.fromisoformat(self.d["day"] or str(dt.date.today())) + dt.timedelta(days=C.COOLDOWN_DAYS + 1)
+            self.d["cooldown_until"] = until.isoformat()
+
+        if net < 0:
+            if self.d.get("streak_before_win") is None:
+                self.d["loss_streak"] += 1
+                if self.d["loss_streak"] >= C.LOSS_STREAK_LIMIT:
+                    cool_down()
+                    self.d["loss_streak"] = 0
+            else:
+                # a win at this same moment was recorded before this loss: count the loss as if it had come first
+                self.d["streak_before_win"] += 1
+                if self.d["streak_before_win"] >= C.LOSS_STREAK_LIMIT:
+                    cool_down()
+                    self.d["streak_before_win"] = 0
+        else:
+            if self.d.get("streak_before_win") is None:
+                self.d["streak_before_win"] = self.d["loss_streak"]     # the streak the same-moment losses add to
+            self.d["loss_streak"] = 0
+
     def record_exit(self, symbol, exit_price, when):
         p = self.positions.pop(symbol)
         gross = costs.gross_pnl(p["entry"], exit_price, p["qty"], p["direction"])
@@ -134,14 +167,7 @@ class State:
         self.d["realized_pnl"] += net
         self.d["charges_paid"] += charges
         self.d["day_pnl"] += net
-        if net < 0:
-            self.d["loss_streak"] += 1
-            if self.d["loss_streak"] >= C.LOSS_STREAK_LIMIT:
-                until = dt.date.fromisoformat(self.d["day"] or str(dt.date.today())) + dt.timedelta(days=C.COOLDOWN_DAYS + 1)
-                self.d["cooldown_until"] = until.isoformat()
-                self.d["loss_streak"] = 0
-        else:
-            self.d["loss_streak"] = 0
+        self._count_streak(net, when)
         self.save()
         risk = abs(p["entry"] - p["stop"]) * p["qty"]
         return {**p, "symbol": symbol, "exit": exit_price, "closed": str(when), "gross": gross,
