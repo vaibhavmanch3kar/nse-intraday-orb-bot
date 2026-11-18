@@ -38,3 +38,29 @@ def test_a_really_late_candle_is_flagged(monkeypatch):
     assert "candle LATE" in chips and "chip amber" in chips
     assert "LATE" in web.candle_age_text(s)
     assert "Newest candle" in web.live_limits(s) and "Data delay" not in web.live_limits(s)
+
+
+# ---------------------------------------------------------------- 2. account value vs available funds
+MARGINS = {"net": 10870.6, "available": {"opening_balance": 4870.6, "live_balance": 10870.6, "intraday_payin": 6000,
+                                         "collateral": 0, "cash": 0}, "utilised": {"debits": 0}}
+
+
+def test_money_added_today_is_explained():
+    import accounts
+    a = accounts.summarise_zerodha(MARGINS, {"net": []})
+    assert (a["equity"], a["available"], a["payin"], a["sizing"]) == (4870.6, 10870.6, 6000.0, 4870.6)
+    assert "includes ₹6,000.00 added today" in web.funds_sub(a)
+    note = web.funds_note(a)
+    assert "₹6,000.00 added today" in note and "sizes real-money trades from <b>₹4,870.60</b>" in note
+    assert "counts from tomorrow" in note
+
+
+def test_no_note_about_added_money_on_an_ordinary_day():
+    import accounts
+    m = {"net": 5000.0, "available": {"opening_balance": 5000.0, "live_balance": 5000.0}, "utilised": {}}
+    a = accounts.summarise_zerodha(m, {"net": []})
+    assert a["payin"] == 0 and "added today" not in web.funds_sub(a) + web.funds_note(a)
+    assert "₹5,000.00" in web.funds_note(a)
+    low = accounts.summarise_zerodha({"net": 3000.0, "available": {"opening_balance": 5000.0, "live_balance": 3000.0}},
+                                     {"net": []})
+    assert low["sizing"] == 3000.0                                # money taken out counts at once

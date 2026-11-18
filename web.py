@@ -316,6 +316,8 @@ def zerodha_card(acct):
     k = [("Opening balance (start of day)", f"<b>{_inr(acct['opening'])}</b>"),
          ("Account value", f"<b>{_inr(acct['equity'])}</b>"),
          ("Available funds", f"<b>{_inr(acct['available'])}</b>"),
+         ("Added today", f"<b>{_inr(acct.get('payin') or 0)}</b>"),
+         ("Bot sizes trades from", f"<b>{_inr(acct.get('sizing') if acct.get('sizing') is not None else acct['opening'])}</b>"),
          ("Margin used", f"<b>{_inr(acct['margin_used'])}</b>"),
          ("Invested (open positions)", f"<b>{_inr(acct['invested'])}</b>"),
          ("Realised P&amp;L today", _pl(acct["realised"])),
@@ -604,6 +606,30 @@ def _limits_kpis(s, equity=None, unreal=0.0):
     return out
 
 
+def funds_sub(a):
+    """Under 'Available funds': margin used, and money added today if any."""
+    sub = f"margin used {_inr(a['margin_used'])}"
+    if a.get("payin"):
+        sub += f" · includes {_inr(a['payin'])} added today"
+    return sub
+
+
+def funds_note(a):
+    """Why 'Account value' and 'Available funds' differ, and which figure the bot sizes trades from."""
+    parts = []
+    if a.get("payin"):
+        parts.append(f"Available funds include <b>{_inr(a['payin'])} added today</b>; account value is this "
+                     f"morning's cash plus today's P&amp;L, so it doesn't.")
+    if a.get("collateral"):
+        parts.append(f"Available funds include {_inr(a['collateral'])} of margin from pledged shares, "
+                     f"which the bot does not use.")
+    if a.get("sizing") is not None:
+        parts.append(f"The bot sizes real-money trades from <b>{_inr(a['sizing'])}</b> (the smaller of this "
+                     f"morning's cash and the cash now"
+                     + ("; money added today counts from tomorrow" if a.get("payin") else "") + ").")
+    return f"<div class='small warnline'>{' '.join(parts)}</div>" if parts else ""
+
+
 def live_kpis(view, s):
     """The key figures for the account in view. Paper: from the paper files only. Zerodha: read-only
     from Kite's balance and positions; a login or error message instead when it can't be read."""
@@ -614,7 +640,7 @@ def live_kpis(view, s):
             return (f"<section class='card acct zerodha' id='acct'>{zerodha_card(a)}</section>")
         n_open = sum(1 for r in a["positions"] if r["qty"])
         cells = (_kpi("Account value", _inr(a["equity"]), f"opening {_inr(a['opening'])}")
-                 + _kpi("Available funds", _inr(a["available"]), f"margin used {_inr(a['margin_used'])}")
+                 + _kpi("Available funds", _inr(a["available"]), funds_sub(a))
                  + _kpi("Today's P&amp;L", _signed(a["pnl"]), f"booked {_inr(a['realised'], True)} · open {_inr(a['unrealised'], True)}",
                         _cls(a["pnl"]))
                  + _kpi("Open P&amp;L", _signed(a["unrealised"]), f"{n_open} open position{'s' if n_open != 1 else ''}",
@@ -622,7 +648,8 @@ def live_kpis(view, s):
                  + _kpi("Invested", _inr(a["invested"]), "open positions at average price")
                  + _kpi("Margin used", _inr(a["margin_used"]), "Zerodha's figure"))
         warn = "".join(f"<div class='warn small warnline'>⚠ {html.escape(w)}</div>" for w in a.get("warnings", []))
-        note = (f"<div class='muted small warnline'>From Zerodha at {_clock(a.get('fetched_at'))} IST · read-only · "
+        note = (funds_note(a) +
+                f"<div class='muted small warnline'>From Zerodha at {_clock(a.get('fetched_at'))} IST · read-only · "
                 f"Zerodha's P&amp;L is before charges · delivery holdings not included</div>")
         return f"<section class='card acct zerodha kwrap' id='acct'><div class='kgrid'>{cells}</div>{warn}{note}</section>"
     a = accounts.paper_account()

@@ -170,7 +170,13 @@ def summarise_zerodha(m, p):
     realised = sum(r["realised"] for r in rows)
     unrealised = sum(r["unrealised"] for r in rows)
     opening = _num(avail.get("opening_balance"))
+    live_bal = avail.get("live_balance")
+    # what the bot sizes real-money trades from (bot.sync_live_balance): the smaller of this morning's cash and
+    # the cash now, so money added during the day counts only from the next day
+    sizing = min(opening, _num(live_bal)) if live_bal is not None else opening
     return {"opening": opening, "available": _num(m.get("net")), "cash": _num(avail.get("live_balance")),
+            "payin": _num(avail.get("intraday_payin")), "collateral": _num(avail.get("collateral")),
+            "sizing": sizing,
             "margin_used": _num(used.get("debits")),
             "invested": sum(abs(r["qty"]) * r["avg"] for r in open_rows),
             "realised": realised, "unrealised": unrealised, "pnl": realised + unrealised,
