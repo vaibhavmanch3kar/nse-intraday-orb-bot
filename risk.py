@@ -19,17 +19,29 @@ def size_position(equity, entry, stop, direction, open_notional=0.0, risk_mult=1
     if per_share_risk <= 0:
         return 0, "stop equals entry"
     budget = equity * C.RISK_PER_TRADE_PCT / 100 * risk_mult
-    qty = int(budget // per_share_risk)
+    by_risk = int(budget // per_share_risk)
     cap_one = equity * C.MAX_POSITION_PCT / 100
-    cap_all = equity * C.MAX_EXPOSURE_PCT / 100 - open_notional
-    qty = min(qty, int(cap_one // entry), int(max(0.0, cap_all) // entry))
+    cap_all = max(0.0, equity * C.MAX_EXPOSURE_PCT / 100 - open_notional)
+    by_one, by_all = int(cap_one // entry), int(cap_all // entry)
+    qty = min(by_risk, by_one, by_all)
+    if qty < C.MIN_QTY:
+        # Say WHICH limit stops the trade. All three used to be reported as "risk budget too small for 1 share",
+        # which was wrong whenever the share price, not the risk, was the reason.
+        if by_risk < C.MIN_QTY:
+            return 0, (f"1 share would risk ₹{per_share_risk:,.2f}, more than the ₹{budget:,.2f} risk budget "
+                       f"({C.RISK_PER_TRADE_PCT * risk_mult:g}% of ₹{equity:,.0f})")
+        if by_one < C.MIN_QTY:
+            return 0, (f"1 share costs ₹{entry:,.2f}, more than the {C.MAX_POSITION_PCT:g}% per-stock limit "
+                       f"(₹{cap_one:,.0f} of ₹{equity:,.0f})")
+        return 0, (f"1 share costs ₹{entry:,.2f}, more than the ₹{cap_all:,.0f} left under the "
+                   f"{C.MAX_EXPOSURE_PCT:g}% total exposure limit")
     # charges are partly fixed (₹20 brokerage cap), so step down until risk + charges fit
     while qty >= C.MIN_QTY:
         loss = per_share_risk * qty + costs.round_trip(entry, stop, qty, direction)
         if loss <= budget:
             return qty, "ok"
         qty = min(qty - 1, int(qty * budget / loss))
-    return 0, "risk budget too small for 1 share"
+    return 0, f"risk budget too small for 1 share (₹{budget:,.2f} doesn't cover the stop loss plus charges)"
 
 
 class State:

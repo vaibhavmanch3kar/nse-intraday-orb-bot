@@ -751,6 +751,60 @@ def zerodha_positions():
             f"<th class='r'>Last price</th><th class='r'>Realised</th><th class='r'>Unrealised</th></tr>{rows}</table></section>")
 
 
+def too_dear(s):
+    """(per-stock limit in rupees, [stocks whose single share costs more than it]) for the bot's own account."""
+    eq = s.get("equity")
+    if not eq:
+        return 0.0, []
+    limit = float(eq) * C.MAX_POSITION_PCT / 100
+    return limit, sorted(sym for sym, r in (s.get("rows") or {}).items()
+                         if isinstance(r.get("close"), (int, float)) and r["close"] > limit)
+
+
+def live_signals(s, now=None):
+    """Why the bot has or hasn't traded today: every signal so far and what happened to it (from the bot's own
+    journal for the account it trades), what the watchlist is waiting for, and which stocks this account
+    can't buy at all. Read-only."""
+    import datetime as dt
+    import journal
+    now = now or dt.datetime.now(dt.timezone(dt.timedelta(hours=5, minutes=30)))
+    mode = "live" if s.get("mode") == "live" else "paper"
+    detail = journal.load_detail(mode, now.date().isoformat()) or {}
+    sigs = detail.get("signals") or []
+    taken = [x for x in sigs if x.get("outcome") == "taken"]
+    rows = "".join(
+        f"<tr><td class='first' data-label='Time'>{html.escape(str(x.get('bar') or x.get('time') or '-'))}</td>"
+        f"<td data-label='Signal'><b>{html.escape(str(x.get('symbol')))}</b> {html.escape(str(x.get('direction') or ''))}</td>"
+        f"<td data-label='What happened'><span class='st {'sig' if x.get('outcome') == 'taken' else 'dn'}'>"
+        f"{'traded' if x.get('outcome') == 'taken' else 'skipped'}</span></td>"
+        f"<td data-label='Why' style='white-space:normal'>{html.escape(str(x.get('reason') or '-'))}</td></tr>"
+        for x in sigs)
+    waiting = {}
+    for r in (s.get("rows") or {}).values():
+        why = (r.get("reason") or "").split(" - skip")[0]
+        key = ("volume too low" if why.startswith("volume") else "range too wide or narrow" if why.startswith("range")
+               else why or "no data yet")
+        waiting[key] = waiting.get(key, 0) + 1
+    wait_txt = " · ".join(f"{n} {html.escape(k)}" for k, n in sorted(waiting.items(), key=lambda kv: -kv[1]))
+    limit, dear = too_dear(s)
+    dear_txt = (f"<div class='warn small warnline'>⚠ With {_inr(s.get('equity'))} in the account, one share of "
+                f"<b>{html.escape(', '.join(dear))}</b> costs more than the {C.MAX_POSITION_PCT:g}% per-stock limit "
+                f"({_inr(limit)}), so their signals are skipped. That limit is a risk rule, not a fault.</div>"
+                if dear else "")
+    if sigs:
+        head = f"{len(sigs)} signal{'s' if len(sigs) != 1 else ''} · {len(taken)} traded · {len(sigs) - len(taken)} skipped"
+        table = (f"<table class='rt'><tr><th>Candle</th><th>Signal</th><th>What happened</th><th>Why</th></tr>"
+                 f"{rows}</table>")
+    else:
+        head = "no signal yet"
+        table = ("<div class='muted' style='padding:10px 14px'>No breakout signal so far today. A signal needs a "
+                 "15-minute candle to close outside the opening range, with enough volume, before "
+                 f"{html.escape(str(C.LAST_ENTRY))}.</div>")
+    now_line = (f"<div class='muted small warnline'>Watchlist right now: {wait_txt}</div>" if wait_txt else "")
+    return (f"<section class='card flush' id='signals'><div class='hd'>Today's signals <span class='end'>"
+            f"<span class='tag'>{html.escape(head)}</span></span></div>{table}{now_line}{dear_txt}</section>")
+
+
 CANDLE_PICKUP_MIN = 1    # the bot looks every POLL_SEC (60 s) and Kite has a closed candle within seconds
 CANDLE_LATE_MIN = 4      # this many minutes past the expected time, the page says "No updates"
 
@@ -1265,7 +1319,7 @@ def live_regions(view, s):
     return {"status": _status_chips(s, running, view, ok, s.get("data_lag_min")),
             "notice": live_notice(s, running), "acct": live_kpis(view, s), "equity": live_equity(view, s),
             "zpositions": zerodha_positions() if view == "zerodha" else "",
-            "positions": live_positions(s, view), "watchlist": live_watchlist(s),
+            "positions": live_positions(s, view), "signals": live_signals(s), "watchlist": live_watchlist(s),
             "controls": live_controls(s, running), "login": live_login(ok, login_msg, s),
             "events": live_events(s), "limits": live_limits(s), "modebadge": mode_badge(s)}
 
@@ -1321,7 +1375,7 @@ def render(msg="", q=None):
 {update_banner(s)}
 {R('acct')}
 <div class="grid" style="margin-top:16px">
-<div>{R('equity')}{R('zpositions')}{R('positions')}{R('watchlist')}</div>
+<div>{R('equity')}{R('zpositions')}{R('positions')}{R('signals')}{R('watchlist')}</div>
 <aside>{R('controls')}{capital}{R('login')}{R('events')}{market_calendar()}{R('limits')}</aside>
 </div>
 <script>{LIVE_JS}</script>"""

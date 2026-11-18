@@ -125,3 +125,80 @@ def test_scanner_page_shows_the_real_risk_not_500(monkeypatch):
     assert "Plan (₹24 risk)" in page and "₹500 risk" not in page and "qty 2" in page and "qty 55" not in page
     assert "qty 0: 1 share doesn&#x27;t fit the limits" in page or "qty 0: 1 share doesn't fit the limits" in page
     assert "0.5% of ₹4,870.60" in page and "your Zerodha balance" in page
+
+
+# ---------------------------------------------------------------- 7. a day without trades says why
+def test_skip_reason_names_the_limit_that_stopped_the_trade():
+    import risk
+    # Rs 4,870.60: risk budget Rs 24.35, per-stock limit Rs 1,217.65
+    qty, why = risk.size_position(4870.6, 1361.0, 1373.0, "SHORT")
+    assert qty == 0 and "1 share costs ₹1,361.00, more than the 25% per-stock limit (₹1,218 of ₹4,871)" in why
+    qty, why = risk.size_position(4870.6, 300.0, 250.0, "LONG")
+    assert qty == 0 and "1 share would risk ₹50.00, more than the ₹24.35 risk budget (0.5% of ₹4,871)" in why
+    qty, why = risk.size_position(4870.6, 300.0, 291.0, "LONG", open_notional=3600.0)
+    assert qty == 0 and "total exposure limit" in why
+    qty, why = risk.size_position(4870.6, 300.0, 291.0, "LONG")
+    assert qty == 2 and why == "ok"                              # quantities themselves are unchanged
+
+
+def test_position_sizes_are_unchanged_by_the_clearer_reasons():
+    import random
+    import risk
+    import costs
+
+    def old(equity, entry, stop, direction, open_notional=0.0, risk_mult=1.0):
+        per = abs(entry - stop)
+        if per <= 0:
+            return 0
+        budget = equity * C.RISK_PER_TRADE_PCT / 100 * risk_mult
+        qty = int(budget // per)
+        qty = min(qty, int(equity * C.MAX_POSITION_PCT / 100 // entry),
+                  int(max(0.0, equity * C.MAX_EXPOSURE_PCT / 100 - open_notional) // entry))
+        while qty >= C.MIN_QTY:
+            loss = per * qty + costs.round_trip(entry, stop, qty, direction)
+            if loss <= budget:
+                return qty
+            qty = min(qty - 1, int(qty * budget / loss))
+        return 0
+
+    rng = random.Random(7)
+    for _ in range(3000):
+        eq = rng.choice([3000, 4870.6, 10000, 100000, 500000])
+        entry = rng.uniform(150, 4500)
+        stop = entry * (1 + rng.uniform(-0.02, 0.02))
+        side = "LONG" if stop < entry else "SHORT"
+        used = rng.choice([0, 0, eq * 0.5, eq * 0.74])
+        assert risk.size_position(eq, entry, stop, side, used)[0] == old(eq, entry, stop, side, used)
+
+
+def signals_status():
+    return {"mode": "live", "equity": 4870.6, "time": t("10:46").isoformat(),
+            "rows": {"RELIANCE": {"close": 1365.1, "reason": "SHORT breakout - skip: 1 share costs ₹1,361.00"},
+                     "ITC": {"close": 291.3, "reason": "inside range"}, "SBIN": {"close": 1110.8, "reason": "inside range"},
+                     "AXISBANK": {"close": 1370.7, "reason": "volume 0.7x < 1.2x"}}}
+
+
+def test_todays_signals_card_lists_each_signal_and_why(monkeypatch):
+    import journal
+    monkeypatch.setattr(journal, "load_detail", lambda mode, day: {"signals": [
+        {"time": "10:45:35", "symbol": "RELIANCE", "bar": "10:30", "direction": "SHORT", "outcome": "skipped",
+         "reason": "1 share costs ₹1,361.00, more than the 25% per-stock limit (₹1,218 of ₹4,871)"},
+        {"time": "11:00:40", "symbol": "ITC", "bar": "10:45", "direction": "LONG", "outcome": "taken", "reason": ""}]}
+        if (mode, day) == ("live", "2026-11-18") else None)
+    card = web.live_signals(signals_status(), now=t("11:05"))
+    assert "2 signals · 1 traded · 1 skipped" in card
+    assert "RELIANCE" in card and "skipped" in card and "per-stock limit" in card and ">traded<" in card
+    assert "Watchlist right now: 2 inside range" in card and "1 volume too low" in card
+    assert "one share of <b>AXISBANK, RELIANCE</b> costs more than the 25% per-stock limit (₹1,217.65)" in card
+    assert "SBIN" not in card.split("costs more than")[0].split("one share of")[1]      # 1,110.80 fits
+
+
+def test_no_signal_yet_is_explained(monkeypatch):
+    import journal
+    monkeypatch.setattr(journal, "load_detail", lambda mode, day: None)
+    s = signals_status()
+    s.update(mode="paper", equity=100000.0)
+    card = web.live_signals(s, now=t("09:50"))
+    assert "no signal yet" in card and "close outside the opening range" in card and "before 12:00" in card
+    assert "costs more than" not in card                          # nothing is out of reach with Rs 1,00,000
+    assert "signals" in web.live_regions("paper", s)
