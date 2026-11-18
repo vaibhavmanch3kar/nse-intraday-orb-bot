@@ -120,6 +120,11 @@ def setup_logging():
     sh.setFormatter(fmt)
     root.handlers[:] = [fh, sh]
     logging.getLogger("urllib3").setLevel(logging.WARNING)
+    try:                                   # secrets removed from every line, and the same lines as JSON (eventlog.py)
+        import eventlog
+        eventlog.install("bot", os.path.join(C.DATA_DIR, "logs"))
+    except Exception:  # noqa: BLE001 - a logging extra must never stop the bot
+        pass
     if isinstance(split, str):
         log.warning(f"the old data\\bot.log was not split into data\\logs {split}")
     elif split:

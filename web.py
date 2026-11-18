@@ -3681,6 +3681,12 @@ if __name__ == "__main__":
     print(f"  Dashboard: http://{C.WEB_HOST}:{C.WEB_PORT}   (Ctrl+C or closing this window stops the dashboard only)")
     if "--no-browser" not in sys.argv:
         webbrowser.open(f"http://{C.WEB_HOST}:{C.WEB_PORT}")
+    try:                                   # the dashboard's own log lines, secrets removed, as JSON (eventlog.py)
+        import eventlog
+        eventlog.install("dashboard", os.path.join(C.DATA_DIR, "logs"))
+        log.info(f"dashboard started on http://{C.WEB_HOST}:{C.WEB_PORT}")
+    except Exception:  # noqa: BLE001
+        pass
     try:
         serve(wait_port=20 if "--wait-port" in sys.argv else 0)
     except KeyboardInterrupt:
