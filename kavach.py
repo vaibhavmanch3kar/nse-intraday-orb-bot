@@ -157,7 +157,7 @@ LIMITS = (
     ("MAX_EXPOSURE_PCT", 75.0, "% of the account in all open positions together (no leverage)"),
     ("MAX_OPEN_POSITIONS", 3, "open positions at one time"),
     ("MAX_TRADES_PER_DAY", 4, "new trades in a day"),
-    ("MAX_DAILY_LOSS_PCT", 2.0, "% loss in a day (booked + open) after which no new trade opens"),
+    ("MAX_DAILY_LOSS_PCT", 2.0, "% loss in a day (booked + open) at which no new trade opens and open positions are closed"),
     ("LOSS_STREAK_LIMIT", 3, "losing trades in a row before the cool-down"),
     ("COOLDOWN_DAYS", 2, "trading days off after that"),
     ("MAX_CHASE_R", 0.3, "R the price may run past the signal before the entry is skipped"),

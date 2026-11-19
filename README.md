@@ -221,7 +221,7 @@ always shown next to the themed name (for example **Lakshman Rekha · stop**), a
 | **Muhurat** | 1-hour time stop | the trade's window has passed |
 | **Sandhya** | 15:00 square-off | dusk: everything is closed |
 | **Maryada** | 2% daily loss limit | Rama's self-imposed limits |
-| **Vanvas** | 2-day cool-down after 3 losses | exile from the market |
+| **Vanvas** | cool-down of 2 trading days after 3 losses | exile from the market |
 | **Vanar Sena** | index filter | trade with the army (the sector index), not against it |
 | **Pushpaka** | Kite real-time data | the swift flying chariot |
 | **Setu** | Zerodha login | the bridge to the exchange |
@@ -326,7 +326,7 @@ Common ones:
 | `PAPER_START_INR` | `100000.0` | Pretend money you start with |
 | `RISK_PER_TRADE_PCT` | `0.5` | Most you can lose on one trade, % of your money (charges included) |
 | `MAX_OPEN_POSITIONS` | `3` | Most trades open at the same time |
-| `MAX_DAILY_LOSS_PCT` | `2.0` | Stop new trades for the day once booked + open losses reach this % |
+| `MAX_DAILY_LOSS_PCT` | `2.0` | Stop new trades for the day, and close open positions, once booked + open losses reach this % |
 | `WATCHLIST` | 12 stocks | Which stocks the bot trades (NSE symbols) |
 | `DATA_SOURCE` | `yahoo` | `kite` for real-time Zerodha data (paid Connect plan, see above) |
 | `LAST_ENTRY` / `SQUARE_OFF` | `12:00` / `15:00` | No new trades after this time / close everything at this time |

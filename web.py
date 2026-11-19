@@ -1071,7 +1071,7 @@ def live_limits(s):
             f"<dt>Price feed</dt><dd>{feed_line(s)}</dd>"
             f"<dt>Per trade</dt><dd>{C.RISK_PER_TRADE_PCT:g}% risk · at most {C.MAX_OPEN_POSITIONS} positions, "
             f"{C.MAX_TRADES_PER_DAY} trades a day</dd>"
-            f"<dt>{T.name('daily_loss')}</dt><dd>stop new trades at −{C.MAX_DAILY_LOSS_PCT:g}% in a day (booked + open)</dd>"
+            f"<dt>{T.name('daily_loss')}</dt><dd>stop new trades and close open positions at −{C.MAX_DAILY_LOSS_PCT:g}% in a day (booked + open)</dd>"
             f"<dt>Exits</dt><dd>{T.term('stop')} · {T.term('trail')} · {T.term('time_stop')} · "
             f"{T.term('square_off')} at {C.SQUARE_OFF}</dd>"
             f"</dl><div class='small' style='padding:0 14px 12px'><a href='/kavach'>Kavach · every risk check "

@@ -29,7 +29,7 @@ R = profit or loss as a multiple of the risk (entry to stop). +1R means you made
 | Max per stock / all stocks | 25% / 75% of equity (no leverage) |
 | Max open positions · trades per day | 3 · 4 |
 | One trade per stock per day | yes |
-| Daily loss limit | 2% of the day's starting equity, counting booked **and open** losses → no new entries that day |
+| Daily loss limit | 2% of the day's starting equity, counting booked **and open** losses → no new entries that day, and open positions are closed |
 | Loss streak | 3 losses → 2 days off |
 | Charges | Zerodha intraday: 0.03% or ₹20 brokerage, STT 0.025% on sell, NSE transaction, SEBI, stamp duty, 18% GST |
 
