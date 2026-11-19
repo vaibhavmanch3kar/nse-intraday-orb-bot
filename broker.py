@@ -148,6 +148,8 @@ class LiveBroker:
         self.uncertain = None       # plain words while an order's fate is unknown: no new entry meanwhile
         self.unsettled = {}         # tag -> order left neither filled nor cancelled (settle() finishes it)
         self.lost = {}              # tag -> order sent with no answer and not (yet) in the order book
+        self.late_exits = []        # shares of a position's closing order that filled after the bot stopped counting
+        self._closing_tracked = True   # False while closing shares the bot never had on record (a late entry fill)
         self.messages = []          # plain lines for the bot's log and events (the bot takes and clears them)
         self.last_final = True
 
@@ -222,7 +224,7 @@ class LiveBroker:
                 self.journal.record(tag, "SENT", order_id=oid, note=f"reply lost ({kind}); found in the order book")
                 log.warning("order %s %s %s: reply lost (%s) but the order exists", oid, side, symbol, kind)
                 return oid, tag
-            self.lost[tag] = {**rec, "looks": 0}
+            self.lost[tag] = {**rec, "looks": 0, "tracked": self._closing_tracked}
             if asked:
                 self.journal.record(tag, "NOT SENT", note=f"send failed ({kind}: {e}); not in the order book")
                 # watched for a while longer by settle(), in case it turns up late
@@ -295,7 +297,7 @@ class LiveBroker:
         if status not in FINAL:
             self.last_final = False
             self.unsettled[tag] = {"order_id": oid, "role": role, "symbol": symbol, "side": side, "qty": int(qty),
-                                   "accounted": filled, "price": price}
+                                   "accounted": filled, "price": price, "tracked": self._closing_tracked}
             self._flag(f"{symbol}: order {oid} is neither filled nor cancelled yet")
         return filled, avg
 
@@ -544,13 +546,33 @@ class LiveBroker:
             direction = "LONG" if side == "BUY" else "SHORT"
             self._say(f"{sym}: {extra} shares of an entry order filled late @ {avg:.2f} - closing them now",
                       logging.ERROR)
-            done, _ = self.exit(sym, {"direction": direction, "qty": extra}, avg, "late fill")
+            self._closing_tracked = False        # these shares were never a position on the bot's record
+            try:
+                done, _ = self.exit(sym, {"direction": direction, "qty": extra}, avg, "late fill")
+            finally:
+                self._closing_tracked = True
             if done < extra:
                 self._say(f"{sym}: {extra - done} late-filled shares could NOT be closed - check Kite NOW",
                           logging.ERROR)
         else:
-            # a closing order filled further: the position is smaller than the bot thinks; recover() corrects it
+            # A closing order filled further after the bot stopped counting it: the position is smaller than the
+            # record says. The bot is told (take_late_exits) so that it books these shares before it does
+            # anything else with the position. It used to learn of them only from the next comparison with
+            # Zerodha, and meanwhile placed a new stop for, or sold again, shares it no longer held.
             self._say(f"{sym}: {extra} more shares of a closing order filled late @ {avg:.2f}", logging.WARNING)
+            if o.get("tracked", True):
+                self.late_exits.append({"symbol": sym, "qty": int(extra), "avg": float(avg)})
+
+    def take_late_exits(self):
+        """Late fills of positions' closing orders since the last call: [{symbol, qty, avg}]."""
+        out, self.late_exits = self.late_exits, []
+        return out
+
+    def closing_pending(self, symbol):
+        """Is a closing order for this stock's position still open-ended (neither filled nor cancelled for
+        certain, or sent with no answer yet)? While it is, no new stop and no second closing order may go out."""
+        return any(o.get("role") == "X" and o.get("symbol") == symbol and o.get("tracked", True)
+                   for o in list(self.unsettled.values()) + list(self.lost.values()))
 
     def recover(self, positions, startup=True):
         """Compare the bot's record with Zerodha. `positions` is the bot's own {symbol: position}.

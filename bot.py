@@ -552,6 +552,22 @@ class Bot:
             log.warning("%s: Zerodha's order book could not be read for the closing price (%s)", sym, type(e).__name__)
             return 0, 0.0, "closed at Zerodha"
 
+    def book_late_exit(self, fill, when):
+        """REAL MONEY: shares of a position's closing order that filled after the bot had stopped waiting for it."""
+        sym, qty, price = fill["symbol"], int(fill["qty"]), float(fill["avg"])
+        pos = self.state.positions.get(sym)
+        if pos is None:
+            self.note(f"{sym}: {qty} shares of a closing order filled late @ {price:.2f}; the position is no longer "
+                      f"on the bot's record (it was booked when it was found closed at Zerodha)", logging.WARNING)
+            return
+        qty = min(qty, int(pos["qty"]))
+        row = self.book_closed(sym, qty, price, "closing order filled late", when)
+        icon = T.EXIT_WIN if row["net"] > 0 else T.EXIT_LOSS
+        left = self.state.positions.get(sym)
+        self.note(f"{icon} EXIT {row['direction']} {sym} x{qty} @ {price:.2f} (its closing order filled late) "
+                  f"net ₹{row['net']:.2f} ({row['r']:+.2f}R)"
+                  + (f"; {left['qty']} shares are still open" if left else ""), logging.WARNING)
+
     def book_closed(self, sym, qty, price, reason, when):
         """Book `qty` shares of a position as closed at `price`: the whole position, or part of it (the rest
         stays on record without a stop order id, so the next round places a stop for it)."""
@@ -679,6 +695,9 @@ class Bot:
             except Exception as e:  # noqa: BLE001 - never stops the round; positions keep their exchange stops
                 self.note(f"could not finish checking open-ended orders ({type(e).__name__})", logging.WARNING)
             self.drain_broker()
+            # shares that a closing order filled late are booked before anything else is done with the position
+            for fill in (self.broker.take_late_exits() if hasattr(self.broker, "take_late_exits") else []):
+                self.book_late_exit(fill, now)
             if (self.last_recon is None or self.recon_missing
                     or (now - self.last_recon).total_seconds() >= C.RECON_EVERY_SEC):
                 self.reconcile(startup=False)
@@ -692,6 +711,8 @@ class Bot:
             pos["last_price"] = px
             if self.live and sym in self.recon_missing:
                 continue        # Zerodha shows no such position and no closing order explains it: send nothing
+            if self.live and hasattr(self.broker, "closing_pending") and self.broker.closing_pending(sym):
+                continue        # its closing order is not final yet: no new stop and no second closing order
             filled_stop = self.broker.stopped_out(sym, pos)
             if filled_stop is not None:
                 row = self.state.record_exit(sym, filled_stop, now)

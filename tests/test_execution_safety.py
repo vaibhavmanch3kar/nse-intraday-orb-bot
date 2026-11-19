@@ -713,3 +713,83 @@ def test_closing_fills_take_the_newest_shares_first():
     got, avg = b.closing_fills("SBIN", "LONG", 10)
     assert got == 10 and abs(avg - 100.4) < 1e-9
     assert b.closing_fills("INFY", "LONG", 3) == (0, 0.0)
+
+
+# ---------------------------------------------------------------- P4: a closing order that fills late
+def blind_to_exits(z, sl):
+    """Zerodha answers about the stop, but questions about any other order fail while `on` is set."""
+    state = {"on": True}
+    real = z.order_history
+
+    def history(oid):
+        if state["on"] and oid != sl:
+            raise ConnectionError("status")
+        return real(oid)
+    z.order_history = history
+    return state
+
+
+def test_a_closing_order_that_filled_unseen_is_booked_and_nothing_more_is_sold(live):
+    """Red-team finding, 19 Nov 2026: the exit filled while Zerodha could not be asked. The bot kept the full
+    position, placed a NEW stop for shares it no longer held, and would have sold them again at 15:00."""
+    b, z = live
+    b.cycle()
+    pos = dict(b.state.positions["SBIN"])
+    blind = blind_to_exits(z, pos["sl_order_id"])
+    b.close_position("SBIN", pos["entry"] + 0.5, "time stop", bot.now_ist())      # it fills; the bot can't see it
+    assert "SBIN" in b.state.positions and any("exit FAILED" in e for e in b.events)
+    assert b.broker.closing_pending("SBIN")
+    b.cycle()                                                 # still blind: the position must be left alone
+    assert len(z.sent("SL")) == 1                             # no new stop for shares that may be gone
+    assert len([o for o in z.sent("LIMIT") if o["transaction_type"] == "SELL"]) == 1
+    blind["on"] = False                                       # Zerodha answers again
+    b.cycle()
+    assert "SBIN" not in b.state.positions and not b.broker.closing_pending("SBIN")
+    assert len(z.sent("SL")) == 1 and len([o for o in z.sent("LIMIT") if o["transaction_type"] == "SELL"]) == 1
+    rows = live_rows()
+    assert len(rows) == 1 and rows[0]["reason"] == "closing order filled late" and int(rows[0]["qty"]) == pos["qty"]
+
+
+def test_a_closing_order_that_fills_partly_late_leaves_the_rest_with_a_new_stop(live):
+    b, z = live
+    b.cycle()
+    pos = dict(b.state.positions["SBIN"])
+    qty = pos["qty"]
+    assert qty >= 3
+    z.fill = [qty - 2]                                        # all but 2 fill ...
+    slow, real_cancel = {"on": True}, z.cancel_order
+
+    def cancel(variety, oid):                                 # ... and the cancel of the rest is not confirmed
+        if slow["on"] and oid != pos["sl_order_id"]:          # (the stop itself cancels at once)
+            z.cancelled.append(oid)
+            return
+        real_cancel(variety, oid)
+    z.cancel_order = cancel
+    b.close_position("SBIN", pos["entry"] + 0.5, "time stop", bot.now_ist())
+    assert b.state.positions["SBIN"]["qty"] == 2 and b.broker.closing_pending("SBIN")
+    exit_id = [o for o in z.sent("LIMIT") if o["transaction_type"] == "SELL"][0]["order_id"]
+    z.book[exit_id].update(status="COMPLETE", filled_quantity=qty - 1)           # one more share filled meanwhile
+    slow["on"] = False
+    z.net = {"SBIN": 1}
+    b.cycle()                                                 # the late share is booked first ...
+    assert b.state.positions["SBIN"]["qty"] == 1
+    assert [int(r["qty"]) for r in live_rows()] == [qty - 2, 1]
+    b.cycle()                                                 # ... and the share that is left gets its stop
+    assert z.book[b.state.positions["SBIN"]["sl_order_id"]]["quantity"] == 1
+
+
+def test_closing_shares_the_bot_never_recorded_does_not_touch_a_position():
+    z = Zerodha()
+    z.fill, z.cancel_slow = [4], True
+    b = lb(z)
+    b.enter("SBIN", "LONG", 10, 800.0, 790.0)                                    # 4 filled, the order still open
+    entry = z.sent("LIMIT")[0]
+    z.book[entry["order_id"]].update(status="COMPLETE", filled_quantity=7)       # 3 more fill late
+    z.fill = [1]                                              # their closing order fills 1 and is not final either
+    b.settle()
+    assert len(b.unsettled) == 1 and not b.closing_pending("SBIN")               # not the recorded position's order
+    late = list(b.unsettled.values())[0]
+    z.book[late["order_id"]].update(status="COMPLETE", filled_quantity=3)
+    z.cancel_slow = False
+    b.settle()
+    assert b.take_late_exits() == []                          # and its late fill is not booked against the position
