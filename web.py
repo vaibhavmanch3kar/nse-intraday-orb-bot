@@ -413,7 +413,7 @@ def capital_card():
                f"value='{int(chosen) if custom_on else ''}' placeholder='e.g. 75000' style='width:110px' "
                f"onfocus=\"this.form.amount.value='custom'\"></label>")
     cancel = ("<form method='post' action='/paper-capital/cancel' style='display:inline' "
-              "onsubmit=\"if(!confirm('Cancel the pending opening balance change?'))return false;this.confirm.value='yes'\">"
+              "onsubmit=\"if(!window.confirm('Cancel the pending opening balance change?'))return false;this.confirm.value='yes'\">"
               f"<input type='hidden' name='confirm' value=''>{csrf_field()}<button class='red'>Cancel pending change</button></form>"
               if pending else "")
     state = (f"<span class='tag warn'>→ {_inr(float(pending['amount']))[:-3]} at next start</span>" if pending
@@ -1100,7 +1100,7 @@ def logout_form(s):
     ask = ("Log out of Zerodha?\\n\\nThis ends today\\'s Zerodha session for this dashboard and the bot, and deletes "
            "the login saved on this PC. Price data switches to Yahoo until you log in again." + live_note)
     return (f"<form method='post' action='/zerodha/logout' class='logout' "
-            f"onsubmit=\"if(!confirm('{ask}'))return false;this.confirm.value='yes'\">"
+            f"onsubmit=\"if(!window.confirm('{ask}'))return false;this.confirm.value='yes'\">"
             f"<input type='hidden' name='confirm' value=''>{csrf_field()}"
             f"<button class='red wide'>⏏ Log out of Zerodha</button></form>")
 
@@ -1343,7 +1343,7 @@ def trading_mode_card(s):
             ask = (f"Close ALL {n} real-money position(s) now at the market price?\\n\\nThis sells/buys at once at "
                    f"whatever the price is. It cannot be undone.")
             out.append(f"<form method='post' action='/positions/close-all' "
-                       f"onsubmit=\"if(!confirm('{ask}'))return false;this.confirm.value='yes'\">"
+                       f"onsubmit=\"if(!window.confirm('{ask}'))return false;this.confirm.value='yes'\">"
                        f"<input type='hidden' name='confirm' value=''>{csrf_field()}"
                        f"<button class='red wide'>✖ Close all positions now</button></form>"
                        f"<p class='muted small'>Separate from the switch: use it only if you want out at once.</p>")
@@ -3164,7 +3164,7 @@ def _bot_running(s):
 def _post_btn(action, label, ask, cls="ghost"):
     """A small form button that asks first and carries the page's confirmation and CSRF_TOKEN."""
     return (f"<form method='post' action='{action}' style='display:inline' "
-            f"onsubmit=\"if(!confirm('{ask}'))return false;this.confirm.value='yes'\">"
+            f"onsubmit=\"if(!window.confirm('{ask}'))return false;this.confirm.value='yes'\">"
             f"<input type='hidden' name='confirm' value=''>{csrf_field()}<button class='{cls} small'>{label}</button></form>")
 
 
