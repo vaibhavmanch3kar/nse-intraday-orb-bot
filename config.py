@@ -180,6 +180,11 @@ RECON_EVERY_SEC = _env("RECON_EVERY_SEC", 300, int)           # compare position
 # every stock with a step of 0.10 or less.
 FALLBACK_TICK = 0.10
 
+# The PC's clock is compared with Zerodha's server every CLOCK_CHECK_SEC seconds (0 = never). If it is more
+# than CLOCK_MAX_SKEW_SEC off, no new entry is taken until it is right again (see clockcheck.py).
+CLOCK_CHECK_SEC = _env("CLOCK_CHECK_SEC", 300, int)
+CLOCK_MAX_SKEW_SEC = _env("CLOCK_MAX_SKEW_SEC", 30, int)
+
 # ── Loop / files ───────────────────────────────────────────────────────────
 POLL_SEC = _env("POLL_SEC", 60, int)
 DATA_DIR = _env("DATA_DIR", "data")

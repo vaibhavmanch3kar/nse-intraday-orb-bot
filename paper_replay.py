@@ -38,6 +38,7 @@ def _safe_environment(work):
     os.environ["DRY_RUN"] = "true"
     os.environ.pop("CONFIRM_LIVE", None)
     os.environ["DATA_SOURCE"] = "yahoo"
+    os.environ["CLOCK_CHECK_SEC"] = "0"         # the replay runs on a simulated clock and never uses the network
     os.environ["DATA_DIR"] = work
 
 

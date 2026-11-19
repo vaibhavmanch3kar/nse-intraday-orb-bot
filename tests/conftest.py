@@ -76,7 +76,9 @@ def isolated(tmp_path, monkeypatch):
                  # Kavach's newer limits (2.0) are off here too; tests/test_kavach_data.py switches them on
                  "MAX_SIGNAL_AGE_MIN": 0.0, "MAX_PER_SECTOR": 0, "MAX_BAR_VOLUME_PCT": 0.0,
                  # tests fake data_yahoo; never reach real Kite even if the user saved DATA_SOURCE=kite
-                 "DATA_SOURCE": "yahoo"}.items():
+                 "DATA_SOURCE": "yahoo",
+                 # no test asks Zerodha for the time; tests/test_clock.py switches the check on with a stand-in
+                 "CLOCK_CHECK_SEC": 0}.items():
         monkeypatch.setattr(C, k, v)
     # These tests feed the bot made-up candles through data_yahoo. In real money Kavach refuses entries on
     # Yahoo prices, so by default the bot is told its prices are Kite's; the data tests say otherwise.

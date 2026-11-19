@@ -21,6 +21,7 @@ import archive
 import backup
 import buildinfo
 import capital
+import clockcheck
 import config as C
 import costs
 import data_yahoo
@@ -291,6 +292,9 @@ class Bot:
         self.recon = {}                   # last comparison of the bot's record with Zerodha (reconcile)
         self.recon_hold = None            # why new entries are held after that comparison (None = not held)
         self.recon_missing = set()        # positions Zerodha does not show and no closing order explains
+        self.clock_hold = None            # why new entries are held because this PC's clock is wrong (check_clock)
+        self.clock_checked = None         # when the clock was last compared with Zerodha's
+        self.clock_skew = None            # seconds this PC is ahead of Zerodha (negative: behind), last reading
         self.recon_said = set()           # mismatches already said in the log
         self.last_recon = None            # when the record was last compared with Zerodha
         self.launcher_gone = lambda: False   # main() sets this when run_bot.ps1 passes --launcher-pid
@@ -305,12 +309,40 @@ class Bot:
         self.events = ([f"{now_ist():%H:%M:%S} {msg}"] + self.events)[:30]
 
     def entry_hold(self):
-        """Why no new entry may be sent right now, in plain words, or None. REAL MONEY only: an order whose fate
-        is unknown (broker.uncertain), or the bot's record not matching Zerodha (reconcile)."""
+        """Why no new entry may be sent right now, in plain words, or None. In REAL MONEY: an order whose fate
+        is unknown (broker.uncertain), or the bot's record not matching Zerodha (reconcile). In either mode:
+        this PC's clock being wrong (check_clock)."""
         unsure = getattr(self.broker, "uncertain", None)
         if unsure:
             return f"order state uncertain ({unsure})"
-        return self.recon_hold
+        return self.recon_hold or self.clock_hold
+
+    def check_clock(self, now):
+        """Every CLOCK_CHECK_SEC: compare this PC's clock with Zerodha's server. The bot times everything by the
+        PC's clock, so if it is more than CLOCK_MAX_SKEW_SEC off no new entry is taken until it is right again.
+        Open positions are still managed, and their exchange stops do not depend on this clock. If Zerodha's
+        time can't be read, nothing changes."""
+        if C.CLOCK_CHECK_SEC <= 0:
+            return
+        if self.clock_checked and 0 <= (now - self.clock_checked).total_seconds() < C.CLOCK_CHECK_SEC:
+            return
+        self.clock_checked = now
+        skew = clockcheck.skew_seconds()
+        if skew is None:
+            return
+        self.clock_skew = round(skew, 1)
+        if abs(skew) > C.CLOCK_MAX_SKEW_SEC:
+            way = "ahead of" if skew > 0 else "behind"
+            was = self.clock_hold
+            self.clock_hold = (f"this PC's clock is {abs(skew):.0f} seconds {way} Zerodha's: set the Windows clock "
+                               f"right (Settings > Time & language > Date & time > Sync now)")
+            if not was:
+                self.note(f"{T.WARN_ICON} {self.clock_hold}. No new entry is taken until it is right; open "
+                          f"positions are still managed.", logging.ERROR)
+        elif self.clock_hold:
+            self.clock_hold = None
+            self.note(f"this PC's clock agrees with Zerodha's again (within {abs(skew):.0f} seconds): new entries "
+                      f"are allowed")
 
     def price_source(self):
         """'kite' or 'yahoo': where this round's prices really came from (marketdata falls back to Yahoo when
@@ -626,6 +658,7 @@ class Bot:
             if self.balance_tried is None or _t.monotonic() - self.balance_tried >= 60:
                 self.sync_live_balance(now)
         self.state.new_day_if_needed(today)
+        self.check_clock(now)
 
         # stale positions from an earlier day (paper mode after a crash)
         for sym, p in list(self.state.positions.items()):
@@ -875,7 +908,8 @@ class Bot:
             "loss_streak": self.state.d["loss_streak"], "cooldown_until": self.state.d["cooldown_until"],
             "positions": positions, "rows": self.rows, "events": self.events, "feed": self.feed,
             # REAL MONEY: the last comparison with Zerodha, and why new entries are on hold (None = they aren't)
-            "recon": self.recon if self.live else None, "entry_hold": self.entry_hold() if self.live else None,
+            "recon": self.recon if self.live else None, "entry_hold": self.entry_hold() if self.live else self.clock_hold,
+            "clock_skew_sec": self.clock_skew,
             "build": self.build,
             # Paper | Real Money (livemode.py): a switch waiting, whether this bot's own environment has both live
             # settings, and whether real money is armed today. Read by the dashboard; never changes the mode.
