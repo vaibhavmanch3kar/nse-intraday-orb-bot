@@ -77,7 +77,7 @@ your account" > New). The dashboard can never set them:
      candle. Until then it opens no new paper trades. The header shows **REAL MONEY** once it has switched.
 
 **Back to paper** (Settings > Trading mode > **Switch back to Paper**): the arming is removed at once and the bot
-opens no new real-money trades. It keeps managing the open ones (exchange stop orders, trailing stop, 15:10
+opens no new real-money trades. It keeps managing the open ones (exchange stop orders, trailing stop, 15:00
 close) and switches to paper when all of them have closed. The header says "→ PAPER when 2 close" meanwhile.
 **Close all positions now** is a separate button with its own confirmation, for when you want out at once.
 

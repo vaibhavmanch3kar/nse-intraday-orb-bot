@@ -101,10 +101,11 @@ def test_api_live_zerodha_view_is_read_only_and_separate(server):
     assert snapshot() == before                                     # looking never writes a file
 
 
-def test_not_running_hides_controls_and_shows_notice(server):
+def test_not_running_offers_only_start_and_shows_notice(server):
     running_status(time=(dt.datetime.now(IST) - dt.timedelta(hours=3)).isoformat())
     r = json.loads(get(server + "/api/live")[0])["regions"]
-    assert r["controls"] == "" and "Bot is not running" in r["notice"] and "NOT RUNNING" in r["status"]
+    assert "action='/start'" in r["controls"] and "/stop" not in r["controls"] and "/pause" not in r["controls"]
+    assert "Bot is not running" in r["notice"] and "NOT RUNNING" in r["status"]
 
 
 def test_both_themes_and_phone_navigation_are_in_every_page(server):

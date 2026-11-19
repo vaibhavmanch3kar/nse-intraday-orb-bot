@@ -68,6 +68,12 @@ def index_for(symbol):
     return C.SECTOR_INDEX.get(symbol, C.INDEX_DEFAULT)
 
 
+def sector_for(symbol):
+    """The stock's sector for Kavach's per-sector limit: its sector index (banks, IT, ...). A stock without a
+    sector index of its own is its own sector: sharing the default index does not make two stocks alike."""
+    return C.SECTOR_INDEX.get(symbol) or symbol
+
+
 def index_agrees(index_bars, bar_time, direction):
     """Correlation filter: the index must be above its day open for longs, below for shorts.
     Returns (ok, text). Missing index data never blocks a trade."""

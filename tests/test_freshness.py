@@ -134,7 +134,10 @@ def test_build_marks_todays_session_in_progress(monkeypatch):
 def test_day_link_to_a_stale_in_progress_review_starts_a_rebuild(monkeypatch):
     started = []
     monkeypatch.setattr(jobs, "start", lambda name, target=None: started.append((name, target)))
-    now = dt.datetime.now(IST)
+    # a fixed moment in the session: with the real clock, before 09:33 India time no candle has closed yet,
+    # so a review built 30 hours earlier was not out of date and the test failed every night
+    now = _Clock.NOW = at(THU, "11:02")
+    monkeypatch.setattr(dt, "datetime", _Clock)
     d = now.date()
     review.write_json(review._cache_path(d.isoformat()),
                       saved_review(d, now - dt.timedelta(hours=30), in_progress=True, as_of="10:00",

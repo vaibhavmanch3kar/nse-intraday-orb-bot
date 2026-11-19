@@ -24,15 +24,19 @@ import capital
 import config as C
 import costs
 import data_yahoo
+import datacheck
 import marketdata
 import holidays
 import journal
+import kavach
 import livemode
 import reports
 import restart
 import risk
+import safefile
 import strategy
 import theme as T
+import watchdog
 from broker import LiveBroker, PaperBroker
 
 IST = dt.timezone(dt.timedelta(hours=5, minutes=30))
@@ -116,6 +120,11 @@ def setup_logging():
     sh.setFormatter(fmt)
     root.handlers[:] = [fh, sh]
     logging.getLogger("urllib3").setLevel(logging.WARNING)
+    try:                                   # secrets removed from every line, and the same lines as JSON (eventlog.py)
+        import eventlog
+        eventlog.install("bot", os.path.join(C.DATA_DIR, "logs"))
+    except Exception:  # noqa: BLE001 - a logging extra must never stop the bot
+        pass
     if isinstance(split, str):
         log.warning(f"the old data\\bot.log was not split into data\\logs {split}")
     elif split:
@@ -235,6 +244,13 @@ class Bot:
         self.balance_ok = not self.live   # REAL MONEY: no new trades until today's Zerodha balance is read
         self.balance_problem = None       # why the balance could not be used (shown on the dashboard)
         self.balance_tried = None         # monotonic time of the last read attempt (retry once a minute)
+        self.status_save_failed = False   # the last status.json save failed (warned once, see write_status)
+        self.feed = {}                    # price-feed health of the last round (dashboard; see cycle)
+        self.feed_warned = set()          # (stock, data problem) already said in the log today
+        self.recon = {}                   # last comparison of the bot's record with Zerodha (reconcile)
+        self.recon_hold = None            # why new entries are held after that comparison (None = not held)
+        self.recon_said = set()           # mismatches already said in the log
+        self.last_recon = None            # when the record was last compared with Zerodha
         self.launcher_gone = lambda: False   # main() sets this when run_bot.ps1 passes --launcher-pid
         try:                    # what this bot runs: version and file/setting hashes, for the dashboard
             self.build = buildinfo.snapshot("bot")
@@ -245,6 +261,19 @@ class Bot:
     def note(self, msg, level=logging.INFO):
         log.log(level, msg)
         self.events = ([f"{now_ist():%H:%M:%S} {msg}"] + self.events)[:30]
+
+    def entry_hold(self):
+        """Why no new entry may be sent right now, in plain words, or None. REAL MONEY only: an order whose fate
+        is unknown (broker.uncertain), or the bot's record not matching Zerodha (reconcile)."""
+        unsure = getattr(self.broker, "uncertain", None)
+        if unsure:
+            return f"order state uncertain ({unsure})"
+        return self.recon_hold
+
+    def price_source(self):
+        """'kite' or 'yahoo': where this round's prices really came from (marketdata falls back to Yahoo when
+        Kite can't be used). Kavach refuses real-money entries on anything but Kite."""
+        return (marketdata.status() or {}).get("using")
 
     def ensure_live_broker(self):
         """Live mode needs today's Kite token; returns False until the user logs in."""
@@ -278,9 +307,17 @@ class Bot:
             self.balance_problem = (None if self.balance_ok else
                                     "positions are open and today's Zerodha balance was not read before them")
             return
+        # A loss already booked today counts against this morning's balance. On a day money is added, Zerodha's
+        # "cash now" is larger than the morning balance, so the morning figure is the smaller one and, read again
+        # after a restart, it used to wipe the day's loss out of the bot's cash (18 Nov 2026: ₹4,870.60 shown
+        # after a ₹3.96 loss). A gain is never added: the balance read here can only be the same or smaller.
+        d0 = self.state.d
+        lost_today = (min(float(d0.get("day_pnl") or 0.0), 0.0)
+                      if d0.get("day") == today and d0.get("balance_day") == today else 0.0)
         try:
             avail = (self.kite.margins("equity") or {}).get("available") or {}
-            vals = [float(avail[k]) for k in ("opening_balance", "live_balance") if avail.get(k) is not None]
+            vals = [float(avail[k]) + (lost_today if k == "opening_balance" else 0.0)
+                    for k in ("opening_balance", "live_balance") if avail.get(k) is not None]
             bal = min(vals) if vals else None
         except Exception as e:  # noqa: BLE001 - network, proxy or Zerodha error: no new trades
             bal, err = None, type(e).__name__
@@ -300,7 +337,10 @@ class Bot:
         d.update(balance_day=today, balance_inr=bal, balance_at=now.isoformat(timespec="seconds"))
         self.state.save()
         self.balance_ok, self.balance_problem = True, None
-        self.note(f"REAL MONEY: balance from Zerodha ₹{bal:,.2f} - trades are sized from it")
+        self.note(f"REAL MONEY: balance from Zerodha ₹{bal:,.2f} - trades are sized from it"
+                  + (f" (this morning's balance less today's booked loss of ₹{-lost_today:,.2f})"
+                     if lost_today and avail.get("opening_balance") is not None
+                     and abs(bal - (float(avail["opening_balance"]) + lost_today)) < 0.005 else ""))
         livemode.log("balance", "read", f"₹{bal:,.2f}")
 
     def apply_paper_capital(self):
@@ -373,13 +413,58 @@ class Bot:
         except Exception as e:  # noqa: BLE001
             self.journal_warn(f"could not close today's journal ({e!r})")
 
-    def reconcile(self):
-        held = self.broker.open_mis_quantities()
-        for sym in list(self.state.positions):
-            if held.get(sym, 0) == 0:
-                self.note(f"{sym}: no open MIS position on Kite - dropping it from state", logging.WARNING)
-                self.state.positions.pop(sym)
+    def reconcile(self, startup=True):
+        """REAL MONEY: compare the bot's positions and unfinished orders with Zerodha (broker.recover), at every
+        start and every RECON_EVERY_SEC. What is safe is corrected here: a position Zerodha no longer holds is
+        dropped, a smaller one is resized (its stop is placed again for the new size), a leftover working order
+        is cancelled. Anything else is a problem only you can decide: it is said loudly and new entries are held
+        until it is gone. The bot never opens or closes a position because of a mismatch."""
+        if not self.live or not hasattr(self.broker, "recover"):
+            return
+        now = now_ist()
+        self.last_recon = now
+        try:
+            rep = self.broker.recover(self.state.positions, startup=startup)
+        except Exception as e:  # noqa: BLE001 - Zerodha can't be read just now: say so, try again next time
+            self.recon = {**self.recon, "at": now.isoformat(timespec="seconds"), "ok": False,
+                          "error": f"{type(e).__name__}: {e}"}
+            if startup:
+                self.note(f"could not compare the bot's positions with Zerodha at the start ({type(e).__name__}) "
+                          f"- it will be tried again", logging.WARNING)
+            return
+        for sym in rep["drop"]:
+            self.note(f"{sym}: no open MIS position on Kite - dropping it from state", logging.WARNING)
+            self.state.positions.pop(sym, None)
+        for sym, qty in rep["resize"].items():
+            pos = self.state.positions[sym]
+            self.note(f"{sym}: Zerodha holds {qty} shares, the bot had {pos['qty']} on record - corrected, and the "
+                      f"stop-loss is placed again for {qty}", logging.WARNING)
+            if pos.get("sl_order_id"):
+                self.broker.cancel(pos["sl_order_id"])
+            pos.update(qty=qty, sl_order_id=None)       # ensure_stop places a stop for the new size this round
+        for text in rep["cancelled"]:
+            self.note(f"cancelled a leftover order of the bot: {text}", logging.WARNING)
+        for text in rep["problems"]:
+            if text not in self.recon_said:
+                self.recon_said.add(text)
+                self.note(f"{T.WARN_ICON} THE BOT'S RECORD DOES NOT MATCH ZERODHA: {text}. New entries are on "
+                          f"hold until this is resolved.", logging.ERROR)
+        if not rep["problems"] and self.recon_hold:
+            self.note("the bot's record matches Zerodha again: new entries are allowed")
+        self.recon_hold = (f"the bot's record does not match Zerodha ({rep['problems'][0]})"
+                           if rep["problems"] else None)
+        self.recon = {"at": now.isoformat(timespec="seconds"), "ok": True, "startup": startup,
+                      "problems": rep["problems"], "notes": rep["notes"], "cancelled": rep["cancelled"],
+                      "dropped": rep["drop"], "resized": rep["resize"]}
         self.state.save()
+
+    def drain_broker(self):
+        """Put what the live broker had to say (order problems, late fills) in the log and the events list."""
+        msgs = getattr(self.broker, "messages", None)
+        if msgs:
+            for level, text in list(msgs):
+                self.note(text, level)
+            msgs.clear()
 
     def close_position(self, sym, ref_price, reason, when):
         pos = self.state.positions[sym]
@@ -387,12 +472,21 @@ class Bot:
         if qty <= 0:
             self.note(f"{T.WARN_ICON} {sym}: exit FAILED ({reason}) - check Kite", logging.ERROR)
             return
+        keep = None
         if qty < pos["qty"]:
-            self.note(f"{sym}: only {qty}/{pos['qty']} closed", logging.ERROR)
+            # Part of the position is still open. It used to be forgotten here (the whole position was booked
+            # as closed); now the rest stays on record, gets a new exchange stop and is managed until it is out.
+            left = pos["qty"] - qty
+            self.note(f"{sym}: only {qty}/{pos['qty']} closed - {left} shares are still open; the bot keeps "
+                      f"managing them", logging.ERROR)
+            keep = {**pos, "qty": left, "sl_order_id": None}
             pos["qty"] = qty
         row = self.state.record_exit(sym, price, when)
         row["reason"] = reason
         log_trade(row, self.mode)
+        if keep:
+            self.state.positions[sym] = keep
+            self.state.save()
         icon = T.EXIT_WIN if row["net"] > 0 else T.EXIT_LOSS
         self.note(f"{icon} EXIT {row['direction']} {sym} x{qty} @ {price:.2f} ({T.reason_label(reason)}) "
                   f"net ₹{row['net']:.2f} ({row['r']:+.2f}R)")
@@ -415,6 +509,8 @@ class Bot:
         bars_by_sym = {}
         lags = []
         fetched = marketdata.fetch_many(C.WATCHLIST, C.INTERVAL_MIN, "10d", C.FETCH_WORKERS)
+        watchdog.beat()                                 # the slow part of a round (price requests) is done
+        feed_problems = {}                              # symbol -> what is wrong with today's candles
         for sym in C.WATCHLIST:
             got = fetched.get(sym)
             if isinstance(got, Exception) or got is None:
@@ -431,6 +527,13 @@ class Bot:
             bars_by_sym[sym] = closed
             self.bars[sym] = closed
             self.prices[sym] = price
+            probs = datacheck.problems(closed, today, C.INTERVAL_MIN)
+            if probs:
+                feed_problems[sym] = probs
+                if (sym, probs[0]) not in self.feed_warned:      # said once per stock and problem
+                    self.feed_warned.add((sym, probs[0]))
+                    self.note(f"{T.WARN_ICON} {sym}: price data problem: {probs[0]} - no new entry in it "
+                              f"while this lasts", logging.WARNING)
             if closed[-1]["t"].date() == today:
                 lags.append((now - closed[-1]["t"]).total_seconds() / 60 - C.INTERVAL_MIN)
         self.data_lag_min = max(lags) if lags else None
@@ -458,6 +561,17 @@ class Bot:
 
         square_off_time = at(C.SQUARE_OFF, today)
 
+        # REAL MONEY housekeeping before anything else: finish orders left open-ended (broker.settle), and
+        # every few minutes compare the bot's record with Zerodha (reconcile).
+        if self.live and hasattr(self.broker, "settle"):
+            try:
+                self.broker.settle()
+            except Exception as e:  # noqa: BLE001 - never stops the round; positions keep their exchange stops
+                self.note(f"could not finish checking open-ended orders ({type(e).__name__})", logging.WARNING)
+            self.drain_broker()
+            if self.last_recon is None or (now - self.last_recon).total_seconds() >= C.RECON_EVERY_SEC:
+                self.reconcile(startup=False)
+
         # 1) manage open positions ("Close all positions now" on the dashboard closes them all, once)
         close_all = livemode.take_close_all(now)
         if close_all:
@@ -472,6 +586,19 @@ class Bot:
                 log_trade(row, self.mode)
                 self.note(f"{T.EXIT_LOSS} EXIT {sym} by exchange stop ({T.name('stop')}) @ {filled_stop:.2f} net ₹{row['net']:.2f}")
                 continue
+            if self.live and hasattr(self.broker, "ensure_stop"):
+                # the position's stop-loss must exist at the exchange on every round, not only when it was placed
+                stop_state, new_id = self.broker.ensure_stop(sym, pos)
+                if stop_state == "replaced":
+                    pos["sl_order_id"] = new_id
+                    self.state.save()
+                    self.note(f"{sym}: the exchange stop-loss was missing and has been placed again", logging.WARNING)
+                elif stop_state == "missing":
+                    self.note(f"{T.WARN_ICON} {sym}: no exchange stop-loss could be placed - closing the position",
+                              logging.ERROR)
+                    pos["sl_order_id"] = None
+                    self.close_position(sym, px, "stop order missing", now)
+                    continue
             if close_all:
                 self.close_position(sym, px, "closed from dashboard", now)
                 continue
@@ -498,53 +625,65 @@ class Bot:
         # 2) entries
         # Apply Now or a Paper | Real Money switch waiting: no new entries (open positions are still managed above)
         paused = os.path.exists(C.PAUSE_FILE) or self.restart_hold or self.switch is not None
-        candidates = []
+        candidates, pickups = [], []
         for sym, closed in bars_by_sym.items():
             last = closed[-1]
             if last["t"].date() != today or self.last_bar.get(sym) == last["t"]:
                 continue
             self.last_bar[sym] = last["t"]
+            pickups.append((now - last["t"]).total_seconds() - C.INTERVAL_MIN * 60)   # seconds after its close
             ev = strategy.evaluate(closed, index_bars=index_bars.get(strategy.index_for(sym)))
             row = {k: ev[k] for k in ("or_high", "or_low", "close", "vwap", "vol_ratio", "reason")}
             row["bar"] = f"{last['t']:%H:%M}"
             self.rows[sym] = self.good_rows[sym] = row
             if ev["signal"]:
                 candidates.append((sym, closed, ev, row))
+        source = self.price_source()
+        newest = max((b[-1]["t"] for b in bars_by_sym.values() if b[-1]["t"].date() == today), default=None)
+        # Feed health for the dashboard: where prices come from, the newest finished candle, how long after its
+        # close the bot got it, and what failed. Recording only.
+        self.feed = {"source": source, "checked_at": now.isoformat(timespec="seconds"),
+                     "newest_candle": f"{newest:%H:%M}" if newest else None,
+                     "pickup_sec": round(max(pickups), 1) if pickups else self.feed.get("pickup_sec"),
+                     "stocks_ok": len(bars_by_sym) - len(feed_problems), "stocks": len(C.WATCHLIST),
+                     "problems": {s: p[0] for s, p in feed_problems.items()},
+                     "errors": sorted(s for s in C.WATCHLIST if isinstance(fetched.get(s), Exception)
+                                      or fetched.get(s) is None),
+                     "live_needs_kite": bool(self.live and source != "kite")}
         # strongest breakout volume first, so scarce slots go to the best signals
         candidates.sort(key=lambda c: -(c[2]["vol_ratio"] or 0.0))
         for sym, closed, ev, row in candidates:
             last = closed[-1]
-            if now >= square_off_time:
-                continue
-            if paused:
-                row["reason"] += " (paused)"
-                continue
-            if not self.balance_ok:
-                row["reason"] += f" - skip: {self.balance_problem or 'Zerodha balance not read yet'}"
-                continue
-            ok, why = self.state.can_enter(sym, today, self.prices)
-            if not ok:
-                row["reason"] += f" - skip: {why}"
-                continue
             direction, stop = ev["signal"], ev["stop"]
             ref = self.prices.get(sym, last["c"])
-            risk_ps = abs(last["c"] - stop)
-            chased = (ref - last["c"]) if direction == "LONG" else (last["c"] - ref)
-            if chased > C.MAX_CHASE_R * risk_ps:
-                row["reason"] += f" - skip: price ran {chased / risk_ps:.1f}R past signal"
-                continue
-            if (direction == "LONG" and ref <= stop) or (direction == "SHORT" and ref >= stop):
-                row["reason"] += " - skip: price already at stop"
-                continue
             mult = strategy.vix_multiplier(self.vix) if C.VIX_SIZING else 1.0
-            qty, why = risk.size_position(self.state.equity(self.prices), ref, stop, direction,
-                                          self.state.open_notional(), mult)
-            if qty <= 0:
-                row["reason"] += f" - skip: {why}"
+            # What the bot knows about this stock's prices right now. Kavach refuses the entry on delayed prices
+            # in real money, on candles that failed validation, on a stale signal, or when the index filter
+            # could not be checked (kavach.data_problem).
+            data = {"live": self.live, "source": source, "problems": feed_problems.get(sym),
+                    "signal_age_min": ((now - last["t"]).total_seconds() / 60) - C.INTERVAL_MIN,
+                    "index_missing": bool(C.INDEX_FILTER) and not datacheck.has_bar(
+                        index_bars.get(strategy.index_for(sym)), last["t"])}
+            # Kavach decides every entry: time, pause, balance, data, account limits, price, sector, size
+            decision = kavach.pre_trade(
+                self.state, sym, direction, ref, stop, today, prices=self.prices, risk_mult=mult, now=now,
+                square_off=square_off_time, paused=paused, hold=self.entry_hold(), balance_ok=self.balance_ok,
+                balance_problem=self.balance_problem, data=data, signal_close=last["c"],
+                bar_volume=last.get("v"), sector_of=strategy.sector_for)
+            if not decision.ok:
+                if decision.check == "paused" and decision.reason == "paused":
+                    row["reason"] += " (paused)"
+                elif decision.check != "time":          # after square-off: nothing to say, as before
+                    row["reason"] += f" - skip: {decision.reason}"
                 continue
+            qty = decision.qty
             filled, fill_price, extra = self.broker.enter(sym, direction, qty, ref, stop)
+            self.drain_broker()
             if filled <= 0:
-                self.note(f"{sym}: entry not filled", logging.WARNING)
+                why = (extra or {}).get("reason")
+                self.note(f"{sym}: entry not filled" + (f" - {why}" if why else ""), logging.WARNING)
+                if why:
+                    row["reason"] += f" - skip: {why}"
                 continue
             target = strategy.target_for(fill_price, stop, direction)
             self.state.record_entry(sym, direction, filled, fill_price, stop, target, now,
@@ -554,6 +693,7 @@ class Bot:
                       f"{T.name('stop')} (stop) {stop:.2f} "
                       + (f"{T.name('target')} (target) {target:.2f}" if target is not None
                          else "no fixed target (trailing)"))
+        self.drain_broker()
         self.journal_round(now, candidates, square_off_time)
         self.write_status(now)
 
@@ -572,7 +712,9 @@ class Bot:
             "day_pnl": self.state.d["day_pnl"], "realized_pnl": self.state.d["realized_pnl"],
             "charges_paid": self.state.d["charges_paid"], "trades_today": self.state.d["trades_today"],
             "loss_streak": self.state.d["loss_streak"], "cooldown_until": self.state.d["cooldown_until"],
-            "positions": positions, "rows": self.rows, "events": self.events,
+            "positions": positions, "rows": self.rows, "events": self.events, "feed": self.feed,
+            # REAL MONEY: the last comparison with Zerodha, and why new entries are on hold (None = they aren't)
+            "recon": self.recon if self.live else None, "entry_hold": self.entry_hold() if self.live else None,
             "build": self.build,
             # Paper | Real Money (livemode.py): a switch waiting, whether this bot's own environment has both live
             # settings, and whether real money is armed today. Read by the dashboard; never changes the mode.
@@ -582,10 +724,23 @@ class Bot:
                          "at": self.state.d.get("balance_at"), "problem": self.balance_problem}
                         if self.live else None),
         }
-        tmp = os.path.join(C.DATA_DIR, "status.json.tmp")
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(status, f, default=str, indent=1)
-        os.replace(tmp, os.path.join(C.DATA_DIR, "status.json"))
+        # The status file only feeds the dashboard. If it can't be saved (another program holds it even after
+        # safefile's retries, the disk is full, ...) that is a warning, said once, never a reason to stop: an
+        # unsaved status used to end the bot outside market hours, with the error shown only in its window.
+        try:
+            tmp = os.path.join(C.DATA_DIR, "status.json.tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(status, f, default=str, indent=1)
+            safefile.replace(tmp, os.path.join(C.DATA_DIR, "status.json"))
+        except OSError as e:
+            if not self.status_save_failed:
+                log.warning(f"could not save the dashboard status file ({type(e).__name__}: {e}) - "
+                            "the bot keeps running and tries again next round")
+            self.status_save_failed = True
+        else:
+            if self.status_save_failed:
+                log.info("dashboard status file saved again")
+            self.status_save_failed = False
 
     def _balance(self):
         import capital
@@ -657,7 +812,7 @@ class Bot:
     def switch_mode_if_requested(self, now):
         """Paper | Real Money (livemode.py). The mode is fixed while the bot runs, so a switch is a restart.
         To paper: no new real-money trades at once; the open ones are managed as usual (stop orders, trailing stop,
-        15:10 close); the restart waits until all of them have closed. To real money: only with both Windows
+        square-off close); the restart waits until all of them have closed. To real money: only with both Windows
         settings in this bot's own environment AND today's arming; it waits for no open paper position and holds
         new paper entries meanwhile. Returns restart.EXIT_RESTART when it is time (run_bot.ps1 starts the bot again
         with the same settings, and livemode.bot_mode decides the new mode). After the close it never restarts:
@@ -792,12 +947,17 @@ class Bot:
         self.apply_paper_capital()
         self.write_status(now_ist())
         self.check_restarted()
+        watchdog.bot_started(now_ist(), os.getpid())    # any start ends "stopped on purpose today"
+        for e in watchdog.last_events(now_ist()):       # why this start happened, if the watchdog caused it
+            self.note(f"Watchdog at {e['at'][11:19]}: {e['text']}", logging.WARNING)
         waiting_login_logged = False
         while True:
+            watchdog.beat()                             # alive and going round: see watchdog.check (hang detection)
             if os.path.exists(C.STOP_FILE):
                 self.note("STOP file found - Ayodhya ORB shutting down (open positions stay protected by exchange stops in live mode)")
                 self.journal_finish(now_ist(), "stopped")
                 os.remove(C.STOP_FILE)
+                watchdog.mark_stopped("Stop button or STOP file")   # the watchdog leaves it stopped today
                 break
             if self.launcher_gone():
                 # Stopping the "Kite ORB Bot" task (or killing run_bot.ps1) ends only the launcher; v1.8.0
@@ -805,6 +965,7 @@ class Bot:
                 self.note("The launcher (run_bot.ps1 / the scheduled task) was stopped - Ayodhya ORB shutting down "
                           "(open positions stay protected by exchange stops in live mode)")
                 self.journal_finish(now_ist(), "stopped")
+                watchdog.mark_stopped("the launcher or the scheduled task was stopped")
                 break
             rc = self.apply_if_requested(now_ist()) or self.switch_mode_if_requested(now_ist())
             if rc:
@@ -834,6 +995,10 @@ class Bot:
                 self.check_changes_at_close(now)
                 self.write_status(now)
                 break
+            # A trading day: start today's counters now (trades today, day P&L, the daily loss limit's base),
+            # not only at the first round after 09:15, so the dashboard never shows yesterday's numbers as
+            # today's before the open. Same reset as cycle() does; it runs once a day.
+            self.state.new_day_if_needed(today)
             if not self.ensure_live_broker():
                 if not waiting_login_logged:
                     self.note(f"{T.term('live')} mode: waiting for today's Kite login ({T.name('login')}) - open http://127.0.0.1:5000", logging.WARNING)
@@ -856,10 +1021,14 @@ class Bot:
         """Sleep between checks, but wake within a second when asked to stop (STOP file or launcher gone),
         instead of up to a minute later. Nothing else changes: the next check runs as before."""
         end = time.monotonic() + seconds
+        beat_at = time.monotonic()
         while True:
             left = end - time.monotonic()
             if left <= 0 or os.path.exists(C.STOP_FILE) or self.launcher_gone():
                 return
+            if time.monotonic() - beat_at >= 15:        # waiting between rounds is healthy: keep the heartbeat fresh
+                watchdog.beat()
+                beat_at = time.monotonic()
             time.sleep(min(1.0, left))
 
 
@@ -900,11 +1069,48 @@ def main():
     if not dashboard_listening():
         log.info(f"Dashboard not running - double-click 3-DASHBOARD.bat to open it "
                  f"(http://{C.WEB_HOST}:{C.WEB_PORT}); the bot trades the same without it")
-    b = Bot()
-    b.launcher_gone = watch_launcher(sys.argv)
-    rc = b.run()
+    enable_fault_log()
+    b = None
+    try:
+        b = Bot()
+        b.launcher_gone = watch_launcher(sys.argv)
+        rc = b.run()
+    except KeyboardInterrupt:
+        # Ctrl+C in the bot's window is a deliberate stop: say so, and the watchdog leaves the bot stopped today
+        log.warning(f"{T.APP} stopped with Ctrl+C (open positions stay protected by exchange stops in live mode)")
+        watchdog.mark_stopped("Ctrl+C in the bot's window")
+        return
+    except Exception as e:  # noqa: BLE001 - the last line of defence: nothing may end the bot without a record
+        # An error that reaches here ends the bot. It used to be shown only in the bot's window, which then
+        # closed; now the full error goes to the log and to data/logs/crash_<time>.txt, and the exit code tells
+        # run_bot.ps1 (which asks watchdog.py whether to start the bot again).
+        path = watchdog.record_crash(e, mode=getattr(b, "mode", None),
+                                     version=(getattr(b, "build", None) or {}).get("version"),
+                                     positions=list(b.state.positions) if b is not None else None)
+        log.critical(f"{T.APP} ENDED WITH AN ERROR: {type(e).__name__}: {e} "
+                     f"(full details: {path or 'could not be saved'}; open positions stay protected by exchange "
+                     f"stops in live mode)", exc_info=True)
+        sys.exit(EXIT_CRASH)
     if rc:
         sys.exit(rc)   # restart.EXIT_RESTART: run_bot.ps1 starts the bot again
+
+
+EXIT_CRASH = 1          # ended with an error (also what Python itself uses); 0 = ended normally, 3 = restart
+_fault_file = None
+
+
+def enable_fault_log():
+    """A crash below Python (in a C library) leaves at least its stack in data/logs/fault.log."""
+    global _fault_file
+    try:
+        import faulthandler
+        if faulthandler.is_enabled():      # someone else (e.g. the test runner) already listens
+            return
+        os.makedirs(os.path.join(C.DATA_DIR, "logs"), exist_ok=True)
+        _fault_file = open(os.path.join(C.DATA_DIR, "logs", "fault.log"), "a", encoding="utf-8")
+        faulthandler.enable(file=_fault_file)
+    except (OSError, RuntimeError, ValueError):
+        pass
 
 
 def watch_launcher(argv):

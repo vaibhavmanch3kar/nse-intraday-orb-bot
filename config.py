@@ -32,6 +32,21 @@ def load_user_env():
                     pass
     except OSError:
         pass
+    load_secret_store()
+
+
+def load_secret_store():
+    """A secret that is NOT in the Windows settings is taken from the protected store (secretbox.py), if it was
+    moved there with secure_secrets.py. A value in the Windows settings always wins. Never raises."""
+    try:
+        import secretbox
+        for name in secretbox.names():
+            if name in _SECRET_VARS and not os.environ.get(name):
+                value = secretbox.get(name)
+                if value:
+                    os.environ[name] = value
+    except Exception:  # noqa: BLE001 - a store problem must look like "key not set", never stop the program
+        pass
 
 
 load_user_env()
@@ -96,7 +111,8 @@ DATA_SOURCE = _env("DATA_SOURCE", "yahoo")
 MARKET_OPEN = _env("MARKET_OPEN", "09:15")
 OR_MINUTES = _env("OR_MINUTES", 15, int)            # opening range = first N minutes
 LAST_ENTRY = _env("LAST_ENTRY", "12:00")            # no new entries on bars starting after this
-SQUARE_OFF = _env("SQUARE_OFF", "15:10")            # close everything (Zerodha auto-squares MIS ~15:20)
+SQUARE_OFF = _env("SQUARE_OFF", "15:00")            # close everything. Zerodha force-closes MIS in F&O stocks at
+                                                    # 15:12 (Rs 50 + GST per order), so 15:10 left only 2 minutes
 MARKET_CLOSE = _env("MARKET_CLOSE", "15:30")
 
 # ── Strategy: opening range breakout ───────────────────────────────────────
@@ -141,6 +157,10 @@ RISK_PER_TRADE_PCT = _env("RISK_PER_TRADE_PCT", 0.5, float)   # % of equity lost
 MAX_POSITION_PCT = _env("MAX_POSITION_PCT", 25.0, float)      # max notional per stock, % of equity
 MAX_EXPOSURE_PCT = _env("MAX_EXPOSURE_PCT", 75.0, float)      # max notional all stocks (no leverage)
 MAX_OPEN_POSITIONS = _env("MAX_OPEN_POSITIONS", 3, int)
+# Kavach (kavach.py), added in 2.0. Each can only make the bot stricter than it was.
+MAX_SIGNAL_AGE_MIN = _env("MAX_SIGNAL_AGE_MIN", 5.0, float)   # a signal older than this is stale: skip (0 = off)
+MAX_PER_SECTOR = _env("MAX_PER_SECTOR", 0, int)               # open positions per sector and direction (0 = off)
+MAX_BAR_VOLUME_PCT = _env("MAX_BAR_VOLUME_PCT", 2.0, float)   # one order <= this % of the signal candle's volume
 MAX_TRADES_PER_DAY = _env("MAX_TRADES_PER_DAY", 4, int)
 MAX_DAILY_LOSS_PCT = _env("MAX_DAILY_LOSS_PCT", 2.0, float)
 LOSS_STREAK_LIMIT = _env("LOSS_STREAK_LIMIT", 3, int)
@@ -151,6 +171,9 @@ MIN_QTY = 1
 LIMIT_BUFFER_PCT = _env("LIMIT_BUFFER_PCT", 0.20, float)      # marketable limit offset
 ORDER_FILL_TIMEOUT_SEC = _env("ORDER_FILL_TIMEOUT_SEC", 30, int)
 EXIT_RETRIES = _env("EXIT_RETRIES", 5, int)
+CANCEL_WAIT_SEC = _env("CANCEL_WAIT_SEC", 10, int)            # wait this long for Zerodha to confirm a cancel
+MARGIN_CHECK = _env("MARGIN_CHECK", True, bool)               # ask Zerodha for the margin before each entry
+RECON_EVERY_SEC = _env("RECON_EVERY_SEC", 300, int)           # compare positions with Zerodha this often
 TICK = 0.05                                                   # valid for every NSE equity tick size
 
 # ── Loop / files ───────────────────────────────────────────────────────────

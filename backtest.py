@@ -20,6 +20,7 @@ import tempfile
 
 import config as C
 import data_yahoo
+import kavach
 import marketdata
 import risk
 import strategy
@@ -63,10 +64,14 @@ def prev_vix(vix, day):
     return vix[max(earlier)] if earlier else None
 
 
-def simulate(data, start_cash, verbose=True, index_data=None, vix=None, trades_path=None):
+def simulate(data, start_cash, verbose=True, index_data=None, vix=None, trades_path=None, strat=None):
     """trades_path: where to write the trade list (default data/backtest_trades.csv). The advisor
-    passes its own path so its runs never overwrite your backtest results."""
+    passes its own path so its runs never overwrite your backtest results.
+    strat: the rules to test. Default: the live bot's own (strategy.py). The strategy lab (yantra.py) passes
+    another object with the same three methods (evaluate, manage_exit, target_for), so every idea is tested by
+    this same engine: same fills, same Kavach checks, same charges."""
     index_data, vix = index_data or {}, vix or {}
+    strat = strat or strategy
     tmp = tempfile.mkdtemp()
     st = risk.State(os.path.join(tmp, "bt_state.json"), start_cash)
     trades = []
@@ -96,17 +101,20 @@ def simulate(data, start_cash, verbose=True, index_data=None, vix=None, trades_p
             b = bars[i]
             pending.pop(s)
             if b["t"].date() == sig["day"] and s not in st.positions:
-                ok, _ = st.can_enter(s, day, last_close)  # open losses count toward the daily limit
                 d, stop = sig["direction"], sig["stop"]
                 beyond = (d == "LONG" and b["o"] <= stop) or (d == "SHORT" and b["o"] >= stop)
-                if ok and not beyond:
+                if not beyond:
                     slip = b["o"] * C.SLIPPAGE_PCT / 100
                     entry = b["o"] + slip if d == "LONG" else b["o"] - slip
                     mult = strategy.vix_multiplier(prev_vix(vix, day)) if C.VIX_SIZING else 1.0
-                    qty, _ = risk.size_position(st.equity(), entry, stop, d, st.open_notional(), mult)
-                    if qty > 0:
-                        st.record_entry(s, d, qty, entry, stop, strategy.target_for(entry, stop, d), b["t"],
-                                        {"held": 0, **(sig["context"] or {})})
+                    # the same Kavach checks as the live bot (kavach.py). Open losses count toward the daily
+                    # limit (prices=last_close); the size comes from booked equity, as before.
+                    decision = kavach.pre_trade(st, s, d, entry, stop, day, prices=last_close, equity=st.equity(),
+                                                risk_mult=mult, bar_volume=sig.get("volume"),
+                                                sector_of=strategy.sector_for)
+                    if decision.ok:
+                        st.record_entry(s, d, decision.qty, entry, stop, strat.target_for(entry, stop, d),
+                                        b["t"], {"held": 0, **(sig["context"] or {})})
         for s, bars in data.items():
             i = idx[s].get(t)
             if i is None:
@@ -117,7 +125,7 @@ def simulate(data, start_cash, verbose=True, index_data=None, vix=None, trades_p
             if s in st.positions:
                 pos = st.positions[s]
                 pos["held"] = pos.get("held", 0) + 1
-                hit = strategy.manage_exit(pos, bars, i, pos["held"])
+                hit = strat.manage_exit(pos, bars, i, pos["held"])
                 if not hit and strategy.is_square_off_bar(b):
                     hit = ("square-off", b["c"])
                 if hit:
@@ -129,10 +137,11 @@ def simulate(data, start_cash, verbose=True, index_data=None, vix=None, trades_p
                     trades.append(row)
             # 3) signal on this closed bar -> enter at next bar open
             if s not in st.positions and not strategy.is_square_off_bar(b):
-                ev = strategy.evaluate(bars, i, index_data.get(strategy.index_for(s)))
+                ev = strat.evaluate(bars, i, index_data.get(strategy.index_for(s)))
                 if ev["signal"]:
                     pending[s] = {"direction": ev["signal"], "stop": ev["stop"], "day": day,
-                                  "rank": ev["vol_ratio"] or 0.0, "context": ev["context"]}
+                                  "rank": ev["vol_ratio"] or 0.0, "context": ev["context"],
+                                  "volume": b.get("v")}
         # mark open positions to this bar's close, so drawdowns inside open trades are counted
         equity_curve.append((t, st.equity(last_close)))
 

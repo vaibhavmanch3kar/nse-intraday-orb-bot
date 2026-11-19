@@ -68,17 +68,30 @@ On a weekday (not an NSE holiday), **before 9:15 AM IST**:
    browser, and the bot starts in **PAPER** mode.
 2. Leave the black window open and the PC awake. Look at the dashboard whenever you like:
    its figures update by themselves every 10 seconds, without reloading the page.
-3. The bot takes trades from about 9:45 AM, closes everything by **3:10 PM**, and **stops by itself at 3:35 PM**.
+3. The bot takes trades from about 9:45 AM, closes everything by **3:00 PM**, and **stops by itself at 3:35 PM**.
 
-To stop early, click **Stop bot** on the dashboard, double-click **`7-STOP-BOT.bat`** (it waits until the bot has
-really stopped), or close the bot's black window. Stopping the "Kite ORB Bot" task in Task Scheduler stops the bot
-too. The dashboard keeps running after the bot stops.
+To stop early, click **Stop bot** on the dashboard or double-click **`7-STOP-BOT.bat`** (it waits until the bot has
+really stopped). Stopping the "Kite ORB Bot" task in Task Scheduler stops the bot too. The dashboard keeps running
+after the bot stops. **Don't stop it by closing the black window:** with the watchdog on (Step 6) that looks like
+an accident, and the bot is started again within 5 minutes.
 
 ### Step 6 (optional): Start automatically every weekday
 
 **Double-click `4-SCHEDULE.bat`.** Windows will start the bot at 9:00 AM Monday to Friday.
 Your PC must be **on, logged in and not sleeping** during market hours (set *Sleep* to *Never* in Windows power settings).
 To undo it, double-click `5-UNSCHEDULE.bat`.
+
+It also adds the **watchdog** ("Kite ORB Watchdog" task, `watchdog.py`), which keeps the bot running on a trading day:
+
+- If the bot ends with an error, it is started again after 10 seconds. The full error is saved in
+  `data\logs\crash_<time>.txt`; every start and exit is listed in `data\logs\launcher.log`.
+- Every 5 minutes from 9:05 AM to 3:45 PM it checks that the bot and the dashboard are running and starts whichever
+  is missing. It also ends a bot that has not responded for 10 minutes, so that it starts again.
+- It gives up after 5 automatic starts in a day, and it never starts a bot you stopped on purpose that day
+  (Stop button, `7-STOP-BOT.bat`, or stopping the task) until you start it yourself or the next 9:00 AM start.
+- A bot started by the watchdog is an ordinary start: paper unless real money was armed that day, and it re-checks
+  its positions against Zerodha first. The dashboard shows a popup for every crash and restart.
+- It can't help when the PC is off, asleep or offline. `python watchdog.py status` shows today's record.
 
 ---
 
@@ -206,7 +219,7 @@ always shown next to the themed name (for example **Lakshman Rekha · stop**), a
 | **Lakshya** | target | the aim |
 | **Anusaran** | 21 EMA trailing exit | "following" the price |
 | **Muhurat** | 1-hour time stop | the trade's window has passed |
-| **Sandhya** | 15:10 square-off | dusk: everything is closed |
+| **Sandhya** | 15:00 square-off | dusk: everything is closed |
 | **Maryada** | 2% daily loss limit | Rama's self-imposed limits |
 | **Vanvas** | 2-day cool-down after 3 losses | exile from the market |
 | **Vanar Sena** | index filter | trade with the army (the sector index), not against it |
@@ -316,7 +329,7 @@ Common ones:
 | `MAX_DAILY_LOSS_PCT` | `2.0` | Stop new trades for the day once booked + open losses reach this % |
 | `WATCHLIST` | 12 stocks | Which stocks the bot trades (NSE symbols) |
 | `DATA_SOURCE` | `yahoo` | `kite` for real-time Zerodha data (paid Connect plan, see above) |
-| `LAST_ENTRY` / `SQUARE_OFF` | `12:00` / `15:10` | No new trades after this time / close everything at this time |
+| `LAST_ENTRY` / `SQUARE_OFF` | `12:00` / `15:00` | No new trades after this time / close everything at this time |
 
 Each December, add next year's NSE holidays to `nse_holidays.json` (the list is on nseindia.com).
 
@@ -324,6 +337,8 @@ Each December, add next year's NSE holidays to `nse_holidays.json` (the list is 
 
 ## More documentation
 
+- **[2.0 step-by-step guide, with screenshots](docs/GUIDE-2.0.md)**: a trading day on the eight pages, health, secrets, logs, readiness
+- **[Production-readiness report](docs/PRODUCTION-READINESS.md)**: what the tests, the paper replay and the lab show
 - **[How the strategy works, and the test results](docs/STRATEGY.md)**: rules, risk limits, backtest, Time Machine, files
 - **[Real-money trading with Zerodha (advanced)](docs/LIVE-TRADING.md)**: Kite Connect app, static IP, daily login, safety switches
 - **[Paid Kite Connect plan for real-time data](docs/KITE-CONNECT-PLAN.md)**: 500 credits a month, adding credits, creating the app, switching the bot

@@ -20,6 +20,7 @@ import config as C
 import costs
 import data_yahoo
 import freshness
+import safefile
 import jobs
 import marketdata
 import strategy
@@ -244,6 +245,7 @@ def build(day=None, symbols=None, refresh=False, job=jobs.NO_JOB):
         res["partial"] = {"skipped": skipped, "why": data_yahoo.SKIPPED}
     os.makedirs(C.DATA_DIR, exist_ok=True)
     for d in {res["day"], str(day) if day else res["day"]}:
+        job.stop_if_cancelled()               # Cancel was pressed: keep the saved Review as it was
         write_json(_cache_path(d), res)
     return res
 
@@ -253,7 +255,7 @@ def write_json(path, obj):
     tmp = f"{path}.{os.getpid()}.tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(obj, f, indent=1, default=str)
-    os.replace(tmp, path)
+    safefile.replace(tmp, path)
 
 
 def _read(path):

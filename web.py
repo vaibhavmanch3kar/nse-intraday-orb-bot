@@ -154,11 +154,36 @@ def mode_chips(status, extra=""):
             f"<span class='muted small'>The Paper | Zerodha switch only changes what you see.</span></div>")
 
 
+STATUS_POLL_SEC = 1.0     # the dashboard looks at status.json at most this often, however many pages poll
+_STATUS = {"key": None, "text": None, "checked": None}
+
+
 def read_status():
+    """The bot's last saved status.
+
+    On Windows, while any other program is touching a file (reading it, or even asking for its details), a
+    program replacing that file is refused ("Access is denied"). That is how the bot's save of status.json
+    failed on 18 Nov 2026 with dashboard pages polling it. The bot now retries a refused save (safefile.py),
+    which is the real fix; this side simply touches the file as little as possible: at most once every
+    STATUS_POLL_SEC it asks whether the file changed, and it opens it only when it did (about once a minute)."""
+    import time
+    now = time.monotonic()
+    fresh = (_STATUS["text"] is not None and _STATUS["key"] and _STATUS["key"][0] == STATUS_FILE
+             and _STATUS["checked"] is not None and now - _STATUS["checked"] < STATUS_POLL_SEC)
     try:
-        with open(STATUS_FILE, encoding="utf-8") as f:
-            return json.load(f)
-    except (OSError, ValueError):
+        if not fresh:
+            st = os.stat(STATUS_FILE)
+            # a replaced file is a new file (st_ino changes) even if its time and size happen to match
+            key = (STATUS_FILE, st.st_mtime_ns, st.st_size, st.st_ino)
+            if STATUS_POLL_SEC <= 0 or _STATUS["key"] != key:
+                with open(STATUS_FILE, encoding="utf-8") as f:
+                    text = f.read()
+                json.loads(text)                   # a half-written file is not kept
+                _STATUS.update(key=key, text=text)
+            _STATUS["checked"] = now
+        return json.loads(_STATUS["text"])         # a fresh copy each time: callers may change it
+    except (OSError, ValueError, TypeError):
+        _STATUS.update(key=None, text=None, checked=None)
         return {}
 
 
@@ -294,10 +319,26 @@ def view_switch(path, view, status):
             f"the bot is trading {html.escape(bot_mode)})'>{''.join(links)}</div>")
 
 
-def view_banner(view):
-    if view == "zerodha":
-        return ("<div class='viewbar zerodha'>LIVE · REAL ZERODHA ACCOUNT · real money · read-only view</div>")
-    return "<div class='viewbar paper'>PAPER ACCOUNT · virtual money</div>"
+def view_banner(view, s=None):
+    """Which account the page shows, and, when that is not the account the bot is trading right now, a plain
+    line saying so. The view only changes what is shown; it never changes the trading mode."""
+    bar = ("<div class='viewbar zerodha'>LIVE · REAL ZERODHA ACCOUNT · real money · read-only view</div>"
+           if view == "zerodha" else "<div class='viewbar paper'>PAPER ACCOUNT · virtual money</div>")
+    s = s or {}
+    if not bot_running(s):
+        return bar
+    live = s.get("mode") == "live"
+    if live and view == "paper":
+        return bar + ("<div class='banner' role='status' style='border-color:var(--dn)'><b>You are looking at the "
+                      "PAPER account, but the bot is trading REAL MONEY on Zerodha right now.</b> These paper "
+                      "figures are not today's trading. <a href='?view=zerodha'>Show the Zerodha account</a> "
+                      "(switching views never changes the trading mode).</div>")
+    if not live and view == "zerodha":
+        return bar + ("<div class='banner' role='status'><b>You are looking at your real Zerodha account, but the "
+                      "bot is trading PAPER (virtual money) right now.</b> It places no real orders. "
+                      "<a href='?view=paper'>Show the Paper account</a> (switching views never changes the "
+                      "trading mode).</div>")
+    return bar
 
 
 def zerodha_card(acct):
@@ -316,6 +357,8 @@ def zerodha_card(acct):
     k = [("Opening balance (start of day)", f"<b>{_inr(acct['opening'])}</b>"),
          ("Account value", f"<b>{_inr(acct['equity'])}</b>"),
          ("Available funds", f"<b>{_inr(acct['available'])}</b>"),
+         ("Added today", f"<b>{_inr(acct.get('payin') or 0)}</b>"),
+         ("Bot sizes trades from", f"<b>{_inr(acct.get('sizing') if acct.get('sizing') is not None else acct['opening'])}</b>"),
          ("Margin used", f"<b>{_inr(acct['margin_used'])}</b>"),
          ("Invested (open positions)", f"<b>{_inr(acct['invested'])}</b>"),
          ("Realised P&amp;L today", _pl(acct["realised"])),
@@ -559,11 +602,16 @@ def _status_chips(s, running, view, ok_login, lag):
     src = "Kite" if ds.get("using") == "kite" else ("Yahoo" if ds.get("using") else None)
     data_chip = ""
     if src:
-        late = lag is not None and lag > 20
-        tip = f" title='{html.escape(ds.get('reason') or '')}'" if ds.get("reason") else ""
-        delay = "" if lag is None else f" · {lag:.0f} min behind"
+        # Prices arrive as 15-minute candles, so the newest finished candle is normally 0-16 minutes old. That
+        # age used to be shown as "N min behind", which read like a broken feed. Now: the candle's time, and a
+        # warning only when a candle is really late (watch_timing).
+        w = watch_timing(s)
+        late = w["state"] == "late" or (lag is not None and lag > 20)
+        why = ds.get("reason") or CANDLE_AGE_TIP
+        tip = f" title='{html.escape(why)}'"
+        delay = " · candle LATE" if late else (f" · last candle {w['last']}" if w["last"] else "")
         data_chip = (f"<span class='chip {'amber' if late or ds.get('reason') else 'ok'}'{tip}><i></i>"
-                     f"{src} data{delay}</span>")
+                     f"{src} data{html.escape(delay)}</span>")
     login_chip = (f"<span class='chip {'ok' if ok_login else ''}'><i></i>Zerodha: "
                   f"{'logged in' if ok_login else 'not logged in'}</span>")
     when = (s.get("time") or "")[11:19]
@@ -599,6 +647,30 @@ def _limits_kpis(s, equity=None, unreal=0.0):
     return out
 
 
+def funds_sub(a):
+    """Under 'Available funds': margin used, and money added today if any."""
+    sub = f"margin used {_inr(a['margin_used'])}"
+    if a.get("payin"):
+        sub += f" · includes {_inr(a['payin'])} added today"
+    return sub
+
+
+def funds_note(a):
+    """Why 'Account value' and 'Available funds' differ, and which figure the bot sizes trades from."""
+    parts = []
+    if a.get("payin"):
+        parts.append(f"Available funds include <b>{_inr(a['payin'])} added today</b>; account value is this "
+                     f"morning's cash plus today's P&amp;L, so it doesn't.")
+    if a.get("collateral"):
+        parts.append(f"Available funds include {_inr(a['collateral'])} of margin from pledged shares, "
+                     f"which the bot does not use.")
+    if a.get("sizing") is not None:
+        parts.append(f"The bot sizes real-money trades from <b>{_inr(a['sizing'])}</b> (the smaller of this "
+                     f"morning's cash and the cash now"
+                     + ("; money added today counts from tomorrow" if a.get("payin") else "") + ").")
+    return f"<div class='small warnline'>{' '.join(parts)}</div>" if parts else ""
+
+
 def live_kpis(view, s):
     """The key figures for the account in view. Paper: from the paper files only. Zerodha: read-only
     from Kite's balance and positions; a login or error message instead when it can't be read."""
@@ -609,7 +681,7 @@ def live_kpis(view, s):
             return (f"<section class='card acct zerodha' id='acct'>{zerodha_card(a)}</section>")
         n_open = sum(1 for r in a["positions"] if r["qty"])
         cells = (_kpi("Account value", _inr(a["equity"]), f"opening {_inr(a['opening'])}")
-                 + _kpi("Available funds", _inr(a["available"]), f"margin used {_inr(a['margin_used'])}")
+                 + _kpi("Available funds", _inr(a["available"]), funds_sub(a))
                  + _kpi("Today's P&amp;L", _signed(a["pnl"]), f"booked {_inr(a['realised'], True)} · open {_inr(a['unrealised'], True)}",
                         _cls(a["pnl"]))
                  + _kpi("Open P&amp;L", _signed(a["unrealised"]), f"{n_open} open position{'s' if n_open != 1 else ''}",
@@ -617,7 +689,8 @@ def live_kpis(view, s):
                  + _kpi("Invested", _inr(a["invested"]), "open positions at average price")
                  + _kpi("Margin used", _inr(a["margin_used"]), "Zerodha's figure"))
         warn = "".join(f"<div class='warn small warnline'>⚠ {html.escape(w)}</div>" for w in a.get("warnings", []))
-        note = (f"<div class='muted small warnline'>From Zerodha at {_clock(a.get('fetched_at'))} IST · read-only · "
+        note = (funds_note(a) +
+                f"<div class='muted small warnline'>From Zerodha at {_clock(a.get('fetched_at'))} IST · read-only · "
                 f"Zerodha's P&amp;L is before charges · delivery holdings not included</div>")
         return f"<section class='card acct zerodha kwrap' id='acct'><div class='kgrid'>{cells}</div>{warn}{note}</section>"
     a = accounts.paper_account()
@@ -703,7 +776,128 @@ def zerodha_positions():
             f"<th class='r'>Last price</th><th class='r'>Realised</th><th class='r'>Unrealised</th></tr>{rows}</table></section>")
 
 
-def live_watchlist(s):
+def too_dear(s):
+    """(per-stock limit in rupees, [stocks whose single share costs more than it]) for the bot's own account."""
+    eq = s.get("equity")
+    if not eq:
+        return 0.0, []
+    limit = float(eq) * C.MAX_POSITION_PCT / 100
+    return limit, sorted(sym for sym, r in (s.get("rows") or {}).items()
+                         if isinstance(r.get("close"), (int, float)) and r["close"] > limit)
+
+
+def live_signals(s, now=None):
+    """Why the bot has or hasn't traded today: every signal so far and what happened to it (from the bot's own
+    journal for the account it trades), what the watchlist is waiting for, and which stocks this account
+    can't buy at all. Read-only."""
+    import datetime as dt
+    import journal
+    now = now or dt.datetime.now(dt.timezone(dt.timedelta(hours=5, minutes=30)))
+    mode = "live" if s.get("mode") == "live" else "paper"
+    detail = journal.load_detail(mode, now.date().isoformat()) or {}
+    sigs = detail.get("signals") or []
+    taken = [x for x in sigs if x.get("outcome") == "taken"]
+    rows = "".join(
+        f"<tr><td class='first' data-label='Time'>{html.escape(str(x.get('bar') or x.get('time') or '-'))}</td>"
+        f"<td data-label='Signal'><b>{html.escape(str(x.get('symbol')))}</b> {html.escape(str(x.get('direction') or ''))}</td>"
+        f"<td data-label='What happened'><span class='st {'sig' if x.get('outcome') == 'taken' else 'dn'}'>"
+        f"{'traded' if x.get('outcome') == 'taken' else 'skipped'}</span></td>"
+        f"<td data-label='Why' style='white-space:normal'>{html.escape(str(x.get('reason') or '-'))}</td></tr>"
+        for x in sigs)
+    waiting = {}
+    for r in (s.get("rows") or {}).values():
+        full = r.get("reason") or ""
+        why = full.split(" - skip")[0]
+        key = ("signal skipped (see above)" if " - skip" in full else
+               "volume too low" if why.startswith("volume") else "range too wide or narrow" if why.startswith("range")
+               else why or "no data yet")
+        waiting[key] = waiting.get(key, 0) + 1
+    wait_txt = " · ".join(f"{n} {html.escape(k)}" for k, n in sorted(waiting.items(), key=lambda kv: -kv[1]))
+    limit, dear = too_dear(s)
+    dear_txt = (f"<div class='warn small warnline'>⚠ With {_inr(s.get('equity'))} in the account, one share of "
+                f"<b>{html.escape(', '.join(dear))}</b> costs more than the {C.MAX_POSITION_PCT:g}% per-stock limit "
+                f"({_inr(limit)}), so their signals are skipped. That limit is a risk rule, not a fault.</div>"
+                if dear else "")
+    if sigs:
+        head = f"{len(sigs)} signal{'s' if len(sigs) != 1 else ''} · {len(taken)} traded · {len(sigs) - len(taken)} skipped"
+        table = (f"<table class='rt'><tr><th>Candle</th><th>Signal</th><th>What happened</th><th>Why</th></tr>"
+                 f"{rows}</table>")
+    else:
+        head = "no signal yet"
+        table = ("<div class='muted' style='padding:10px 14px'>No breakout signal so far today. A signal needs a "
+                 "15-minute candle to close outside the opening range, with enough volume, before "
+                 f"{html.escape(str(C.LAST_ENTRY))}.</div>")
+    now_line = (f"<div class='muted small warnline'>Watchlist right now: {wait_txt}</div>" if wait_txt else "")
+    return (f"<section class='card flush' id='signals'><div class='hd'>Today's signals <span class='end'>"
+            f"<span class='tag'>{html.escape(head)}</span></span></div>{table}{now_line}{dear_txt}</section>")
+
+
+CANDLE_PICKUP_MIN = 1    # the bot looks every POLL_SEC (60 s) and Kite has a closed candle within seconds
+CANDLE_LATE_MIN = 4      # this many minutes past the expected time, the page says "No updates"
+
+
+def watch_timing(s, now=None):
+    """When the watchlist last changed and when it should change next. It changes once per 15-minute candle:
+    the 09:15 candle closes at 09:30, so the first update is about 09:31, then about every 15 minutes.
+    Returns {state: before_open|waiting|late|closed|stopped, last, text, key}; `key` names the overdue
+    update, so a page shows one "No updates" popup per missed candle, not one per refresh."""
+    import datetime as dt
+    import holidays
+    now = now or dt.datetime.now(dt.timezone(dt.timedelta(hours=5, minutes=30)))
+    tz = now.tzinfo
+    step = dt.timedelta(minutes=C.INTERVAL_MIN)
+    pick = dt.timedelta(minutes=CANDLE_PICKUP_MIN)
+
+    def at(day, hhmm):
+        h, m = map(int, hhmm.split(":"))
+        return dt.datetime.combine(day, dt.time(h, m), tz)
+
+    day = now.date()
+    open_t, close_t = at(day, C.MARKET_OPEN), at(day, C.MARKET_CLOSE)
+    try:
+        status_at = dt.datetime.fromisoformat(s["time"])
+        status_day = status_at.date()
+        running = (now - status_at).total_seconds() < max(180, 3 * C.POLL_SEC)   # same rule as bot_running()
+    except (KeyError, ValueError, TypeError):
+        status_day, running = None, False
+    bars = sorted(r.get("bar") for r in (s.get("rows") or {}).values() if r.get("bar"))
+    last = bars[-1] if bars and status_day == day else None          # 'HH:MM' strings sort in time order
+    out = {"last": last, "key": ""}
+    if not holidays.is_trading_day(day) or now >= close_t:
+        nd = holidays.next_trading_day(day)
+        first = at(nd, C.MARKET_OPEN) + step + pick
+        out.update(state="closed", text=f"Market closed. Next update about {first:%H:%M} on {first:%a %d %b}, "
+                                        f"when the first 15-minute candle closes.")
+        return out
+    if now < open_t:
+        first = open_t + step + pick
+        out.update(state="before_open", text=f"Market opens at {open_t:%H:%M}. First update about {first:%H:%M}, "
+                                             f"when the {open_t:%H:%M} candle closes.")
+        return out
+    if not running:
+        out.update(state="stopped", key=f"{day}-stopped",
+                   text="No updates: the bot is not running, so the watchlist isn't changing. "
+                        "Start it (2-START-BOT.bat) to resume.")
+        return out
+    nxt = (at(day, last) + step) if last else open_t                  # the candle we are waiting for
+    closes = nxt + step
+    expected = closes + pick
+    mins = max(0, int((expected - now).total_seconds() // 60))
+    if now <= expected + dt.timedelta(minutes=CANDLE_LATE_MIN):
+        when = "in under a minute" if mins == 0 else f"in {mins} min"
+        lead = f"Last update: the {last} candle. " if last else "No candles yet today. "
+        out.update(state="waiting", text=f"{lead}Next update about {expected:%H:%M} ({when}), "
+                                         f"when the {nxt:%H:%M} candle closes at {closes:%H:%M}.")
+        return out
+    late = int((now - expected).total_seconds() // 60)
+    ds = (s.get("data_source") or {}).get("using") or "price data"
+    out.update(state="late", key=f"{day}-{nxt:%H%M}",
+               text=f"No updates: the {nxt:%H:%M} candle closed at {closes:%H:%M} but hasn't reached the bot "
+                    f"({late} min late). The bot retries every minute; check the internet and {ds.capitalize()} data.")
+    return out
+
+
+def live_watchlist(s, now=None):
     rows = []
     for sym, r in sorted(s.get("rows", {}).items()):
         reason = r.get("reason") or ""
@@ -720,8 +914,13 @@ def live_watchlist(s):
             f"<td data-label='Bar' class='hide-s'>{_fmt(r.get('bar'))}</td>"
             f"<td data-label='Status' style='white-space:normal'><span class='st {cls}'>{_fmt(T.decorate(reason) or None)}</span></td></tr>")
     body = "".join(rows) or "<tr><td colspan=7 class='muted'>Waiting for market data</td></tr>"
-    return (f"<section class='card flush' id='watchlist'><div class='hd'><span class='theme'>{T.term('watchlist')}</span> <span class='end'><span class='tag'>last closed 15-min bar</span></span></div>"
-            f"<table><tr><th>Stock</th><th class='r'>Close</th><th class='r hide-s'>Opening range</th><th class='r hide-s'>VWAP</th>"
+    w = watch_timing(s, now)
+    tag = f"last candle {w['last']}" if w["last"] else "last closed 15-min bar"
+    late = f" data-late='{html.escape(w['key'])}'" if w["state"] in ("late", "stopped") else ""
+    bar = (f"<div class='wtime {w['state']}' role='status'{late}>"
+           f"{'⚠ ' if w['state'] in ('late', 'stopped') else '⏱ '}{html.escape(w['text'])}</div>")
+    return (f"<section class='card flush' id='watchlist'><div class='hd'><span class='theme'>{T.term('watchlist')}</span> <span class='end'><span class='tag'>{html.escape(tag)}</span></span></div>"
+            f"{bar}<table><tr><th>Stock</th><th class='r'>Close</th><th class='r hide-s'>Opening range</th><th class='r hide-s'>VWAP</th>"
             f"<th class='r hide-s'>Vol ×</th><th class='hide-s'>Bar</th><th>Status</th></tr>{body}</table></section>")
 
 
@@ -749,20 +948,74 @@ def balance_notice(s):
             f"Open positions are still managed.</div>")
 
 
+def watchdog_notices():
+    """Today's crashes and automatic restarts for the popups and the Live page. Never raises."""
+    try:
+        import watchdog
+        return watchdog.notices()
+    except Exception:  # noqa: BLE001 - a problem reading the record must not break a page
+        return []
+
+
+def watchdog_banner():
+    """What the watchdog did today, newest first (at most 4 lines): shown on the Live page all day."""
+    items = [n for n in watchdog_notices() if n.get("tone") in ("dn", "warn")][-4:][::-1]
+    if not items:
+        return ""
+    rows = "".join(f"<li><b>{html.escape(n['at'][11:16])}</b> {html.escape(n['title'])}: "
+                   f"{html.escape(n['body'])}</li>" for n in items)
+    bad = any(n["tone"] == "dn" for n in items)
+    return (f"<div class='banner wd' role='status' style='border-color:var(--{'dn' if bad else 'warn'})'>"
+            f"<b>Watchdog today</b><ul style='margin:4px 0 0 18px;padding:0'>{rows}</ul></div>")
+
+
 def live_notice(s, running):
     if running:
-        return balance_notice(s)
+        return watchdog_banner() + balance_notice(s)
     when = (s.get("time") or "")
-    return (f"<div class='banner'><b>Bot is not running</b> ({T.name('not_running')}: markets closed, weekend, or stopped). "
+    return (watchdog_banner() +
+            f"<div class='banner'><b>Bot is not running</b> ({T.name('not_running')}: markets closed, weekend, or stopped). "
             f"Showing the last saved state{' from ' + html.escape(when[:16].replace('T', ' ')) if when else ''}. "
             f"See <a href='/review'>{T.term('review')}</a> for how the last trading day played out, "
             f"or <a href='/trades'>{T.term('trades')}</a> for history.</div>")
 
 
+def start_mode(now=None):
+    """(live, sentence): the mode a bot started now would trade in. Decided exactly as the bot decides it: the
+    two Windows settings plus today's arming on this dashboard. Start never changes any of them."""
+    import livemode
+    env_live = (livemode.windows_setting("DRY_RUN").strip().lower() == "false"
+                and livemode.windows_setting("CONFIRM_LIVE").strip() == "YES")
+    live, note = livemode.bot_mode(env_live, now)
+    if live:
+        return True, "REAL MONEY (the Windows settings are on and real money was armed today)"
+    return False, "PAPER (virtual money)" + ("; real money is not armed today" if note else "")
+
+
+def start_bot():
+    """Start the bot the way the watchdog does (run_bot.ps1 as its own process). Returns a sentence for the
+    page. A bot that is already running is left alone."""
+    import watchdog
+    probe = watchdog.RealProbe()
+    if probe.bot_running():
+        return "The bot is already running."
+    ok = probe.start_bot()
+    watchdog.log("dashboard: Start pressed - " + ("bot start requested" if ok else "the start request FAILED"))
+    return ("Starting the bot. It appears here within a minute." if ok else
+            "The bot could not be started. Start it with 2-START.bat and look at data\\logs\\launcher.log.")
+
+
 def live_controls(s, running):
-    """Pause/Resume and Stop (both ask first). Shown only while the bot runs."""
+    """Start (while the bot is not running), or Pause/Resume and Stop (while it runs). All ask first."""
     if not running:
-        return ""
+        live, mode = start_mode()
+        ask = (f"Start the bot now? It will trade in {mode.split(' (')[0]} mode."
+               + (" REAL orders can be placed." if live else ""))
+        return (f"<section class='card'><div class='hd'><span class='theme'>{T.term('controls')}</span></div>"
+                + _post_btn("/start", "▶ Start bot", ask, "red" if live else "ghost")
+                + f"<div class='muted small'>It would start in <b>{html.escape(mode)}</b>. Start only starts the "
+                  f"program: the mode comes from your own settings and today's arming, never from this button."
+                  f"</div></section>")
     paused = s.get("paused")
     ask = "Resume new entries?" if paused else "Pause new entries? Open positions keep being managed."
     label = "▶ Resume new entries" if paused else f"⏸ {T.name('pause')} · Pause new entries"
@@ -775,22 +1028,57 @@ def live_controls(s, running):
             f"<div class='muted small'>Both ask before acting. Open positions keep their stop.</div></section>")
 
 
-def live_limits(s):
-    cooldown = s.get("cooldown_until")
+CANDLE_AGE_TIP = ("Prices arrive as 15-minute candles. The newest finished candle is normally up to 16 minutes "
+                  "old: that is its age, not a delay in the data.")
+
+
+def candle_age_text(s, now=None):
+    """'finished 9 min ago · on time' / '... · LATE: ...' for the Data & limits card."""
     lag = s.get("data_lag_min")
-    lag_txt = "-" if lag is None else f"{lag:.0f} min"
+    if lag is None:
+        return "-"
+    w = watch_timing(s, now)
+    if w["state"] == "late" or lag > 20:
+        return (f"finished {lag:.0f} min ago · <span class='warn'>LATE: a newer candle should have arrived</span>")
+    return (f"finished {lag:.0f} min ago · <span class='up'>on time</span> "
+            f"<span class='muted'>(a new candle every {C.INTERVAL_MIN} min; up to {C.INTERVAL_MIN + 1} min old is normal)</span>")
+
+
+def feed_line(s):
+    """One line on the price feed's health for the Data & limits card (the bot records it each round)."""
+    f = s.get("feed") or {}
+    if not f:
+        return "-"
+    src = "Kite" if f.get("source") == "kite" else (str(f.get("source") or "none").capitalize())
+    pick = f.get("pickup_sec")
+    got = f" · picked up {pick:.0f} s after it closed" if isinstance(pick, (int, float)) else ""
+    bad = len(f.get("problems") or {}) + len(f.get("errors") or [])
+    health = (f"<span class='up'>{f.get('stocks_ok', 0)} of {f.get('stocks', 0)} stocks OK</span>" if not bad else
+              f"<span class='warn'>{f.get('stocks_ok', 0)} of {f.get('stocks', 0)} stocks OK · {bad} with a problem</span>")
+    block = (" · <b class='dn'>real-money entries blocked: not on Kite prices</b>" if f.get("live_needs_kite") else "")
+    return f"{html.escape(src)} · candle {html.escape(str(f.get('newest_candle') or '-'))}{got} · {health}{block}"
+
+
+def live_limits(s):
+    cooldown = active_cooldown(s)
+    lag_txt = candle_age_text(s)
     until = f" · <span class='warn'>until {html.escape(str(cooldown))}</span>" if cooldown else ""
     return (f"<details class='card' id='limits'><summary>Data &amp; limits</summary><dl class='facts'>"
             f"<dt>Loss streak</dt><dd>{_fmt(s.get('loss_streak'))} <span class='muted'>· {T.name('cooldown')} after "
             f"{C.LOSS_STREAK_LIMIT}</span>{until}</dd>"
             f"<dt>Price data</dt><dd>{data_source_text(s)}</dd>"
-            f"<dt>Data delay</dt><dd>{lag_txt}</dd>"
+            f"<dt>Newest candle</dt><dd>{lag_txt}</dd>"
+            f"<dt>Price feed</dt><dd>{feed_line(s)}</dd>"
             f"<dt>Per trade</dt><dd>{C.RISK_PER_TRADE_PCT:g}% risk · at most {C.MAX_OPEN_POSITIONS} positions, "
             f"{C.MAX_TRADES_PER_DAY} trades a day</dd>"
             f"<dt>{T.name('daily_loss')}</dt><dd>stop new trades at −{C.MAX_DAILY_LOSS_PCT:g}% in a day (booked + open)</dd>"
             f"<dt>Exits</dt><dd>{T.term('stop')} · {T.term('trail')} · {T.term('time_stop')} · "
             f"{T.term('square_off')} at {C.SQUARE_OFF}</dd>"
-            f"</dl></details>")
+            f"</dl><div class='small' style='padding:0 14px 12px'><a href='/kavach'>Kavach · every risk check "
+            f"and limit →</a> · <a href='/chanakya'>Chanakya · what speaks for and against each stock →</a> · "
+            f"<a href='/rajya'>Rajya · the whole account, measured →</a> · "
+            f"<a href='/readiness'>Readiness report →</a> · "
+            f"<a href='/yantrashala'>Yantrashala · strategy lab →</a></div></details>")
 
 
 def live_positions_held(s):
@@ -1005,7 +1293,7 @@ def switch_to_paper():
         n = live_positions_held(s)
         if n:
             return (f"Switching to PAPER: no new real-money trades from now. The bot keeps managing its {n} open "
-                    f"position(s) (stop orders, trailing stop, 15:10 close) and switches when they have closed.")
+                    f"position(s) (stop orders, trailing stop, square-off close) and switches when they have closed.")
         return "Switching to PAPER: the bot restarts in paper within a minute."
     return "Real money is not armed any more: the bot trades PAPER."
 
@@ -1047,7 +1335,7 @@ def trading_mode_card(s):
             out.append(f"<p class='warn'>{html.escape(sw)}</p>")
         if s.get("switch") != "to_paper":
             ask = ("Switch back to PAPER?\\n\\nNo new real-money trades from now. Open positions are still managed "
-                   "(stop orders, trailing stop, 15:10 close); the bot switches when they have closed.")
+                   "(stop orders, trailing stop, square-off close); the bot switches when they have closed.")
             out.append(f"<form method='post' action='/mode/paper' onsubmit=\"return confirm('{ask}')\">{csrf_field()}"
                        f"<button class='wide'>◐ Switch back to Paper</button></form>")
         n = len(s.get("positions") or []) if live else 0
@@ -1102,6 +1390,56 @@ def trading_mode_card(s):
 LIVE_REFRESH_SEC = ACCOUNT_REFRESH_SEC
 
 
+def active_cooldown(s, today=None):
+    """The cool-down date if it is still ahead, else None. The bot's record keeps the last date after it has
+    passed; only a date still ahead holds new trades back (risk.State.can_enter uses the same test)."""
+    until = (s or {}).get("cooldown_until")
+    today = today or _now_ist().date()
+    return until if until and today.isoformat() < str(until) else None
+
+
+HEALTH_WORDS = {"ok": ("✓", "working", "in"), "warn": ("!", "needs a look", ""), "bad": ("✕", "NOT working", "dn"),
+                "off": ("–", "not applicable now", "")}
+
+
+def health_card(s=None):
+    """Every health check in one card (health.py), closed while everything works, open when something does not;
+    under it, today's alert history. Read-only."""
+    import health
+    rows = health.checks(status=s)
+    health.observe(rows=rows)
+    worst = health.overall(rows)
+    bad = [r for r in rows if r["state"] == "bad"]
+    warn = [r for r in rows if r["state"] == "warn"]
+    if bad:
+        head = f"<span class='st dn'>✕ {len(bad)} NOT working</span>" + (f" · {len(warn)} need a look" if warn else "")
+    elif warn:
+        head = f"<span class='st'>! {len(warn)} need a look</span>"
+    else:
+        head = "<span class='st in'>✓ all working</span>"
+    body = "".join(
+        f"<tr><td class='first' data-label='Check'><b>{html.escape(r['name'])}</b></td>"
+        f"<td data-label='State'><span class='st {HEALTH_WORDS[r['state']][2]}'>{HEALTH_WORDS[r['state']][0]} "
+        f"{HEALTH_WORDS[r['state']][1]}</span></td>"
+        f"<td data-label='Detail' style='white-space:normal'>{html.escape(r['detail'])}</td></tr>" for r in rows)
+    hist = health.alerts()[-8:][::-1]
+    if hist:
+        lines = "".join(
+            f"<li><b>{html.escape(a['at'][11:16])}</b> {html.escape(a['name'])}: "
+            f"{'working again' if a['state'] == 'ok' else 'needs a look' if a['state'] == 'warn' else 'NOT working'}"
+            f" <span class='muted'>· {html.escape(a['detail'])}</span></li>" for a in hist)
+        history = (f"<div class='small' style='padding:8px 14px 12px'><b>Alerts today</b> (newest first)"
+                   f"<ul style='margin:4px 0 0 18px;padding:0'>{lines}</ul></div>")
+    else:
+        history = "<div class='muted small' style='padding:8px 14px 12px'>No alert today.</div>"
+    return (f"<details class='card flush' id='health'{' open' if worst != 'ok' else ''}><summary>System health "
+            f"<span class='end'>{head}</span></summary>"
+            f"<table class='rt'><tr><th>Check</th><th>State</th><th>Detail</th></tr>{body}</table>{history}"
+            f"<div class='muted small' style='padding:0 14px 12px'>These checks only read. The watchdog restarts a "
+            f"stopped bot; Kavach and the bot guard every trade. The same list is at <a href='/api/health'>"
+            f"/api/health</a>.</div></details>")
+
+
 def live_regions(view, s):
     """The parts of the Live page that change while the bot runs. /api/live sends the same parts and the
     page swaps them in place every few seconds (no reload; the opening-balance form is never touched)."""
@@ -1110,9 +1448,10 @@ def live_regions(view, s):
     return {"status": _status_chips(s, running, view, ok, s.get("data_lag_min")),
             "notice": live_notice(s, running), "acct": live_kpis(view, s), "equity": live_equity(view, s),
             "zpositions": zerodha_positions() if view == "zerodha" else "",
-            "positions": live_positions(s, view), "watchlist": live_watchlist(s),
+            "positions": live_positions(s, view), "signals": live_signals(s), "watchlist": live_watchlist(s),
             "controls": live_controls(s, running), "login": live_login(ok, login_msg, s),
-            "events": live_events(s), "limits": live_limits(s), "modebadge": mode_badge(s)}
+            "events": live_events(s), "limits": live_limits(s), "modebadge": mode_badge(s),
+            "health": health_card(s)}
 
 
 LIVE_JS = """
@@ -1159,14 +1498,15 @@ def render(msg="", q=None):
     body = f"""<style>{LIVE_CSS}</style>
 <div class="page-head"><h1>{T.BOW} {T.name('live_page')}</h1><span class="sub">{T.plain('live_page')} · updates in place every {LIVE_REFRESH_SEC} s</span></div>
 {R('status')}
-{view_banner(view)}
+{view_banner(view, s)}
 <div class="banner" id="offline" role="status" hidden>⚠ Can't reach the dashboard server: the figures below may be old. It keeps trying.</div>
 {R('notice')}
+{R('health')}
 {note}
 {update_banner(s)}
 {R('acct')}
 <div class="grid" style="margin-top:16px">
-<div>{R('equity')}{R('zpositions')}{R('positions')}{R('watchlist')}</div>
+<div>{R('equity')}{R('zpositions')}{R('positions')}{R('signals')}{R('watchlist')}</div>
 <aside>{R('controls')}{capital}{R('login')}{R('events')}{market_calendar()}{R('limits')}</aside>
 </div>
 <script>{LIVE_JS}</script>"""
@@ -1214,8 +1554,28 @@ def _scan_job(target, job):
         raise RuntimeError(f"no stock could be downloaded ({len(res['errors'])} errors)")
 
 
+def _chanakya_job(target, job):
+    import chanakya
+    res = chanakya.build(job=job)
+    if not res.get("rows") and res.get("errors"):
+        raise RuntimeError(f"no stock could be downloaded ({len(res['errors'])} errors)")
+
+
 jobs.register("review", _review_job, REVIEW_LIMIT_SEC)
 jobs.register("scanner", _scan_job, SCAN_LIMIT_SEC)
+def _rajya_job(target, job):
+    import rajya
+    rajya.build(target or "paper", job=job)
+
+
+def _bakhar_job(target, job):
+    import bakhar
+    bakhar.build(job=job)
+
+
+jobs.register("bakhar", _bakhar_job, REVIEW_LIMIT_SEC)
+jobs.register("chanakya", _chanakya_job, REVIEW_LIMIT_SEC)
+jobs.register("rajya", _rajya_job, REVIEW_LIMIT_SEC)
 
 
 def auto_start(name, target=None):
@@ -1283,6 +1643,13 @@ def job_strip(name, result, fresh, refresh_url, unit):
         tail = f" · {saved}" if saved else ""
         text = (f"{s['done']} of {s['total'] or '?'} {unit} · {_mmss(s['elapsed_sec'])}"
                 + (f" · {s['step']}" if s.get("step") else "") + tail)
+        button = (f"<form method='post' action='/jobs/cancel' style='margin:0'>"
+                  f"<input type='hidden' name='job' value='{html.escape(name)}'>{csrf_field()}"
+                  f"<button class='ghost small' aria-label='Cancel this build'>✕ Cancel</button></form>")
+    elif s["state"] == "cancelled":
+        state, icon, cls = "Cancelled", "⚠", "warn"
+        text = "the build was cancelled; nothing of it was saved" + (f" · {saved}" if saved else "")
+        button = btn("Refresh")
     elif s["state"] == "failed":
         state, icon, cls = "Failed", "✕", "bad"
         text = f"the last update failed: {s['error']}" + (f" · {saved}" if saved else "")
@@ -1303,7 +1670,9 @@ def job_strip(name, result, fresh, refresh_url, unit):
         button = btn("Retry")
     else:
         state, icon, cls = "Completed", "✓", "ok"
-        text = f"updated {_hm(built)}, {_ago(built)}"
+        took = (f" · took {_mmss(s['elapsed_sec'])} for {s['done']} {unit}"
+                if s.get("elapsed_sec") and s.get("finished") else "")
+        text = f"updated {_hm(built)}, {_ago(built)}{took}"
     data = (f" data-running='1' data-job='{name}' data-unit='{html.escape(unit)}' data-tail='{html.escape(tail)}'"
             if running else "")
     return (f"<div class='jobstrip {cls}' role='status' aria-live='polite'{data}>"
@@ -1316,7 +1685,7 @@ def render_review(day=None, refresh=False):
     """Draws straight away from the saved Review; builds in the background when it is missing,
     out of date or a refresh was asked for. Never waits for price downloads."""
     import review
-    h1 = f"<h1>{T.LAMP} {T.term('review')}</h1>"
+    h1 = f"{bakhar_tabs('/review')}<h1>{T.LAMP} {T.term('review')}</h1>"
     r = review.cached(day) if day else review.latest()
     if r and not r.get("day"):
         r = None
@@ -1371,7 +1740,8 @@ def render_review(day=None, refresh=False):
     settings = " · ".join(f"{k}={v}" for k, v in st.items())
     total = r.get("total_r", 0.0)
     built = html.escape(str(r.get('built', ''))[:16].replace('T', ' '))
-    at_risk = total * C.PAPER_START_INR * C.RISK_PER_TRADE_PCT / 100
+    cap, cap_label = sizing_capital()
+    at_risk = total * cap * C.RISK_PER_TRADE_PCT / 100
     body = f"""
 <div class="page-head"><h1>{T.LAMP} {T.term('review')} <span class="tag">{r['day']}</span></h1>
 <span class="sub">The day replayed through the strategy rules, one stock at a time (portfolio limits not applied) ·
@@ -1381,7 +1751,9 @@ built {built} from 15-min data</span></div>{note}
 <input type="hidden" name="refresh" value="1"><button class="ghost small">↻ Refresh</button></form></div>
 <div class="kgrid k4">{_kpi("Signals", f"{r.get('signals', 0)}")}{_kpi("Winners", f"{r.get('wins', 0)}")}
 {_kpi("Total", f"{total:+.2f}R", "after slippage and charges", _cls(total))}
-{_kpi("At 0.5% risk on ₹1L", _signed(at_risk), "about", _cls(at_risk))}</div>{progress_note}
+{_kpi(f"At {C.RISK_PER_TRADE_PCT:g}% risk on {_inr(cap)}", _signed(at_risk),
+      f"about · {html.escape(cap_label)} · less when a position limit applies", _cls(at_risk))}</div>{progress_note}
+{review_funnel(r)}
 <section class="card flush"><div class="hd">Stocks <span class="end"><span class="tag">chart = 15-min closes ·
 {T.ui('band_colour')} band = opening range</span></span></div><table class="rt">
 <tr><th>Stock</th><th>Day</th><th class="r">Opening range</th><th class="r">Day %</th><th>Signal → outcome</th>
@@ -1394,6 +1766,740 @@ should beat these odds. The replays also inherit the stock's recent intraday dri
 The verdict compares target-first vs stop-first at 1R with break-even (50%): within 5 points is a coin flip.<br>
 {T.SCROLL} History is the real record: the bot's same rules (same direction) run on each earlier session.</div></details>"""
     return page("Session review", "/review", body)
+
+
+def review_funnel(r):
+    """One line under the Review's figures: of N stocks, how many gave a signal and why the others did not
+    (taken from each stock's own note), so 'only 3 signals' explains itself."""
+    rows = r.get("rows") or {}
+    if not rows:
+        return ""
+    groups, signals = {}, 0
+    for x in rows.values():
+        if x.get("signal_time") or x.get("direction"):
+            signals += 1
+            continue
+        note = (x.get("note") or "").strip()
+        why = note.split(" ", 1)[1] if note[:2].isdigit() and " " in note else note     # drop the leading HH:MM
+        low = why.lower()
+        key = ("volume too low" if low.startswith("volume") else
+               "opening range too wide or too narrow" if low.startswith("range") else
+               "breakout came after the last entry time" if "after" in low else
+               "never closed outside the opening range" if "inside" in low or not low else
+               "price on the wrong side of VWAP" if "vwap" in low else
+               "index moving the other way" if "index" in low or "nifty" in low else why)
+        groups[key] = groups.get(key, 0) + 1
+    parts = [f"<b>{signals}</b> gave a signal"] + [f"{n} {html.escape(k)}" for k, n in
+                                                     sorted(groups.items(), key=lambda kv: -kv[1])]
+    return (f"<div class='muted small' role='note' style='margin:0 0 14px'>Of {len(rows)} stocks: "
+            f"{' · '.join(parts)}. Each stock's own reason is in the table below.</div>")
+
+
+KAVACH_CHECKS = (
+    ("time", "Not after the square-off time."),
+    ("paused", "Not while Pause, an Apply-Now restart or a Paper | Real Money switch is waiting."),
+    ("balance", "Real money: today's Zerodha balance has been read."),
+    ("data", "Real money trades only on Kite prices, never delayed Yahoo. The stock's candles passed validation, "
+             "the signal is not stale, and the index filter could be checked."),
+    ("account", "Cool-down after losses, daily loss limit (booked + open), trades a day, open positions, and one "
+                "trade per stock a day: so no averaging down and no second entry."),
+    ("price", "The price has not run past the signal, and is not already at the stop."),
+    ("sector", "Not too many open positions in one sector and direction (when switched on)."),
+    ("size", "Shares from the risk budget, the per-stock limit, the total exposure limit and charges. "
+             "If not even one share fits, the trade is skipped."),
+    ("liquidity", "The order is a small share of the signal candle's volume."),
+)
+
+
+def kavach_zerodha_card(s):
+    """REAL MONEY: the bot's last comparison of its own record with Zerodha, and whether new entries are held."""
+    if s.get("mode") != "live":
+        return ""
+    r = s.get("recon") or {}
+    hold = s.get("entry_hold")
+    if not r:
+        body = "<div class='muted'>Not compared yet: the bot does it at every start and every few minutes.</div>"
+    elif not r.get("ok"):
+        body = (f"<div class='warn'>⚠ Zerodha could not be read at {html.escape(str(r.get('at') or '')[11:19])} "
+                f"({html.escape(str(r.get('error') or ''))}). The bot tries again.</div>")
+    else:
+        lines = [f"<li class='dn'><b>{html.escape(p)}</b></li>" for p in r.get("problems") or []]
+        lines += [f"<li>Dropped {html.escape(x)}: Zerodha no longer holds it.</li>" for x in r.get("dropped") or []]
+        lines += [f"<li>{html.escape(k)} corrected to {v} shares.</li>" for k, v in (r.get("resized") or {}).items()]
+        lines += [f"<li>Cancelled a leftover order: {html.escape(x)}</li>" for x in r.get("cancelled") or []]
+        lines += [f"<li class='muted'>{html.escape(x)}</li>" for x in r.get("notes") or []]
+        ok = "<span class='up'>matches Zerodha</span>" if not r.get("problems") else "<b class='dn'>DOES NOT MATCH</b>"
+        body = (f"<div>The bot's record {ok} · checked {html.escape(str(r.get('at') or '')[11:19])}"
+                f"{' (at the start)' if r.get('startup') else ''}</div>"
+                f"<ul style='margin:6px 0 0 18px;padding:0'>{''.join(lines)}</ul>")
+    held = (f"<div class='banner' role='alert' style='border-color:var(--dn);margin-top:8px'><b>New entries are on "
+            f"hold:</b> {html.escape(hold)}. Open positions are still managed and keep their exchange stops.</div>"
+            if hold else "")
+    return (f"<section class='card' id='zmatch'><div class='hd'>Bot's record against Zerodha</div>{body}{held}"
+            f"<div class='muted small' style='margin-top:6px'>The bot corrects only what is safe (a position Zerodha "
+            f"no longer holds, a leftover working order, a missing stop). It never opens or closes a position "
+            f"because of a mismatch.</div></section>")
+
+
+ORDER_ROLE_WORDS = {"E": "entry", "S": "stop-loss", "X": "exit", "F": "flatten"}
+
+
+def kavach_orders_card(s, now=None):
+    """Today's order record (orders.py): every real order the bot asked for and what became of it. Read-only."""
+    import datetime as dt
+    import orders
+    if s.get("mode") != "live":
+        return ""
+    now = now or dt.datetime.now(dt.timezone(dt.timedelta(hours=5, minutes=30)))
+    latest = orders.Journal("live", now=lambda: now).latest()
+    rows = []
+    for tag, o in sorted(latest.items(), key=lambda kv: str(kv[1].get("at") or ""), reverse=True)[:40]:
+        st = str(o.get("status") or "")
+        cls = ("sig" if st == "COMPLETE" else "dn" if st in ("REJECTED", "UNCERTAIN", "NOT SENT") else
+               "in" if st in ("TRIGGER PENDING", "OPEN") else "")
+        fill = (f"{int(o.get('filled') or 0)} @ {_fmt(o.get('avg'))}" if o.get("filled") else "-")
+        rows.append(
+            f"<tr><td class='first' data-label='Time'>{html.escape(str(o.get('at') or '')[11:19])}</td>"
+            f"<td data-label='Order'><b>{html.escape(str(o.get('symbol') or '?'))}</b> "
+            f"{html.escape(str(o.get('side') or ''))} {html.escape(str(o.get('qty') or ''))} "
+            f"<span class='muted'>{html.escape(ORDER_ROLE_WORDS.get(str(o.get('role')), 'order'))}</span></td>"
+            f"<td data-label='Status'><span class='st {cls}'>{html.escape(st)}</span></td>"
+            f"<td data-label='Filled' class='r'>{fill}</td>"
+            f"<td data-label='Note' style='white-space:normal' class='muted small'>"
+            f"{html.escape(str(o.get('note') or o.get('order_id') or ''))}</td></tr>")
+    table = (f"<table class='rt'><tr><th>Last change</th><th>Order</th><th>Status</th><th class='r'>Filled</th>"
+             f"<th>Zerodha order / note</th></tr>{''.join(rows)}</table>" if rows else
+             "<div class='muted' style='padding:10px 14px'>No real order has been asked for today.</div>")
+    return (f"<section class='card flush' id='orders'><div class='hd'>Order record today <span class='end'>"
+            f"<span class='tag'>{len(latest)} order{'s' if len(latest) != 1 else ''}</span></span></div>{table}"
+            f"<div class='muted small' style='padding:8px 14px 12px'>Each order is written down before it is sent "
+            f"and after every change (data\\orders). Filled quantities come from Zerodha's order status, never "
+            f"from the order id alone.</div></section>")
+
+
+def kavach_feed_card(s):
+    f = s.get("feed") or {}
+    if not f:
+        return ("<section class='card'><div class='hd'>Price feed</div><div class='muted'>The bot records feed "
+                "health each round from its next start (version 2.0). Nothing recorded yet.</div></section>")
+    rows = "".join(f"<tr><td class='first'><b>{html.escape(sym)}</b></td><td style='white-space:normal'>"
+                   f"<span class='st dn'>{html.escape(why)}</span></td></tr>"
+                   for sym, why in sorted((f.get("problems") or {}).items()))
+    rows += "".join(f"<tr><td class='first'><b>{html.escape(sym)}</b></td><td><span class='st dn'>no data this "
+                    f"round</span></td></tr>" for sym in f.get("errors") or [])
+    table = (f"<table class='rt'><tr><th>Stock</th><th>Problem (no new entry while it lasts)</th></tr>{rows}</table>"
+             if rows else "<div class='muted' style='padding:10px 14px'>No data problems this round.</div>")
+    return (f"<section class='card flush' id='feed'><div class='hd'>Price feed <span class='end'><span class='tag'>"
+            f"checked {html.escape(str(f.get('checked_at') or '')[11:19])}</span></span></div>"
+            f"<div style='padding:10px 14px'>{feed_line(s)}</div>{table}</section>")
+
+
+def render_kavach():
+    """Kavach: the limits in force, how much of today's limits is used, the checks every entry passes, what was
+    refused today and why, and the price feed's health. Read-only: nothing here changes a limit."""
+    import kavach
+    s = read_status()
+    lim = kavach.limits()
+    loose = {x["name"] for x in kavach.looser_than_default()}
+    rows = "".join(
+        f"<tr><td class='first' data-label='Limit' style='white-space:normal'><b>{html.escape(x['what'])}</b>"
+        f"<div class='muted small'>{x['name']}</div></td>"
+        f"<td data-label='Now' class='r'><b>{x['value']:g}</b></td>"
+        f"<td data-label='Built-in' class='r'>{x['default']:g}</td>"
+        f"<td data-label='Status'>" + (
+            "<span class='st dn'>LOOSER than built-in</span>" if x["name"] in loose else
+            "<span class='st'>changed (stricter)</span>" if x["changed"] else "<span class='st in'>as built</span>")
+        + "</td></tr>" for x in lim)
+    warn = (f"<div class='banner' role='alert' style='border-color:var(--dn)'><b>{len(loose)} limit(s) are set looser "
+            f"than the built-in value:</b> {html.escape(', '.join(sorted(loose)))}. They come from Windows settings "
+            f"(environment variables); remove them there to go back to the built-in values.</div>" if loose else "")
+    eq = s.get("equity")
+    notional = sum(float(p.get("entry") or 0) * float(p.get("qty") or 0) for p in s.get("positions") or [])
+    n_pos = len(s.get("positions") or [])
+    streak = int(s.get("loss_streak") or 0)
+    usage = (_limits_kpis(s)
+             + _kpi("Open positions", f"{n_pos} <small>of {C.MAX_OPEN_POSITIONS}</small>",
+                    _meter(n_pos / C.MAX_OPEN_POSITIONS * 100) if C.MAX_OPEN_POSITIONS else "")
+             + _kpi("In the market", (f"{notional / float(eq) * 100:.0f}% <small>of {C.MAX_EXPOSURE_PCT:g}%</small>"
+                                      if eq else "-"),
+                    _meter(notional / float(eq) * 100 / C.MAX_EXPOSURE_PCT * 100) if eq else "")
+             + _kpi("Losses in a row", f"{streak} <small>of {C.LOSS_STREAK_LIMIT}</small>",
+                    _meter(streak / C.LOSS_STREAK_LIMIT * 100) if C.LOSS_STREAK_LIMIT else ""))
+    if eq:
+        usage += _kpi("Risk per trade now", _inr(float(eq) * C.RISK_PER_TRADE_PCT / 100),
+                      f"{C.RISK_PER_TRADE_PCT:g}% of {_inr(eq)}")
+    checks = "".join(f"<li><b>{i}. {name}</b>: {html.escape(what)}</li>" for i, (name, what) in enumerate(KAVACH_CHECKS, 1))
+    cooldown = active_cooldown(s)
+    cool = (f"<div class='banner' role='status'><b>Cool-down:</b> no new trades until {html.escape(str(cooldown))} "
+            f"after {C.LOSS_STREAK_LIMIT} losses in a row.</div>" if cooldown else "")
+    body = f"""
+<div class="page-head"><h1>🛡 Kavach <span class="tag">risk controls</span></h1>
+<span class="sub">One set of checks decides every new position, in paper, real money and backtests alike ·
+read-only</span></div>
+{mode_chips(s)}{warn}{cool}
+<div class="kgrid">{usage}</div>
+{live_signals(s)}
+{kavach_feed_card(s)}
+{kavach_zerodha_card(s)}
+{kavach_orders_card(s)}
+<section class="card flush"><div class="hd">Limits in force</div>
+<table class="rt"><tr><th>Limit</th><th class="r">Now</th><th class="r">Built-in</th><th>Status</th></tr>{rows}</table>
+<div class="muted small" style="padding:8px 14px 12px">A limit can be changed only in the bot's own settings, never
+from this page. "Looser" means a larger risk than the built-in value.</div></section>
+<details class="card" open><summary>The nine checks every entry passes, in order</summary>
+<ol style="margin:6px 0 0 4px;padding-left:18px;line-height:1.6;list-style:none">{checks}</ol>
+<div class="muted small" style="margin-top:8px">The first check that fails stops the trade and names the rule in
+"Today's signals". A stop-loss limits the planned loss; it cannot guarantee the price it fills at.</div></details>"""
+    return page("Kavach", "/kavach", body)
+
+
+READY_WORDS = {"pass": ("✓ PASS", "in"), "fail": ("✕ FAIL", "dn"), "open": ("• OPEN", "")}
+
+
+def render_readiness():
+    """The production-readiness result saved by readiness.py: three verdicts with their reasons, every
+    requirement with its tests, the paper replay and what is known about the rules. Read-only."""
+    import readiness
+    r = readiness.latest()
+    head = ("<div class='page-head'><h1>📋 Readiness <span class='tag'>from evidence</span></h1><span class='sub'>"
+            "What the tests, the paper replay and the running system show · read-only</span></div>"
+            "<div class='banner' role='note'><b>How to read this.</b> Three separate questions, each answered by a "
+            "rule fixed in advance. It states what the evidence shows; it is not advice on whether to trade.</div>")
+    if not r:
+        return page("Readiness", "/kavach", head + "<p class='muted'>No result is saved yet. Run "
+                    "<code>.venv\\Scripts\\python.exe readiness.py run</code> (about 4 minutes).</p>")
+    v, t = r["verdicts"], r["tests"]
+    names = {"platform": ("Platform", "Is the software safe and correct?"),
+             "strategy": ("Strategy", "Do the trading rules have a proven edge?"),
+             "operations": ("Operations", "What is still open?")}
+    cards = ""
+    for k in ("platform", "strategy", "operations"):
+        word, cls = READY_WORDS[v[k]["state"]]
+        reasons = "".join(f"<li><span class='st {READY_WORDS[s][1]}'>{READY_WORDS[s][0]}</span> {html.escape(text)}</li>"
+                          for s, text in v[k]["reasons"])
+        cards += (f"<section class='card'><div class='hd'>{names[k][0]} <span class='muted small'>{names[k][1]}</span>"
+                  f"<span class='end'><span class='st {cls}'>{word}</span></span></div>"
+                  f"<div class='small'><b>{html.escape(readiness.HEADLINES[(k, v[k]['state'])])}</b></div>"
+                  f"<ul class='small' style='margin:8px 0 0 0;padding:0;list-style:none;line-height:1.9'>{reasons}</ul>"
+                  f"</section>")
+    reqs = "".join(
+        f"<tr><td class='first' data-label='No.'>{x['id']}</td><td data-label='Area'>{html.escape(x['area'])}</td>"
+        f"<td data-label='Requirement' style='white-space:normal'>{html.escape(x['text'])}</td>"
+        f"<td data-label='Tests passed' class='r'>{x['passed']}"
+        + (f" <b class='dn'>({x['failed']} failed)</b>" if x["failed"] else "") + "</td>"
+        f"<td data-label='Result'><span class='st {READY_WORDS[x['state']][1]}'>{READY_WORDS[x['state']][0]}</span></td></tr>"
+        for x in r["requirements"])
+    rp = r.get("replay")
+    if rp:
+        c = rp["compare"]
+        replay = (f"<div class='small' style='padding:8px 14px 12px'>The real trading loop was driven through "
+                  f"<b>{rp['days'][2]}</b> archived days ({rp['days'][0]} to {rp['days'][1]}, {rp['rounds']} rounds) "
+                  f"on virtual money and compared with the backtest of the same days. Trades: loop "
+                  f"<b>{c['loop_trades']}</b>, backtest <b>{c['backtest_trades']}</b>; the same trade in both: "
+                  f"<b>{c['same_trade']}</b> ({c['agreement_pct']:.1f}%); same quantity {c['same_quantity']}, same "
+                  f"exit reason {c['same_exit_reason']}. Net: loop {_inr(c['loop_net'], True)}, backtest "
+                  f"{_inr(c['backtest_net'], True)}. Rounds with an error: {len(rp.get('errors') or [])}. A replay "
+                  f"cannot show real fills, a broker outage or live price delays.</div>")
+    else:
+        replay = ("<p class='muted small' style='padding:8px 14px 12px'>Not run. <code>paper_replay.py --out "
+                  "data\\paper_replay.json</code></p>")
+    lab = "".join(
+        f"<tr><td class='first' data-label='Idea'>{html.escape(str(x['strategy']))}</td>"
+        f"<td data-label='Walk-forward trades' class='r'>{x['trades'] if x['trades'] is not None else '-'}</td>"
+        f"<td data-label='Average R' class='r'>{format(x['avg_r'], '+.2f') if x.get('avg_r') is not None else '-'}</td>"
+        f"<td data-label='Verdict'>{html.escape(str(x['verdict']))}</td></tr>" for x in r["strategy"].get("lab") or [])
+    rules = "".join(
+        f"<tr><td class='first' data-label='Rule' style='white-space:normal'><b>{html.escape(c['name'])}</b></td>"
+        f"<td data-label='How the bot stands' style='white-space:normal'>{html.escape(c['text'])}</td>"
+        f"<td data-label='Checked'>{html.escape(c['checked']) if c['checked'] else '<span class=\'st dn\'>not yet</span>'}</td></tr>"
+        for c in r["compliance"])
+    body = f"""{head}
+<div class="muted small" style="margin:0 0 10px">Built {html.escape(str(r['built'])[:16].replace('T', ' '))} ·
+code {html.escape(str((r['state'].get('git') or {}).get('version')))} · tests: {t['passed']} passed, {t['failed']} failed,
+{t['skipped']} skipped · the same report as a file: docs\\PRODUCTION-READINESS.md · refresh with
+<code>readiness.py run</code></div>
+{cards}
+<section class="card flush"><div class="hd">Requirements and the tests that prove them</div>
+<table class="rt"><tr><th>No.</th><th>Area</th><th>Requirement</th><th class="r">Tests passed</th><th>Result</th></tr>{reqs}</table></section>
+<section class="card flush"><div class="hd">Paper replay of the trading loop</div>{replay}</section>
+<section class="card flush"><div class="hd">Ideas tested in the lab</div>
+<table class="rt"><tr><th>Idea</th><th class="r">Walk-forward trades</th><th class="r">Average R</th><th>Verdict</th></tr>{lab}</table>
+<div class="muted small" style="padding:8px 14px 12px">Details in <a href="/yantrashala">Yantrashala</a> and the
+<a href="/backtest">one-year backtest</a>. Thirty real trades are an early checkpoint, not proof.</div></section>
+<section class="card flush"><div class="hd">Rules for trading through the Kite API</div>
+<table class="rt"><tr><th>Rule</th><th>How the bot stands</th><th>Checked</th></tr>{rules}</table></section>"""
+    return page("Readiness", "/kavach", body)
+
+
+def bakhar_tabs(active):
+    """The two parts of the Bakhar tab: one day replayed (the session review) and the whole year backtested."""
+    parts = (("/review", "One day · session review"), ("/backtest", "One year · backtest"))
+    return ("<div class='seg' role='group' aria-label='Review or backtest' style='margin-bottom:10px'>"
+            + "".join(f"<a class='{'on' if p == active else ''}' href='{p}'"
+                      f"{' aria-current=' + chr(39) + 'true' + chr(39) if p == active else ''}>{label}</a>"
+                      for p, label in parts) + "</div>")
+
+
+def render_backtest():
+    """The bot's present rules over every archived day, run as a background job by the same engine as every other
+    backtest. Read-only apart from its own two result files."""
+    import bakhar
+    r = bakhar.latest()
+    fresh = bakhar.status(r)
+    note = job_strip("bakhar", r, fresh, "/backtest?refresh=1", "steps")
+    head = (f"{bakhar_tabs('/backtest')}<div class='page-head'><h1>{T.FIRE} {T.term('backtest')} "
+            f"<span class='tag'>one year</span></h1><span class='sub'>The bot's present rules over every day in the "
+            f"candle archive · same fills, Kavach checks and charges as the bot · read-only</span></div>")
+    run = ("<form method='get' action='/backtest' style='margin:0 0 12px'><input type='hidden' name='refresh' "
+           "value='1'><button class='ghost'>▶ Run the backtest now</button> <span class='muted small'>takes about "
+           "10 seconds; it never touches the bot</span></form>")
+    if not r:
+        return page("Backtest", "/backtest", head + note + run + "<p class='muted'>No run is saved yet. Press Run; "
+                    "the result appears here by itself.</p>")
+    res, rng, arc = r["result"], r["range"], r["archive"]
+    net = res.get("net_pnl") or 0.0
+    lost = net < 0
+    proven = rng.get("r_low") is not None and (rng["r_high"] < 0 or rng["r_low"] > 0)
+    verdict = (
+        f"<div class='banner' role='note' style='border-color:var(--{'dn' if lost else 'warn'})'><b>"
+        + (f"Over this period these rules lost {_inr(-net)} ({res.get('return_pct'):+.2f}%) on {_inr(r['start_cash'])}, "
+           f"after {_inr(res.get('charges'))} of charges." if lost else
+           f"Over this period these rules made {_inr(net)} ({res.get('return_pct'):+.2f}%) on {_inr(r['start_cash'])}, "
+           f"after {_inr(res.get('charges'))} of charges.")
+        + f"</b> Simply holding the same stocks returned {res.get('buy_hold_pct'):+.2f}%. "
+        + (f"The average trade was {rng['avg_r']:+.2f}R, and the range that chance alone allows "
+           f"({rng['r_low']:+.2f} to {rng['r_high']:+.2f}) "
+           + ("is entirely below zero: the loss is not bad luck." if rng["r_high"] < 0 else
+              "is entirely above zero." if proven else "includes zero: this proves nothing either way.")
+           if rng.get("avg_r") is not None else "")
+        + " A past result is not a forecast.</div>")
+    kp = (_kpi("Period", f"{arc['from']} → {arc['to']}", f"{arc['days']} trading days · {len(arc['stocks'])} stocks")
+          + _kpi("Months that made money", f"{rng.get('months_positive')} <small>of {rng.get('months')}</small>")
+          + _kpi("Profit factor", _fmt(res.get("profit_factor")), "money won ÷ money lost; above 1 makes money")
+          + _kpi("Largest fall from a high", f"{_fmt(res.get('max_dd_pct'))}%", _inr(rng.get("max_drawdown"))))
+    rows = trade_rows(bakhar.NAME)
+    stale = ("" if not fresh["stale"] else f"<div class='banner' role='status'><b>This run is out of date:</b> "
+             f"{html.escape(fresh['why'])}. Press Run to bring it up to date.</div>")
+    foot = ("<div class='muted small' style='margin:10px 0'>How it is run: entries at the next candle's open after "
+            "a signal, with slippage and Zerodha's charges; position sizes and refusals come from Kavach, as in "
+            "live trading. It cannot show what a real order book would have filled, or a broker outage. The four "
+            "context columns of the trade list (range width, VWAP distance, index and gap) are left empty by this "
+            "fast run. Testing new ideas belongs in <a href='/yantrashala'>Yantrashala</a>.</div>")
+    body = (f"{head}{note}{stale}{verdict}<div class='kgrid'>{kp}</div>{run}"
+            + trade_section(rows, bakhar.NAME, "Backtest", r["start_cash"]) + foot)
+    return page("Backtest", "/backtest", f"<style>{TRADES_CSS}</style>" + body)
+
+
+# the pages' Swarajya names typed as addresses lead to the page
+PAGE_ALIASES = {"/gad": "/", "/daftar": "/trades", "/bakhar": "/review", "/buruj": "/scanner", "/buruj-watch": "/scanner"}
+
+CHECK_WORDS = {"for": ("agrees", "sig"), "against": ("disagrees", "dn"), "neutral": ("says nothing", ""),
+               "n/a": ("not available", "")}
+
+
+def _chanakya_details(a):
+    """One stock's full picture: every check with its measured value, the plan, Kavach's answer, the record."""
+    rows = "".join(
+        f"<tr><td class='first' data-label='Check'><b>{html.escape(c['name'])}</b></td>"
+        f"<td data-label='Says'><span class='st {CHECK_WORDS[c['state']][1]}'>{CHECK_WORDS[c['state']][0]}</span></td>"
+        f"<td data-label='Measured' style='white-space:normal'>{html.escape(str(c['value']))}</td>"
+        f"<td data-label='What it means' style='white-space:normal' class='muted small'>{html.escape(c['why'])}</td></tr>"
+        for c in a["checks"])
+    p = a.get("plan") or {}
+    plan = ""
+    if p:
+        bits = [f"entry about <b>{_fmt(p['entry'])}</b>", f"stop <b>{_fmt(p['stop'])}</b> ({_fmt(p['risk_per_share'])} a share)",
+                f"2R reference {_fmt(p['reference_2r'])}"]
+        if p.get("qty"):
+            bits += [f"<b>{p['qty']}</b> share(s) = {_inr(p['value'])}", f"at risk {_inr(p['risk'])}",
+                     f"charges {_inr(p['charges'])} + slippage {_inr(p['slippage'])}"]
+        plan = (f"<div class='small' style='padding:8px 14px'><b>The plan the bot would use:</b> {' · '.join(bits)}. "
+                f"Target: {html.escape(str(p.get('target')))}. A stop limits the planned loss; it cannot guarantee "
+                f"the price it fills at.</div>")
+    return (f"<details class='card flush' id='c-{html.escape(a['symbol'])}'><summary><b>{html.escape(a['symbol'])}</b> · "
+            f"{html.escape(a['setup'])} · {a['score']} of {a['of']} agree, {a['against']} disagree</summary>"
+            f"<div style='padding:8px 14px'>{html.escape(a['summary'])}</div>{plan}"
+            f"<table class='rt'><tr><th>Check</th><th>Says</th><th>Measured</th><th>What it means</th></tr>{rows}</table>"
+            f"</details>")
+
+
+def render_chanakya():
+    """Chanakya: for every watchlist stock, what speaks for and against a trade right now, from measured facts.
+    Read-only. It draws from the saved result and rebuilds in the background; it never touches the broker."""
+    import chanakya
+    r = chanakya.latest()
+    fresh = chanakya.status(r)
+    if fresh["stale"]:
+        auto_start("chanakya")
+    note = job_strip("chanakya", r, fresh, "/chanakya?refresh=1", "steps")
+    head = (f"<div class='page-head'><h1>🧭 Chanakya <span class='tag'>research assistant</span></h1>"
+            f"<span class='sub'>What speaks for and against each stock right now, from measured facts · read-only"
+            f"</span></div>"
+            f"<div class='banner' role='note'><b>How to read this.</b> The score is a count of checks that agree, "
+            f"not a probability and not advice. Chanakya cannot place an order and cannot overrule Kavach. "
+            f"The past record is shown with its sample size, and says so when it proves nothing.</div>")
+    if not r:
+        return page("Chanakya", "/chanakya", head + note + "<p class='muted'>The first assessment appears here when it has "
+                    "been built. The page updates by itself.</p>")
+    rec = (r.get("record") or {}).get("ALL") or {}
+    period = (r.get("record") or {}).get("period") or ["", ""]
+    record = ""
+    if rec.get("trades"):
+        losing = rec["r_high"] < 0
+        record = (f"<div class='banner' role='note' style='border-color:var(--{'dn' if losing else 'warn'})'>"
+                  f"<b>The record of the bot's rules:</b> {rec['trades']} trades from {html.escape(str(period[0]))} to "
+                  f"{html.escape(str(period[1]))}, average {rec['avg_r']:+.2f}R a trade after charges "
+                  f"(range {rec['r_low']:+.2f} to {rec['r_high']:+.2f}), net {_inr(rec['net'], True)} on ₹1,00,000. "
+                  + ("<b>Over that year these rules lost money.</b> A high count of agreeing checks below does not "
+                     "change that." if losing else "") + "</div>")
+    elif (r.get("record") or {}).get("error"):
+        record = (f"<div class='banner' role='note'>The past record could not be worked out "
+                  f"({html.escape(str(r['record']['error']))}).</div>")
+    rows = []
+    for a in r.get("rows", []):
+        k = a.get("kavach") or {}
+        h = a.get("history") or {}
+        kav = ("-" if not k else f"<span class='st sig'>allowed, {k['qty']}</span>" if k.get("ok") else
+               f"<span class='st dn'>refused</span> <span class='muted small'>{html.escape(str(k.get('reason')))}</span>")
+        past = (f"{h['trades']} trades, {h['avg_r']:+.2f}R <span class='muted small'>({h['r_low']:+.2f} to "
+                f"{h['r_high']:+.2f})</span>" if h.get("trades") else "<span class='muted'>none</span>")
+        score = (f"<b>{a['score']}</b> of {a['of']} agree · {a['against']} disagree" if a.get("direction") else
+                 "<span class='muted'>no setup</span>")
+        rows.append(
+            f"<tr><td class='first' data-label='Stock'><a href='#c-{html.escape(a['symbol'])}'><b>"
+            f"{html.escape(a['symbol'])}</b></a></td>"
+            f"<td data-label='Now' style='white-space:normal'>{html.escape(a['setup'])}</td>"
+            f"<td data-label='Checks'>{score}</td>"
+            f"<td data-label='Kavach' style='white-space:normal'>{kav}</td>"
+            f"<td data-label='Past record'>{past}</td>"
+            f"<td data-label=\"Bot's rule\" style='white-space:normal' class='muted small'>"
+            f"{html.escape(str(a.get('bot_rule') or ''))}</td></tr>")
+    errs = r.get("errors") or {}
+    err = (f"<div class='banner' role='note'>No data for {len(errs)} stock(s): "
+           f"{html.escape(', '.join(sorted(errs)))}</div>" if errs else "")
+    details = "".join(_chanakya_details(a) for a in r.get("rows", []) if a.get("direction"))
+    quiet = [a for a in r.get("rows", []) if not a.get("direction")]
+    quiet_txt = (f"<section class='card'><div class='hd'>No setup right now</div><ul class='small' "
+                 f"style='margin:0 0 0 18px;padding:0'>"
+                 + "".join(f"<li>{html.escape(a['summary'] or a['symbol'] + ': ' + a['setup'])}</li>" for a in quiet)
+                 + "</ul></section>" if quiet else "")
+    body = f"""{head}{note}{record}{err}
+<section class="card flush"><div class="hd">Ranking <span class="muted small">most agreeing checks first ·
+as of {html.escape(str(r.get('as_of') or '')[11:16])} · account {_inr(r.get('equity'))} ({html.escape(str(r.get('mode')))})</span>
+<span class="end"><form method="get" action="/chanakya" style="margin:0"><input type="hidden" name="refresh" value="1">
+<button class="ghost small">↻ Rebuild</button></form></span></div>
+<table class="rt"><tr><th>Stock</th><th>Now</th><th>Checks</th><th>Kavach</th><th>Past record (this stock and direction)</th>
+<th>Bot's rule on this candle</th></tr>{''.join(rows)}</table></section>
+{details}{quiet_txt}"""
+    return page("Chanakya", "/chanakya", body)
+
+
+def _pct(v, nd=1, signed=False):
+    return "-" if v is None else f"{v:+.{nd}f}%" if signed else f"{v:.{nd}f}%"
+
+
+def _rajya_rebalance(alloc, view, q):
+    """The rebalancing SIMULATION: arithmetic on a rule the user picks. The form is a plain GET; nothing is ordered."""
+    import rajya
+    rule = "equal" if (q.get("rule") or ["cap"])[0] == "equal" else "cap"
+    try:
+        cap = min(100.0, max(1.0, float((q.get("cap") or [C.MAX_POSITION_PCT])[0])))
+    except ValueError:
+        cap = float(C.MAX_POSITION_PCT)
+    sim = rajya.rebalance(alloc, rule, cap)
+    form = (f"<form method='get' action='/rajya' class='small' style='padding:8px 14px;display:flex;gap:10px;"
+            f"flex-wrap:wrap;align-items:center'><input type='hidden' name='view' value='{view}'>"
+            f"<label>Rule <select name='rule'><option value='cap'{' selected' if rule == 'cap' else ''}>No holding "
+            f"above a share of the account</option><option value='equal'{' selected' if rule == 'equal' else ''}>"
+            f"Every holding the same size</option></select></label>"
+            f"<label>Share limit % <input type='number' name='cap' min='1' max='100' step='1' value='{cap:g}' "
+            f"style='width:5em'></label><button class='ghost small'>Work it out</button></form>")
+    note = ("<div class='banner' role='note' style='margin:8px 14px'><b>Simulation only.</b> Rajya cannot place "
+            "orders. These rows are arithmetic on the rule you chose, not advice; nothing changes in your account "
+            "unless you decide to and place the orders yourself in Kite. Selling can create a tax bill, which is "
+            "not estimated here.</div>")
+    if not sim["holdings"]:
+        table = ("<p class='muted small' style='padding:0 14px 12px'>There are no delivery holdings to rebalance. "
+                 "The bot's intraday positions are closed the same day and are left out.</p>")
+    elif not sim["trades"]:
+        table = (f"<p class='small' style='padding:0 14px 12px'>Nothing to change: "
+                 + (f"no holding is above {cap:g}% of the account." if rule == "cap" else
+                    "the holdings are already as equal as whole shares allow.") + "</p>")
+    else:
+        rows = "".join(
+            f"<tr><td class='first' data-label='Stock'><b>{html.escape(t['symbol'])}</b></td>"
+            f"<td data-label='Would'>{'sell' if t['action'] == 'SELL' else 'buy'} {t['qty']}</td>"
+            f"<td data-label='Value' class='r'>{_inr(t['value'])}</td>"
+            f"<td data-label='Share before' class='r'>{_pct(t['before_pct'])}</td>"
+            f"<td data-label='Share after' class='r'>{_pct(t['after_pct'])}</td>"
+            f"<td data-label='Est. charges' class='r'>{_inr(t['charges'])}</td></tr>" for t in sim["trades"])
+        table = (f"<table class='rt'><tr><th>Stock</th><th>Would</th><th class='r'>Value</th><th class='r'>Share "
+                 f"before</th><th class='r'>Share after</th><th class='r'>Est. charges</th></tr>{rows}</table>"
+                 f"<div class='small' style='padding:8px 14px 12px'>Sold {_inr(sim['sold'])} · bought "
+                 f"{_inr(sim['bought'])} · estimated charges {_inr(sim['charges'])} · cash would change by "
+                 f"{_inr(sim['cash_change'], True)}. Prices are the last ones read; real fills differ.</div>")
+    return (f"<section class='card flush' id='rebalance'><div class='hd'>Rebalancing simulation <span class='muted "
+            f"small'>delivery holdings only · nothing is ordered</span></div>{note}{form}{table}</section>")
+
+
+def render_rajya(q=None):
+    """Rajya: the whole account measured (allocation, concentration, risk budget, past movement, correlation,
+    what-if arithmetic, rebalancing simulation). Read-only: the view only chooses which account is shown."""
+    import rajya
+    q = q or {}
+    s = read_status()
+    view = current_view(q, s)
+    r = rajya.latest(view)
+    fresh = rajya.status(r)
+    if fresh["stale"]:
+        auto_start("rajya", view)
+    note = job_strip("rajya", r, fresh, f"/rajya?view={view}&refresh=1", "steps")
+    head = (f"<div class='page-head'><h1>🏛 Rajya <span class='tag'>portfolio</span></h1>"
+            f"<span class='sub'>Everything in the account, measured · read-only</span></div>"
+            f"{view_switch('/rajya', view, s)}{view_banner(view, s)}"
+            f"<div class='banner' role='note'><b>How to read this.</b> Rajya measures what is already in the "
+            f"account. It is not advice, names nothing to buy and cannot place an order. Figures from past prices "
+            f"describe the past year; they are not forecasts, and real falls can be larger.</div>")
+    if not r:
+        return page("Rajya", "/rajya", head + note + "<p class='muted'>The first picture appears here when it has been "
+                    "built. The page updates by itself.</p>")
+    if r.get("error"):
+        url = login_url() if r.get("login_needed") else ""
+        login = f" <a class='btn' href='{html.escape(url)}'>Log in to Zerodha</a>" if url else ""
+        return page("Rajya", "/rajya", head + note + f"<div class='banner' role='alert'><b>The account could not be read."
+                    f"</b> {html.escape(str(r['error']))}{login}</div>")
+    a, c, b, h, rec = r["allocation"], r["concentration"], r["budget"], r["history"], r["record"]
+    warn = "".join(f"<div class='banner' role='status'>{html.escape(w)}</div>" for w in r.get("warnings") or [])
+    kp = (_kpi("Whole account", _inr(a["total"]), "cash side + delivery holdings")
+          + _kpi("Cash side", _inr(a["cash_equity"]), "cash with today's intraday result")
+          + _kpi("Delivery holdings", _inr(a["holdings_value"]),
+                 "your own sleeve" if r.get("holdings_known") else "could not be read")
+          + _kpi("In intraday positions", _inr(a["intraday_value"]), "the bot's sleeve")
+          + _kpi("Today so far", _pl(b["day_pnl"]), "Zerodha's figure, before charges" if view == "zerodha" else
+                 "booked today after charges, plus open positions")
+          + _kpi("Booked by the bot", _pl(rec["net"]),
+                 f"{rec['trades']} trade(s) after {_inr(rec['charges'])} charges" if rec["trades"] else "no closed trade yet"))
+    lev = ("<div class='banner' role='status'>Intraday positions are larger than the cash behind them: the "
+           "difference is intraday margin (borrowed for the day).</div>" if a.get("leveraged") else "")
+    rows = "".join(
+        f"<tr><td class='first' data-label='Stock'><b>{html.escape(str(x['symbol']))}</b> "
+        f"<span class='muted small'>{x['direction'].lower()}</span></td>"
+        f"<td data-label='Sleeve'>{'intraday · ' + ('the bot' if x['owner'] == 'bot' else 'not the bot') if x['sleeve'] == 'intraday' else 'delivery · yours'}</td>"
+        f"<td data-label='Sector'>{html.escape(x['sector'])}</td><td data-label='Qty' class='r'>{x['qty']}</td>"
+        f"<td data-label='Value' class='r'>{_inr(x['value'])}</td>"
+        f"<td data-label='Share of account' class='r'>{_pct(x['pct'])}</td>"
+        f"<td data-label='P&amp;L' class='r'>{_pl(x['pnl'])}</td></tr>" for x in a["rows"])
+    alloc = (f"<table class='rt'><tr><th>Stock</th><th>Sleeve</th><th>Sector</th><th class='r'>Qty</th>"
+             f"<th class='r'>Value</th><th class='r'>Share of account</th><th class='r'>P&amp;L</th></tr>{rows}</table>"
+             if rows else "<p class='muted small' style='padding:8px 14px'>Nothing is held right now: the whole "
+             "account is cash.</p>")
+
+    def split(title, parts):
+        cells = "".join(f"<tr><td class='first' data-label='{title}'>{html.escape(p['name'])}</td>"
+                        f"<td data-label='Value' class='r'>{_inr(p['value'])}</td>"
+                        f"<td data-label='Share' class='r'>{_pct(p['pct'])}</td></tr>" for p in parts)
+        return f"<table class='rt'><tr><th>{title}</th><th class='r'>Value</th><th class='r'>Share</th></tr>{cells}</table>"
+
+    if c.get("positions"):
+        over = (f" <b class='dn'>Above the {c['limit_pct']:g}% the bot allows itself per stock: "
+                f"{html.escape(', '.join(c['over_limit']))}.</b>" if c["over_limit"] else "")
+        conc = (f"Largest position <b>{html.escape(str(c['largest']))}</b> is {_pct(c['largest_pct'])} of the account; "
+                f"the largest three are {_pct(c['top3_pct'])}. By size, the {c['positions']} position(s) count as "
+                f"<b>{c['effective']:.1f}</b> equal-sized one(s).{over}")
+    else:
+        conc = "No position, so nothing is concentrated."
+    stops = "".join(
+        f"<tr><td class='first' data-label='Stock'><b>{html.escape(str(x['symbol']))}</b></td>"
+        f"<td data-label='Stop' class='r'>{_fmt(x['stop']) if x['stop'] else '<span class=\'st dn\'>no stop</span>'}</td>"
+        f"<td data-label='At risk to the stop' class='r'>{_inr(x['risk']) if x['risk'] is not None else 'whole value ' + _inr(x['value'])}</td></tr>"
+        for x in b["rows"])
+    budget = (
+        "<div class='kgrid'>"
+        + _kpi("At risk to stops", _inr(b["at_risk"]), f"{_pct(b['at_risk_pct'], 2)} of the bot's {_inr(b.get('base'))}")
+        + _kpi("Daily loss limit left", _inr(b["day_left"]),
+               (_meter((b["day_limit"] - b["day_left"]) / b["day_limit"] * 100) if b["day_limit"] else "")
+               + f"of today's {_inr(b['day_limit'])}")
+        + _kpi("In the market", f"{_pct(b['exposure_pct'], 0)} <small>of {b['exposure_limit_pct']:g}%</small>",
+               _meter((b["exposure_pct"] or 0) / b["exposure_limit_pct"] * 100) if b["exposure_limit_pct"] else "")
+        + _kpi("Open intraday positions", f"{b['open']} <small>of {b['open_limit']}</small>")
+        + _kpi("If every stop is hit today", _pl(b["worst_today"]), "today's result, stops and exit charges")
+        + "</div>"
+        + (f"<table class='rt'><tr><th>Stock</th><th class='r'>Stop</th><th class='r'>At risk to the stop</th></tr>"
+           f"{stops}</table>" if stops else "")
+        + (f"<div class='banner' role='status' style='margin:8px 14px'><b>No stop is known for: "
+           f"{html.escape(', '.join(b['no_stop']))}.</b> Rajya only knows the bot's own stops; a holding without "
+           f"one is exposed for its whole value.</div>" if b["no_stop"] else "")
+        + "<div class='muted small' style='padding:8px 14px 12px'>Limits are Kavach's and are worked out on the "
+          "balance the bot trades from. A stop limits the planned loss; a gap can fill beyond it.</div>")
+    per = "".join(
+        f"<tr><td class='first' data-label='Stock'><b>{html.escape(str(p['symbol']))}</b></td>"
+        + (f"<td data-label='Usual daily move' class='r'>{_pct(p['vol_day_pct'], 2)}</td>"
+           f"<td data-label='Over a year' class='r'>{_pct(p['vol_year_pct'], 0)}</td>"
+           f"<td data-label='Moves with NIFTY' class='r'>{'-' if p['beta'] is None else format(p['beta'], '.2f') + 'x'}</td>"
+           f"<td data-label='1 day in 20 lost more than' class='r'>{_inr(p['move_1in20'])}</td>"
+           if p["covered"] else "<td colspan='4' class='muted'>no price history found</td>") + "</tr>"
+        for p in h["per"])
+    mix = h.get("mix")
+    mix_txt = (f"<div class='small' style='padding:8px 14px 12px'><b>Today's positions, replayed over "
+               f"{mix['days']} past trading days</b> ({mix['from']} to {mix['to']}): a usual day moved the account by "
+               f"{_inr(mix['vol_day'])} ({_pct(mix['vol_day_pct'], 2)}); on 1 day in 20 it lost more than "
+               f"{_inr(mix['loss_1in20'])}; the worst day ({mix['worst_day']}) was {_inr(mix['worst_move'], True)}; "
+               f"held unchanged, the largest fall from a high was {_inr(mix['drawdown'])} "
+               f"({_pct(mix['drawdown_pct'], 1)}). Past movement, not a forecast."
+               + (f" <b>Left out, no price history: {html.escape(', '.join(mix['left_out']))}.</b>"
+                  if mix.get("left_out") else "") + "</div>" if mix else
+               "<p class='muted small' style='padding:8px 14px 12px'>Not enough price history to replay this mix.</p>")
+    moves = (f"<table class='rt'><tr><th>Stock</th><th class='r'>Usual daily move</th><th class='r'>Over a year</th>"
+             f"<th class='r'>Moves with NIFTY</th><th class='r'>1 day in 20 lost more than</th></tr>{per}</table>{mix_txt}"
+             if per else "<p class='muted small' style='padding:8px 14px 12px'>Nothing is held, so there is nothing "
+             "to measure.</p>")
+    if h["pairs"]:
+        prs = "".join(
+            f"<tr><td class='first' data-label='Pair'><b>{html.escape(p['a'])}</b> and <b>{html.escape(p['b'])}</b></td>"
+            f"<td data-label='Moved together' class='r'>{p['corr']:+.2f}</td>"
+            f"<td data-label='Reading'>{'<span class=\'st dn\'>close to one bet</span>' if p['high'] else '<span class=\'st in\'>separate enough</span>'}</td></tr>"
+            for p in h["pairs"][:15])
+        corr = (f"<table class='rt'><tr><th>Pair</th><th class='r'>Moved together</th><th>Reading</th></tr>{prs}</table>"
+                f"<div class='muted small' style='padding:8px 14px 12px'>+1 means the two always moved together, 0 "
+                f"not at all. At {rajya.CORR_HIGH:g} or more, two positions spread the risk much less than their "
+                f"count suggests. Average of all pairs: {h['avg_corr']:+.2f}.</div>")
+    else:
+        corr = ("<p class='muted small' style='padding:8px 14px 12px'>Correlation needs at least two positions with "
+                "price history.</p>")
+    st_rows = "".join(
+        f"<tr><td class='first' data-label='What if' style='white-space:normal'><b>{html.escape(x['name'])}</b>"
+        f"<div class='muted small'>{html.escape(x['what'])}</div></td>"
+        f"<td data-label='Result' class='r'>{_pl(-x['loss'])}</td>"
+        f"<td data-label='Of the account' class='r'>{_pct(-x['pct'] if x['pct'] is not None else None, 2, True)}</td></tr>"
+        for x in r["stress"])
+    stress = (f"<table class='rt'><tr><th>What if</th><th class='r'>Result</th><th class='r'>Of the account</th></tr>"
+              f"{st_rows}</table><div class='muted small' style='padding:8px 14px 12px'>Each row is one stated "
+              f"assumption applied to today's positions. None is a forecast, and none is a limit on what can happen."
+              f"</div>" if st_rows else "<p class='muted small' style='padding:8px 14px 12px'>Nothing is held, so "
+              "no scenario changes the account.</p>")
+    record = (f"{rec['trades']} closed trade(s) since {html.escape(str(rec['first']))}: {_inr(rec['gross'], True)} "
+              f"before charges, {_inr(rec['charges'])} charges, <b>{_inr(rec['net'], True)}</b> after. Largest fall "
+              f"from a high: {_inr(rec['drawdown'])}; now {_inr(rec['below_high'])} below its high. Today: "
+              f"{rec['today_trades']} closed, {_inr(rec['today_net'], True)}." if rec["trades"] else
+              "No closed trade in this account's log yet, so there is no booked result or drawdown to show.")
+    body = f"""{head}{note}{warn}
+<div class="kgrid">{kp}</div>{lev}
+<section class="card flush"><div class="hd">Where the money is <span class="muted small">as of
+{html.escape(str(r.get('built') or '')[11:16])}</span><span class="end"><a class="btn ghost small"
+href="/rajya?view={view}&amp;refresh=1">↻ Rebuild</a></span></div>{alloc}
+{split('Sleeve', a['by_sleeve'])}{split('Sector', a['by_sector']) if a['by_sector'] else ''}
+<div class="small" style="padding:8px 14px 12px"><b>Concentration.</b> {conc}</div></section>
+<section class="card flush"><div class="hd">Risk budget <span class="muted small">the bot's sleeve against
+Kavach's limits</span></div>{budget}</section>
+<section class="card flush"><div class="hd">How these positions have moved <span class="muted small">daily
+closes, past year</span></div>{moves}</section>
+<section class="card flush"><div class="hd">Do they move together?</div>{corr}</section>
+<section class="card flush"><div class="hd">What-if arithmetic</div>{stress}</section>
+<section class="card"><div class="hd">Booked result and drawdown <span class="muted small">after charges, from
+the trade log</span></div><div class="small">{record}</div></section>
+{_rajya_rebalance(a, view, q)}"""
+    return page("Rajya", "/rajya", body)
+
+
+def _lab_row(label, m, judged=False):
+    if not m or not m.get("trades"):
+        return (f"<tr><td class='first' data-label='Run'>{html.escape(label)}</td>"
+                f"<td colspan='6' class='muted'>no trades</td></tr>")
+    pf = f"{m['profit_factor']:.2f}" if m.get("profit_factor") is not None else "-"
+    return (f"<tr{' class=judged' if judged else ''}><td class='first' data-label='Run' style='white-space:normal'>"
+            f"{'<b>' if judged else ''}{html.escape(label)}{'</b>' if judged else ''}</td>"
+            f"<td data-label='Trades' class='r'>{m['trades']}</td>"
+            f"<td data-label='Wins' class='r'>{m['win_rate']:.0%}</td>"
+            f"<td data-label='Average per trade' class='r {_cls(m['avg_r'])}'>{m['avg_r']:+.2f}R "
+            f"<span class='muted'>({m['r_low']:+.2f} to {m['r_high']:+.2f})</span></td>"
+            f"<td data-label='Profit factor' class='r'>{pf}</td>"
+            f"<td data-label='Net' class='r'>{_pl(m['net'])}</td>"
+            f"<td data-label='Months up' class='r'>{m['months_positive']} of {m['months']}</td></tr>")
+
+
+def render_yantrashala():
+    """Yantrashala, the strategy lab: the saved experiments (yantra.py), newest per strategy, with the rule they
+    were judged by. Read-only: this page runs nothing and changes nothing; the lab never trades."""
+    import yantra
+    exps = yantra.experiments()
+    latest = {}
+    for e in exps:                                   # newest first: keep the first seen per strategy
+        latest.setdefault(e["strategy"], e)
+    cards = []
+    for name, e in sorted(latest.items(), key=lambda kv: (kv[1]["verdict"] != "PASS", kv[0])):
+        rows = "".join(_lab_row(label + " · whole develop period", m) for label, m in e["in_sample"].items())
+        rows += _lab_row("Walk-forward (the part that is judged)", e["walk_forward"], judged=True)
+        ok = e["verdict"] == "PASS"
+        why = "".join(f"<li>{html.escape(w)}</li>" for w in e.get("why") or [])
+        cards.append(
+            f"<section class='card flush'><div class='hd'>{html.escape(name)} <span class='muted small'>"
+            f"{html.escape(e.get('what') or '')}</span><span class='end'><span class='tag {'up' if ok else 'dn'}'>"
+            f"{'PASS: forward-test candidate' if ok else 'FAIL'}</span></span></div>"
+            f"<table class='rt'><tr><th>Run</th><th class='r'>Trades</th><th class='r'>Wins</th>"
+            f"<th class='r'>Average per trade (95% range)</th><th class='r'>Profit factor</th><th class='r'>Net</th>"
+            f"<th class='r'>Months up</th></tr>{rows}</table>"
+            + (f"<ul class='small' style='margin:8px 0 10px 30px;padding:0'>{why}</ul>" if why else "")
+            + f"<div class='muted small' style='padding:0 14px 12px'>{e['variants_tried']} variant(s) tried · "
+              f"{html.escape(e['period'][0])} to {html.escape(e['period'][1])} · run "
+              f"{html.escape(str(e.get('at') or '')[:16].replace('T', ' '))} · code {html.escape(str(e.get('code')))}"
+              f"</div></section>")
+    reg = yantra.registered()
+    try:
+        with open(os.path.join(yantra.lab_dir(), "forward.json"), encoding="utf-8") as f:
+            fwd = json.load(f)
+    except (OSError, ValueError):
+        fwd = {}
+    frows = {r["label"]: r for r in fwd.get("rows") or []}
+    reg_rows = "".join(
+        f"<tr><td class='first'><b>{html.escape(r['label'])}</b></td><td>{html.escape(r['registered'])}</td>"
+        f"<td style='white-space:normal'>{html.escape((frows.get(r['label']) or {}).get('status') or 'not measured yet: run yantra.py forward')}"
+        + (f" · {(frows[r['label']]['result'] or {}).get('trades', 0)} trades · "
+           f"{html.escape(str(frows[r['label']].get('verdict')))}" if (frows.get(r['label']) or {}).get('result') else "")
+        + "</td></tr>" for r in reg)
+    reg_card = (f"<section class='card flush'><div class='hd'>Forward test <span class='muted small'>the only "
+                f"untouched data: candles recorded after a variant was frozen</span></div>"
+                + (f"<table class='rt'><tr><th>Variant</th><th>Frozen on</th><th>Result on later candles</th></tr>"
+                   f"{reg_rows}</table>" if reg else
+                   "<div class='muted' style='padding:10px 14px'>Nothing is registered. Only a variant that passes "
+                   "the walk-forward test is worth freezing for a forward test; none has passed.</div>")
+                + "</section>")
+    n_pass = sum(1 for e in latest.values() if e["verdict"] == "PASS")
+    tried = yantra.tests_so_far()
+    head = (f"<div class='kgrid k4'>{_kpi('Ideas tested', str(len(latest)))}{_kpi('Variants tried', str(tried))}"
+            f"{_kpi('Passed walk-forward', str(n_pass), cls='up' if n_pass else '')}"
+            f"{_kpi('In forward test', str(len(reg)))}</div>")
+    empty = ("" if cards else "<section class='card'><div class='muted'>No experiment has been run yet. Run "
+             "<code>.venv\\Scripts\\python.exe yantra.py test all</code> in the bot's folder.</div></section>")
+    body = f"""
+<div class="page-head"><h1>⚗ Yantrashala <span class="tag">strategy lab</span></h1>
+<span class="sub">Ideas under test. Nothing here is traded, and a backtest alone never puts a strategy into the bot ·
+read-only</span></div>
+<div class="banner" role="note"><b>How an idea is judged</b> (fixed before any result was seen): tested on the
+develop period only, walked forward month by month, and it passes only with at least {yantra.MIN_TRADES} walk-forward
+trades, an average result per trade whose whole 95% range is above zero, a profit factor above {yantra.PASS_PF} and
+{yantra.PASS_MONTHS:.0%} of months positive. A pass is only a ticket to the forward test on future data.
+{f'With {tried} variants tried, the best one looking good is expected by luck alone.' if tried else ''}</div>
+{head}{empty}{''.join(cards)}{reg_card}"""
+    return page("Yantrashala", "/yantrashala", body)
+
+
+def sizing_capital(s=None):
+    """(rupees, plain label): the capital that plans on the Scanner and Review pages are sized from. It is the
+    account the bot trades: in real money the Zerodha balance the bot read (what it sizes its own trades from),
+    otherwise the paper opening balance. It used to be a fixed Rs 1,00,000 whatever the account held."""
+    s = read_status() if s is None else s
+    bal = s.get("balance") or {}
+    if s.get("mode") == "live" and bal.get("inr"):
+        return float(bal["inr"]), "your Zerodha balance, as the bot read it"
+    import capital
+    return float(capital.current_opening_balance()), "the paper opening balance"
+
+
+def plan_qty(close, stop, cap):
+    """Shares for a long plan: the risk rule, capped by the per-stock limit (the Scanner's own rule)."""
+    if not close or not stop or close <= stop:
+        return 0
+    return int(min(cap * C.RISK_PER_TRADE_PCT / 100 // (close - stop), cap * C.MAX_POSITION_PCT / 100 // close))
 
 
 def render_scanner(refresh=False):
@@ -1421,10 +2527,13 @@ def render_scanner(refresh=False):
     counts = "".join(_kpi(html.escape(k), f"{v}") for k, v in r.get("counts", {}).items())
     rows = []
     hits = [(s, x) for s, x in r.get("rows", {}).items() if x["setups"]]
+    cap, cap_label = sizing_capital()
     for s, x in sorted(hits, key=lambda kv: (-len(kv[1]["setups"]), kv[0])):
         trend = ("<span class='up'>above 200 DMA</span>" if x.get("above_200dma") else
                  "<span class='dn'>below 200 DMA</span>" if x.get("above_200dma") is False else "-")
-        plan = (f"stop {_fmt(x['stop'])} · target {_fmt(x['target'])} · qty {x['qty']}"
+        qty = plan_qty(x.get("close"), x.get("stop"), cap)
+        plan = (f"stop {_fmt(x['stop'])} · target {_fmt(x['target'])} · "
+                + (f"qty {qty}" if qty else "<span class='warn'>qty 0: 1 share doesn't fit the limits</span>")
                 if x.get("stop") else "-")
         rows.append(
             f"<tr><td class='first' data-label='Stock'><b>{html.escape(s)}</b></td>"
@@ -1436,7 +2545,7 @@ def render_scanner(refresh=False):
             f"<td data-label='Trend'><span>{trend} <span class='muted'>· {x['from_52w_high_pct']:+.1f}% vs 52w high</span></span></td>"
             f"<td data-label='Plan' class='block' style='white-space:normal'>{plan}</td></tr>")
     table = "".join(rows) or "<tr><td colspan=7 class='muted'>No setups on the last session.</td></tr>"
-    risk_rs = C.PAPER_START_INR * C.RISK_PER_TRADE_PCT / 100
+    risk_rs = cap * C.RISK_PER_TRADE_PCT / 100
     built = html.escape(str(r.get('built', ''))[:16].replace('T', ' '))
     errors = (' Data errors: ' + html.escape(', '.join(r['errors']))) if r.get('errors') else ''
     body = f"""
@@ -1452,8 +2561,8 @@ def render_scanner(refresh=False):
 <details class="card"><summary>How the setups and the plan work</summary><div class="small muted">
 Setups: 20-day high breakout · bull flag (≥8% pole, tight shallow flag) · 20-day MA reclaim ·
 oversold (RSI&lt;30) · oversold bounce (RSI&lt;30 in last 3 days, close above yesterday's high).
-Plan: stop = close − 1.5 × ATR(14), target = 2R, qty risks {C.RISK_PER_TRADE_PCT}% of ₹{C.PAPER_START_INR:,.0f}
-(capped at {C.MAX_POSITION_PCT:.0f}% of capital). The TWS interview's rule: prefer stocks in an uptrend (above the 200 DMA,
+Plan: stop = close − 1.5 × ATR(14), target = 2R, qty risks {C.RISK_PER_TRADE_PCT}% of {_inr(cap)}
+({html.escape(cap_label)}; capped at {C.MAX_POSITION_PCT:.0f}% of it per stock, so {_inr(cap * C.MAX_POSITION_PCT / 100)}). The TWS interview's rule: prefer stocks in an uptrend (above the 200 DMA,
 near highs).{errors}</div></details>"""
     return page("Swing scanner", "/scanner", body)
 
@@ -1474,7 +2583,7 @@ def _num(x):
         return 0.0
 
 
-TRADE_FILES = {"paper": "trades_paper.csv", "live": "trades_live.csv", "backtest": "backtest_trades.csv"}
+TRADE_FILES = {"paper": "trades_paper.csv", "live": "trades_live.csv", "backtest": "backtest_trades.csv", "bakhar": "trades_bakhar.csv"}
 
 
 def trade_rows(src):
@@ -1792,7 +2901,7 @@ def render_trades(q=None):
     body = (f"<style>{TRADES_CSS}</style>"
             f"<div class='page-head'><h1>{T.SCROLL} {T.term('trades')}</h1>"
             f"<span class='sub'>{html.escape(T.ui('trades_sub'), quote=False)}</span></div>"
-            + mode_chips(s) + view_banner(view) + trade_kpis(st, label, view) + note
+            + mode_chips(s) + view_banner(view, s) + trade_kpis(st, label, view) + note
             + f"<nav class='ptabs' role='tablist' aria-label='Trades sections'>{tabs}</nav>"
             + "".join(f"<section class='panel' id='{pid}' role='tabpanel' aria-label='{name}'>{html_}</section>"
                       for pid, name, html_ in panels)
@@ -2403,12 +3512,60 @@ class Handler(BaseHTTPRequestHandler):
             self._send(render_journey(q.get("src", ["paper"])[0], idx))
         elif u.path == "/settings":
             self._settings(q)
+        elif u.path == "/backtest":
+            if q.get("refresh", ["0"])[0] == "1":
+                jobs.start("bakhar")
+                self._redirect("/backtest")
+                return
+            self._send(render_backtest())
+        elif u.path == "/readiness":
+            self._send(render_readiness())
+        elif u.path in PAGE_ALIASES:
+            self._redirect(PAGE_ALIASES[u.path])
+        elif u.path == "/kavach":
+            self._send(render_kavach())
+        elif u.path == "/yantrashala":
+            self._send(render_yantrashala())
+        elif u.path == "/chanakya":
+            if q.get("refresh", ["0"])[0] == "1":
+                jobs.start("chanakya")
+                self._redirect("/chanakya")
+                return
+            self._send(render_chanakya())
+        elif u.path == "/rajya":
+            # read-only: the view only chooses which account is SHOWN; it never changes the trading mode
+            view = current_view(q, read_status())
+            if q.get("refresh", ["0"])[0] == "1":
+                jobs.start("rajya", view)
+                self._redirect(f"/rajya?view={view}")
+                return
+            self._send(render_rajya(q))
         elif u.path == "/scanner":
             if q.get("refresh", ["0"])[0] == "1":
                 jobs.start("scanner")
                 self._redirect("/scanner")
                 return
             self._send(render_scanner())
+        elif u.path == "/api/zerodha/events":
+            # read-only: Zerodha position-change alerts for the popups on every page (accounts.zerodha_events)
+            import accounts
+            try:
+                since = int(q.get("since", ["-1"])[0])
+            except ValueError:
+                since = -1
+            out = accounts.zerodha_events(since)
+            w = watch_timing(read_status())       # "No updates" warning for the popups (watchlist timing)
+            out["watch"] = {"state": w["state"], "key": w["key"], "text": w["text"]}
+            import health
+            health.observe()                      # a check that just changed gets its alert line (health.py)
+            out["notices"] = watchdog_notices() + health.notices()   # restarts and crashes, and health alerts
+            self._send(json.dumps(out), ctype="application/json; charset=utf-8")
+        elif u.path == "/api/health":
+            # read-only: every health check as JSON (states and plain sentences; no secrets, no account numbers)
+            import health
+            rep = health.report()
+            self._send(json.dumps(rep, ensure_ascii=False), 503 if rep["overall"] == "bad" else 200,
+                       "application/json; charset=utf-8")
         elif u.path == "/api/jobs":
             # read-only: progress of the Review and Scanner background builds
             self._send(json.dumps(jobs.snapshot_all()), ctype="application/json; charset=utf-8")
@@ -2537,6 +3694,16 @@ class Handler(BaseHTTPRequestHandler):
         if self.path in ("/paper-capital", "/paper-capital/cancel"):
             self._paper_capital(form)
             return
+        if self.path == "/jobs/cancel":
+            # stop a running Review or Scanner build (nothing of it is saved); never touches the bot
+            name = form.get("job", [""])[0]
+            if name in ("review", "scanner", "chanakya", "rajya", "bakhar"):
+                job = jobs.get(name)
+                if job:
+                    job.cancel()
+            self._redirect({"scanner": "/scanner", "chanakya": "/chanakya", "rajya": "/rajya",
+                            "bakhar": "/backtest"}.get(name, "/review"))
+            return
         if self.path in ("/bot/apply-now", "/bot/apply-after-close", "/bot/restart-cancel", "/bot/restart-dismiss",
                          "/bot/go-back", "/dashboard/restart"):
             self._restart(form)
@@ -2561,6 +3728,13 @@ class Handler(BaseHTTPRequestHandler):
             msg = (zerodha_logout() if form.get("confirm", [""])[0] == "yes"
                    else "Not logged out: the logout needs your confirmation.")
             self._redirect("/?msg=" + quote(msg))
+            return
+        if self.path == "/start":
+            from urllib.parse import quote
+            if (form.get("confirm") or [""])[0] != "yes":
+                self._redirect("/?msg=" + quote("Not started: starting the bot needs your confirmation."))
+                return
+            self._redirect("/?msg=" + quote(start_bot()))
             return
         if self.path == "/pause":
             open(C.PAUSE_FILE, "w").close()
@@ -2597,6 +3771,12 @@ if __name__ == "__main__":
     print(f"  Dashboard: http://{C.WEB_HOST}:{C.WEB_PORT}   (Ctrl+C or closing this window stops the dashboard only)")
     if "--no-browser" not in sys.argv:
         webbrowser.open(f"http://{C.WEB_HOST}:{C.WEB_PORT}")
+    try:                                   # the dashboard's own log lines, secrets removed, as JSON (eventlog.py)
+        import eventlog
+        eventlog.install("dashboard", os.path.join(C.DATA_DIR, "logs"))
+        log.info(f"dashboard started on http://{C.WEB_HOST}:{C.WEB_PORT}")
+    except Exception:  # noqa: BLE001
+        pass
     try:
         serve(wait_port=20 if "--wait-port" in sys.argv else 0)
     except KeyboardInterrupt:

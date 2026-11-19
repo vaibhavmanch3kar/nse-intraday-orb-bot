@@ -43,6 +43,21 @@ def no_background_jobs(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def no_real_starts(monkeypatch):
+    """No test may start the real bot or dashboard through Windows. On 19 Nov 2026 two tests that press every
+    dashboard button pressed Start without a stand-in, and the real run_bot.ps1 was started from the test run.
+    Every such request is recorded here instead and answered "not started"."""
+    import watchdog
+    asked = []
+
+    def refuse(self, command_line):
+        asked.append(command_line)
+        return False
+    monkeypatch.setattr(watchdog.RealProbe, "_spawn", refuse)
+    return asked
+
+
+@pytest.fixture(autouse=True)
 def isolated(tmp_path, monkeypatch):
     """Every test gets its own data dir and default strategy settings."""
     monkeypatch.setattr(C, "DATA_DIR", str(tmp_path))
@@ -58,7 +73,21 @@ def isolated(tmp_path, monkeypatch):
                  # rule tests switch these on explicitly; core tests use the original rules
                  "INDEX_FILTER": False, "TRAIL_EMA": 0, "TIME_STOP_BARS": 0, "TIME_STOP_MIN_R": 0.5,
                  "VIX_SIZING": False,
+                 # Kavach's newer limits (2.0) are off here too; tests/test_kavach_data.py switches them on
+                 "MAX_SIGNAL_AGE_MIN": 0.0, "MAX_PER_SECTOR": 0, "MAX_BAR_VOLUME_PCT": 0.0,
                  # tests fake data_yahoo; never reach real Kite even if the user saved DATA_SOURCE=kite
                  "DATA_SOURCE": "yahoo"}.items():
         monkeypatch.setattr(C, k, v)
+    # These tests feed the bot made-up candles through data_yahoo. In real money Kavach refuses entries on
+    # Yahoo prices, so by default the bot is told its prices are Kite's; the data tests say otherwise.
+    try:
+        import bot
+        monkeypatch.setattr(bot.Bot, "price_source", lambda self: "kite")
+        import web
+        monkeypatch.setattr(web, "STATUS_POLL_SEC", 0.0)      # tests rewrite the status file and read it at once
+        # web.STATUS_FILE is fixed when web is first imported, so without this a page drawn in a test read the
+        # REAL data/status.json: two tests failed in the main folder once the real bot had traded real money.
+        monkeypatch.setattr(web, "STATUS_FILE", str(tmp_path / "status.json"))
+    except ImportError:
+        pass
     yield tmp_path

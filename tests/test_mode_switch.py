@@ -243,7 +243,7 @@ def test_arming_writes_only_todays_arming_and_never_the_settings(dash):
     ok, msg = web.arm_real_money(WORDS)
     assert ok and "armed for today" in msg and "next safe moment" in msg
     arm = json.load(open(livemode.arm_path()))
-    assert set(arm) == livemode.ARM_KEYS and arm["date"] == dt.date.today().isoformat()
+    assert set(arm) == livemode.ARM_KEYS and arm["date"] == dt.datetime.now(IST).date().isoformat()   # the India date, whatever the PC's clock
     assert (C.DRY_RUN, C.CONFIRM_LIVE, C.is_live(), dict(os.environ)) == flags
 
 

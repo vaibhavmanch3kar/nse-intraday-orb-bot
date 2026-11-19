@@ -12,7 +12,14 @@ import theme as T
 
 # page tabs in the order shown: path, TERMS key, icon name (the icon comes from the theme in use), short label
 NAV = [("/", "live_page", "BOW", "Live"), ("/trades", "trades", "SCROLL", "Trades"),
-       ("/review", "review", "LAMP", "Review"), ("/scanner", "scanner", "FLAG", "Scanner")]
+       ("/review", "review", "LAMP", "Review"), ("/scanner", "scanner", "FLAG", "Scanner"),
+       ("/chanakya", "chanakya", "🧭", "Research"), ("/kavach", "kavach", "🛡", "Risk"),
+       ("/rajya", "rajya", "🏛", "Portfolio"), ("/yantrashala", "yantrashala", "🧪", "Lab")]
+# The four 2.0 pages keep one name in every theme: key -> (name, what it is)
+PAGE_NAMES = {"chanakya": ("Chanakya", "Research assistant"), "kavach": ("Kavach", "Risk controls"),
+              "rajya": ("Rajya", "Portfolio"), "yantrashala": ("Yantrashala", "Strategy lab")}
+# pages that belong under a tab without being one (the tab stays lit on them)
+PARENT = {"/backtest": "/review", "/journey": "/trades"}
 VIEW_PAGES = ("/", "/trades")      # pages with the Paper Account | Zerodha Account switch
 THEME_KEY = "ayodhya-theme"        # the browser remembers your light/dark choice (per browser, nothing else)
 
@@ -61,8 +68,9 @@ code{background:var(--surface-2);border:1px solid var(--border);border-radius:5p
  background:linear-gradient(135deg,var(--gold),var(--accent))}
 .brand b{font:600 18px var(--serif);color:var(--gold);letter-spacing:.3px;display:block;line-height:1.1}
 .brand small{color:var(--muted);font-size:11px;display:block}
-.tabs{display:flex;gap:4px}
-.tabs a{display:flex;flex-direction:column;padding:5px 12px;border-radius:9px;color:var(--muted);text-decoration:none;line-height:1.2}
+.tabs{display:flex;gap:2px;min-width:0;flex:1 1 auto;overflow-x:auto;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tabs a{display:flex;flex-direction:column;padding:5px 10px;border-radius:9px;color:var(--muted);text-decoration:none;line-height:1.2;white-space:nowrap;flex:0 0 auto}
 .tabs a b{color:var(--text);font-weight:600;font-size:13px} .tabs a small{font-size:11px}
 .tabs a:hover{background:var(--surface-2);text-decoration:none}
 .tabs a.on{background:var(--surface-2);box-shadow:inset 0 -2px 0 var(--accent)} .tabs a.on b{color:var(--gold)}
@@ -203,6 +211,11 @@ input[type=number],input[type=search],select{background:var(--surface);color:var
   .kgrid{grid-template-columns:repeat(3,minmax(0,1fr))}
   .tabs a small{display:none}
 }
+/* eight tabs do not fit beside the brand and the account switch below this width: give them their own row */
+@media (max-width:1500px){
+  .top-in{flex-wrap:wrap;row-gap:4px}
+  .tabs{order:3;flex:1 0 100%}
+}
 /* ---------- phone ---------- */
 @media (max-width:760px){
   body{font-size:14.5px}
@@ -237,11 +250,12 @@ input[type=number],input[type=search],select{background:var(--surface);color:var
   .card.flush table.rt tr{padding:8px 14px}
   table.rt td.block{display:block;text-align:left}
   table.rt td.block::before{display:block;max-width:none;margin-bottom:2px}
-  .bottom{display:grid;grid-template-columns:repeat(4,1fr);position:fixed;left:0;right:0;bottom:0;z-index:12;
+  .bottom{display:flex;overflow-x:auto;scrollbar-width:none;scroll-snap-type:x proximity;position:fixed;left:0;right:0;bottom:0;z-index:12;
    background:color-mix(in srgb,var(--surface) 94%,transparent);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);
    border-top:1px solid var(--border);padding:6px 4px calc(6px + env(safe-area-inset-bottom))}
+  .bottom::-webkit-scrollbar{display:none}
   .bottom a{display:flex;flex-direction:column;align-items:center;gap:2px;text-decoration:none;color:var(--muted);font-size:11px;
-   min-height:48px;justify-content:center;border-radius:10px}
+   min-height:48px;justify-content:center;border-radius:10px;flex:0 0 22%;scroll-snap-align:start}
   .bottom a span{font-size:19px;line-height:1}
   .bottom a.on{color:var(--gold);background:var(--surface-2)}
   .bottom a:hover{text-decoration:none}
@@ -270,6 +284,133 @@ THEME_JS = """
 """
 
 
+# Zerodha position-change popups on every page (accounts.zerodha_events via /api/zerodha/events).
+# A page that just opened starts from "now" (since=-1), so it never replays earlier alerts; the last alert
+# number is kept per tab (sessionStorage), so moving between pages doesn't lose or repeat one. Ticks come
+# from a tiny Web Worker because browsers slow down timers in background tabs; desktop alerts use the
+# alert number as their tag, so two open tabs don't show the same alert twice.
+ALERTS_CSS = """
+.alerts{position:fixed;right:16px;top:76px;z-index:60;display:flex;flex-direction:column;gap:8px;
+  width:min(360px,calc(100vw - 32px));pointer-events:none}
+.alert{pointer-events:auto;background:var(--surface);color:var(--text);border:1px solid var(--border);
+  border-left:5px solid var(--info);border-radius:var(--radius);box-shadow:var(--shadow);padding:10px 12px;
+  font-family:var(--font);line-height:1.35;animation:alertIn .18s ease-out}
+.alert.up{border-left-color:var(--up)} .alert.dn{border-left-color:var(--dn)} .alert.warn{border-left-color:var(--warn)}
+.alert .t{display:block;font-weight:700;padding-right:22px} .alert .b{display:block;margin-top:2px}
+.alert .m{display:block;margin-top:4px;color:var(--muted);font-size:12px}
+.alert .x{float:right;margin:-4px -4px 0 0;background:none;border:0;color:var(--muted);cursor:pointer;
+  font-size:20px;line-height:1;padding:2px 6px}
+.alert .ask{margin-top:6px;background:var(--surface-2);color:var(--text);border:1px solid var(--border);
+  border-radius:6px;padding:4px 8px;cursor:pointer;font:inherit;font-size:12px}
+.wtime{padding:8px 14px;border-bottom:1px solid var(--border);font-size:13px;color:var(--muted)}
+.wtime.late,.wtime.stopped{background:var(--warn-bg);color:var(--text);font-weight:600;
+  border-left:4px solid var(--warn)}
+@keyframes alertIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion: reduce){.alert{animation:none}}
+@media print{.alerts{display:none}}
+"""
+
+ALERTS_JS = """
+(function(){
+  if(!window.fetch)return;
+  var API='/api/zerodha/events', KEY='ayodhya-alert-seq', seq=null, busy=false, idle=0;
+  try{var s=sessionStorage.getItem(KEY); if(s!==null&&s!==''&&!isNaN(+s))seq=+s;}catch(e){}
+  var box=document.createElement('div'); box.className='alerts'; box.setAttribute('role','status');
+  box.setAttribute('aria-live','polite'); box.setAttribute('aria-label','Zerodha position alerts');
+  document.body.appendChild(box);
+  function save(){try{sessionStorage.setItem(KEY,String(seq))}catch(e){}}
+  function inr(x){return '\\u20b9'+Number(x||0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});}
+  function side(q){return q>0?'LONG '+q:(q<0?'SHORT '+(-q):'flat');}
+  function posText(p){
+    if(!p)return '';
+    if(p.change==='opened')return 'New position: '+side(p.after);
+    if(p.change==='closed')return 'Position closed \\u00b7 P&L '+(p.pnl>=0?'+':'\\u2212')+inr(Math.abs(p.pnl))+' (before charges)';
+    if(p.change==='reversed')return 'Position reversed: now '+side(p.after);
+    return 'Position now '+side(p.after);
+  }
+  function describe(e){
+    var who=e.by_bot?'Placed by the bot':'Not placed by the bot (Kite app or another tool)';
+    var p=e.position, tone=(p&&p.change==='closed')?(p.pnl>=0?'up':'dn'):'';
+    if(e.kind==='fill')return {tone:tone, title:e.side+' '+e.qty+' '+e.symbol+' filled @ '+inr(e.price),
+      body:posText(p)||('Order complete: '+e.filled+' of '+e.quantity), meta:who};
+    if(e.kind==='partial')return {tone:'warn', title:'Partial fill: '+e.side+' '+e.qty+' '+e.symbol+' @ '+inr(e.price),
+      body:e.filled+' of '+e.quantity+' filled, '+e.pending+' still pending'+(p?' \\u00b7 '+posText(p):''), meta:who};
+    return {tone:tone, title:e.symbol+' position '+(p?p.change:'changed')+' on Zerodha',
+      body:posText(p)||'', meta:'Seen on Zerodha (no matching fill seen by the dashboard)'};
+  }
+  function askButton(el){
+    if(!('Notification' in window)||Notification.permission!=='default')return;
+    var b=document.createElement('button'); b.type='button'; b.className='ask'; b.textContent='Also show these as desktop alerts';
+    b.addEventListener('click',function(){Notification.requestPermission().then(function(){b.remove()})});
+    el.appendChild(b);
+  }
+  function show(e){toast(describe(e),'ayodhya-zerodha-'+e.seq,e);}
+  var LATE='ayodhya-late-key', lateKey=null;
+  try{lateKey=sessionStorage.getItem(LATE)}catch(e){}
+  function watch(w){                       // watchlist timing: one "No updates" popup per missed candle
+    if(!w)return;
+    if((w.state==='late'||w.state==='stopped')&&w.key&&w.key!==lateKey){
+      lateKey=w.key; try{sessionStorage.setItem(LATE,lateKey)}catch(e){}
+      toast({tone:'warn',title:'No updates',body:w.text,meta:'Watchlist timing'},'ayodhya-late-'+w.key,null);
+    }else if(w.state==='waiting'&&lateKey){
+      lateKey=null; try{sessionStorage.removeItem(LATE)}catch(e){}
+      toast({tone:'up',title:'Updates are back',body:w.text,meta:'Watchlist timing'},'ayodhya-late-ok',null);
+    }
+  }
+  var NK='ayodhya-notices-seen';           // watchdog: crashes and automatic restarts, once per browser
+  function notices(list){
+    if(!list||!list.length)return;
+    var seen=[]; try{seen=JSON.parse(localStorage.getItem(NK)||'[]')}catch(e){}
+    if(!Array.isArray(seen))seen=[];
+    list.forEach(function(n){
+      if(seen.indexOf(n.key)>=0)return; seen.push(n.key);
+      if(Date.now()-Date.parse(n.at)<30*60*1000)       // older ones stay on the Live page's banner only
+        toast({tone:n.tone,title:n.title,body:n.body,meta:'Watchdog'},'ayodhya-wd-'+n.key,null);
+    });
+    try{localStorage.setItem(NK,JSON.stringify(seen.slice(-80)))}catch(e){}
+  }
+  function toast(d,tag,e){
+    var el=document.createElement('div');
+    el.className='alert'+(d.tone?' '+d.tone:'');
+    var x=document.createElement('button'); x.type='button'; x.className='x'; x.textContent='\\u00d7';
+    x.setAttribute('aria-label','Close this alert'); x.addEventListener('click',function(){el.remove()});
+    var t=document.createElement('span'); t.className='t'; t.textContent=d.title;
+    var b=document.createElement('span'); b.className='b'; b.textContent=d.body;
+    var m=document.createElement('span'); m.className='m';
+    m.textContent=e?(d.meta+' \\u00b7 '+(e.product||'')+' \\u00b7 seen '+String(e.seen_at||'').slice(11,19))
+                    :(d.meta+' \\u00b7 '+new Date().toTimeString().slice(0,8));
+    el.appendChild(x); el.appendChild(t); if(d.body)el.appendChild(b); el.appendChild(m); askButton(el);
+    box.insertBefore(el, box.firstChild);
+    while(box.children.length>5)box.removeChild(box.lastChild);
+    var timer=setTimeout(function(){el.remove()},45000);
+    el.addEventListener('mouseenter',function(){clearTimeout(timer)});
+    if('Notification' in window&&Notification.permission==='granted'){
+      try{new Notification(d.title,{body:(d.body?d.body+'\\n':'')+d.meta,tag:tag})}catch(err){}
+    }
+  }
+  function handle(r){
+    if(!r||typeof r.seq!=='number')return;
+    idle=(r.login_needed?6:0);
+    watch(r.watch); notices(r.notices);
+    if(seq===null||r.seq<seq){seq=r.seq; save(); return;}     // first look, or the dashboard was restarted
+    (r.events||[]).forEach(show); seq=r.seq; save();
+  }
+  function poll(){
+    if(busy)return; if(idle>0){idle--; return;}                 // not logged in: ask about every 30 s
+    busy=true;
+    fetch(API+'?since='+(seq===null?-1:seq),{cache:'no-store',credentials:'same-origin'})
+      .then(function(r){return r.json()}).then(handle).catch(function(){})
+      .then(function(){busy=false});
+  }
+  try{
+    var w=new Worker(URL.createObjectURL(new Blob(['setInterval(function(){postMessage(1)},5000)'],{type:'text/javascript'})));
+    w.onmessage=poll;
+  }catch(e){setInterval(poll,5000);}
+  poll();
+})();
+"""
+
+
 def empty(text, cls="empty", tag="div"):
     """An empty-state message. Themes with a bot avatar show it beside the text (decorative only, the
     same picture whatever the numbers are); Default shows the text alone, as before."""
@@ -287,22 +428,32 @@ def _favicon():
 
 def css():
     skin = T._ui.active().skin_css if T._ui else ""  # a theme's decorative extras (Default has none)
-    return _tokens() + BASE_CSS + skin
+    return _tokens() + BASE_CSS + ALERTS_CSS + skin
+
+
+# With eight pages the tab row and the phone's bottom bar scroll sideways: bring the current page into view.
+NAV_JS = ("(function(){document.querySelectorAll('nav.tabs a.on,nav.bottom a.on').forEach(function(a){"
+          "var n=a.parentNode;n.scrollLeft=Math.max(0,a.offsetLeft-(n.clientWidth-a.offsetWidth)/2);});})();")
 
 
 def nav_links(active, view, cls):
     """Page tabs (desktop) or bottom navigation (phone). The current account view carries over."""
     out = []
+    active = PARENT.get(active, active)
     for path, key, icon_name, short in NAV:
-        icon = getattr(T, icon_name)
+        if key in PAGE_NAMES:
+            icon, (name, what) = icon_name, PAGE_NAMES[key]
+            title = f"{name} · {what}"
+        else:
+            icon, name, title = getattr(T, icon_name), T.name(key), T.term(key)
         href = path + (f"?view={view}" if view and path in VIEW_PAGES else "")
         on = " on" if path == active else ""
         cur = " aria-current='page'" if path == active else ""
         if cls == "tabs":
-            out.append(f"<a class='{on.strip()}' href='{href}'{cur} title='{html.escape(T.term(key))}'><b>{short}</b>"
-                       f"<small>{html.escape(T.name(key), quote=False)}</small></a>")
+            out.append(f"<a class='{on.strip()}' href='{href}'{cur} title='{html.escape(title)}'><b>{short}</b>"
+                       f"<small>{html.escape(name, quote=False)}</small></a>")
         else:
-            out.append(f"<a class='{on.strip()}' href='{href}'{cur} title='{html.escape(T.term(key))}'>"
+            out.append(f"<a class='{on.strip()}' href='{href}'{cur} title='{html.escape(title)}'>"
                        f"<span aria-hidden='true'>{icon}</span>{short}</a>")
     return "".join(out)
 
@@ -334,4 +485,4 @@ def shell(title, active, body, view=None, switch="", extra_head="", mode=""):
             f"<script>{HEAD_JS}</script><style>{css()}{charts_css}</style>{extra_head}</head>"
             f"<body data-view='{html.escape(view or '')}'><a class='skip' href='#main'>Skip to content</a>{head}{phone_switch}"
             f"<main class='wrap' id='main'>{body}{foot}</main>{bottom}"
-            f"<script>{THEME_JS}</script>{charts_js}</body></html>")
+            f"<script>{THEME_JS}</script><script>{NAV_JS}</script><script>{ALERTS_JS}</script>{charts_js}</body></html>")

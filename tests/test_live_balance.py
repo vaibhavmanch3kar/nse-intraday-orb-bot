@@ -166,3 +166,54 @@ def test_dashboard_shows_the_balance(live, market):
     notice = web.balance_notice(s)
     assert "Balance from Zerodha: <b>₹5,000.00</b>" in notice and "(read 10:00)" in notice
     assert web.balance_notice({"mode": "paper", "balance": None}) == ""
+
+
+# ---------------------------------------------------------------- a loss booked today, read again after a restart
+def booked(b, market, pnl):
+    """Today's balance has been read and a result is booked, as after a closed trade."""
+    b.state.new_day_if_needed(market["day"])
+    b.sync_live_balance(market["now"])
+    b.state.d["day_pnl"] = pnl
+    b.state.d["cash"] += pnl
+    b.state.save()
+
+
+def test_a_loss_booked_today_survives_a_restart_on_a_day_money_was_added(live, market):
+    live.kite = FakeKite(opening=4870.60, live=10867.70)       # 6,000 was added today: "cash now" is larger
+    booked(live, market, -3.96)
+    assert live.state.d["cash"] == pytest.approx(4866.64) and live.state.d["day_start_equity"] == 4870.60
+    nb = bot.Bot()                                             # restart with no position open
+    nb.kite = FakeKite(opening=4870.60, live=10867.70)
+    nb.sync_live_balance(market["now"])
+    assert nb.balance_ok and nb.state.d["cash"] == pytest.approx(4866.64)       # was 4,870.60 before the fix
+    assert nb.state.d["day_start_equity"] == 4870.60 and nb.state.d["day_pnl"] == -3.96   # the loss limit's base stays
+    assert "this morning's balance less today's booked loss of ₹3.96" in nb.events[0]
+
+
+def test_a_gain_is_never_added_and_the_figure_is_never_larger_than_before(live, market):
+    live.kite = FakeKite(opening=5000.0, live=11050.0)
+    booked(live, market, +50.0)
+    nb = bot.Bot()
+    nb.kite = FakeKite(opening=5000.0, live=11050.0)
+    nb.sync_live_balance(market["now"])
+    assert nb.state.d["cash"] == 5000.0 and "booked loss" not in nb.events[0]
+    for opening, now_cash, pnl in ((5000.0, 4997.1, -3.96), (5000.0, 4000.0, -3.96), (5000.0, 9000.0, -120.0),
+                                   (5000.0, 5000.0, 0.0), (5000.0, 5200.0, 80.0)):
+        nb.state.d["day_pnl"] = pnl
+        nb.kite = FakeKite(opening=opening, live=now_cash)
+        nb.sync_live_balance(market["now"])
+        assert nb.state.d["cash"] == pytest.approx(min(opening + min(pnl, 0.0), now_cash))
+        assert nb.state.d["cash"] <= min(opening, now_cash) + 1e-9          # never looser than the old rule
+
+
+def test_yesterdays_loss_is_not_taken_off_todays_balance(live, market):
+    live.kite = FakeKite(opening=5000.0, live=5000.0)
+    booked(live, market, -100.0)
+    tomorrow = market["now"] + dt.timedelta(days=1)
+    market["now"] = tomorrow
+    livemode.arm(login_at=tomorrow)                            # arming is per day: without it the bot is paper
+    nb = bot.Bot()
+    assert nb.live
+    nb.kite = FakeKite(opening=4900.0, live=4900.0)            # Zerodha's own figure already has yesterday's loss
+    nb.sync_live_balance(tomorrow)
+    assert nb.state.d["cash"] == 4900.0 and nb.state.d["day_start_equity"] == 4900.0

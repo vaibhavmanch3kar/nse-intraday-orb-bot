@@ -26,6 +26,8 @@ class FakeKite:
             raise RuntimeError("SL rejected")
         oid = f"o{len(self.placed) + 1}"
         self.placed.append({**p, "id": oid})
+        self.tags = getattr(self, "tags", {})
+        self.tags[oid] = p.get("tag")
         if p["order_type"] == "SL":
             self.orders[oid] = {"status": "TRIGGER PENDING", "filled_quantity": 0, "average_price": 0}
         else:
@@ -42,6 +44,15 @@ class FakeKite:
         self.cancelled.append(oid)
         if self.orders[oid]["status"] in ("OPEN", "TRIGGER PENDING"):
             self.orders[oid]["status"] = "CANCELLED"
+
+    def orders(self):
+        return [{"order_id": oid, "tag": getattr(self, "tags", {}).get(oid), **o} for oid, o in self.orders.items()]
+
+    def order_margins(self, params):
+        return [{"total": sum(p["quantity"] * p["price"] for p in params) / 5}]
+
+    def margins(self, segment=None):
+        return {"available": {"live_balance": 1e9}}
 
     def positions(self):
         return {"day": [{"tradingsymbol": "SBIN", "product": "MIS", "exchange": "NSE", "quantity": 10},

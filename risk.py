@@ -6,6 +6,7 @@ import math
 import os
 
 import config as C
+import safefile
 import costs
 
 IST = dt.timezone(dt.timedelta(hours=5, minutes=30))
@@ -18,17 +19,29 @@ def size_position(equity, entry, stop, direction, open_notional=0.0, risk_mult=1
     if per_share_risk <= 0:
         return 0, "stop equals entry"
     budget = equity * C.RISK_PER_TRADE_PCT / 100 * risk_mult
-    qty = int(budget // per_share_risk)
+    by_risk = int(budget // per_share_risk)
     cap_one = equity * C.MAX_POSITION_PCT / 100
-    cap_all = equity * C.MAX_EXPOSURE_PCT / 100 - open_notional
-    qty = min(qty, int(cap_one // entry), int(max(0.0, cap_all) // entry))
+    cap_all = max(0.0, equity * C.MAX_EXPOSURE_PCT / 100 - open_notional)
+    by_one, by_all = int(cap_one // entry), int(cap_all // entry)
+    qty = min(by_risk, by_one, by_all)
+    if qty < C.MIN_QTY:
+        # Say WHICH limit stops the trade. All three used to be reported as "risk budget too small for 1 share",
+        # which was wrong whenever the share price, not the risk, was the reason.
+        if by_risk < C.MIN_QTY:
+            return 0, (f"1 share would risk ₹{per_share_risk:,.2f}, more than the ₹{budget:,.2f} risk budget "
+                       f"({C.RISK_PER_TRADE_PCT * risk_mult:g}% of ₹{equity:,.0f})")
+        if by_one < C.MIN_QTY:
+            return 0, (f"1 share costs ₹{entry:,.2f}, more than the {C.MAX_POSITION_PCT:g}% per-stock limit "
+                       f"(₹{cap_one:,.0f} of ₹{equity:,.0f})")
+        return 0, (f"1 share costs ₹{entry:,.2f}, more than the ₹{cap_all:,.0f} left under the "
+                   f"{C.MAX_EXPOSURE_PCT:g}% total exposure limit")
     # charges are partly fixed (₹20 brokerage cap), so step down until risk + charges fit
     while qty >= C.MIN_QTY:
         loss = per_share_risk * qty + costs.round_trip(entry, stop, qty, direction)
         if loss <= budget:
             return qty, "ok"
         qty = min(qty - 1, int(qty * budget / loss))
-    return 0, "risk budget too small for 1 share"
+    return 0, f"risk budget too small for 1 share (₹{budget:,.2f} doesn't cover the stop loss plus charges)"
 
 
 class State:
@@ -52,7 +65,7 @@ class State:
         tmp = self.path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(self.d, f, indent=2, default=str)
-        os.replace(tmp, self.path)
+        safefile.replace(tmp, self.path)
 
     # -- accessors
     @property
@@ -112,6 +125,39 @@ class State:
         self.d["traded_symbols"].append(symbol)
         self.save()
 
+    def _count_streak(self, net, when):
+        """Losses in a row, and the cool-down after LOSS_STREAK_LIMIT of them.
+
+        Exits recorded at the same moment (positions closing on the same candle) are counted LOSSES FIRST,
+        whatever order they are recorded in: a win that closes on the same candle as a loss does not wipe that
+        loss out. Without this the count depended on which of the two happened to be recorded first, and the
+        bot and the backtest could disagree about a cool-down (found by the paper replay, 18 Nov 2026).
+        Exits at different moments are counted in the order they happen, as before."""
+        moment = str(when)
+        if self.d.get("streak_moment") != moment:
+            self.d["streak_moment"], self.d["streak_before_win"] = moment, None
+
+        def cool_down():
+            until = dt.date.fromisoformat(self.d["day"] or str(dt.date.today())) + dt.timedelta(days=C.COOLDOWN_DAYS + 1)
+            self.d["cooldown_until"] = until.isoformat()
+
+        if net < 0:
+            if self.d.get("streak_before_win") is None:
+                self.d["loss_streak"] += 1
+                if self.d["loss_streak"] >= C.LOSS_STREAK_LIMIT:
+                    cool_down()
+                    self.d["loss_streak"] = 0
+            else:
+                # a win at this same moment was recorded before this loss: count the loss as if it had come first
+                self.d["streak_before_win"] += 1
+                if self.d["streak_before_win"] >= C.LOSS_STREAK_LIMIT:
+                    cool_down()
+                    self.d["streak_before_win"] = 0
+        else:
+            if self.d.get("streak_before_win") is None:
+                self.d["streak_before_win"] = self.d["loss_streak"]     # the streak the same-moment losses add to
+            self.d["loss_streak"] = 0
+
     def record_exit(self, symbol, exit_price, when):
         p = self.positions.pop(symbol)
         gross = costs.gross_pnl(p["entry"], exit_price, p["qty"], p["direction"])
@@ -121,14 +167,7 @@ class State:
         self.d["realized_pnl"] += net
         self.d["charges_paid"] += charges
         self.d["day_pnl"] += net
-        if net < 0:
-            self.d["loss_streak"] += 1
-            if self.d["loss_streak"] >= C.LOSS_STREAK_LIMIT:
-                until = dt.date.fromisoformat(self.d["day"] or str(dt.date.today())) + dt.timedelta(days=C.COOLDOWN_DAYS + 1)
-                self.d["cooldown_until"] = until.isoformat()
-                self.d["loss_streak"] = 0
-        else:
-            self.d["loss_streak"] = 0
+        self._count_streak(net, when)
         self.save()
         risk = abs(p["entry"] - p["stop"]) * p["qty"]
         return {**p, "symbol": symbol, "exit": exit_price, "closed": str(when), "gross": gross,

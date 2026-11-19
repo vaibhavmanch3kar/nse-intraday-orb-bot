@@ -7,3 +7,6 @@ STOP
 *.log
 .env
 .claude/
+.secrets.dpapi.json
+.secrets.dpapi.json.tmp
+.kite_token.json.tmp
