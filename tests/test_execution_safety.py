@@ -248,7 +248,8 @@ def test_if_the_close_after_a_failed_stop_is_partial_the_rest_stays_on_record():
     z.fill = [None, 6, 0, 0]                                 # entry fills; the closing orders fill 6, then nothing
     b = lb(z)
     qty, avg, extra = b.enter("SBIN", "LONG", 10, 800.0, 790.0)
-    assert qty == 4 and extra == {"sl_order_id": None}       # 4 shares still open: the bot must keep managing them
+    assert qty == 4 and extra["sl_order_id"] is None         # 4 shares still open: the bot must keep managing them
+    assert extra["closed"]["qty"] == 6 and extra["closed"]["entry"] == avg       # the 6 that were closed again
     assert any("WITHOUT an exchange stop" in m for _, m in b.messages)
 
 
@@ -920,3 +921,58 @@ def test_exit_uses_the_bots_price_when_zerodha_gives_none_or_a_bad_one():
     assert b2.last_price("SBIN", near=800.0) is None and b2.last_price("SBIN") == 8.0
     b2.exit("SBIN", {"direction": "LONG", "qty": 10}, 800.0, "target")
     assert 798.0 < z2.sent("LIMIT")[0]["price"] < 800.0
+
+
+# ---------------------------------------------------------------- shares the broker closes by itself are booked
+def test_an_entry_closed_because_its_stop_failed_is_booked_as_a_trade(live):
+    """Review, 19 Nov 2026: an entry that was closed at once (no stop could be placed) left no trace: no result,
+    no trade counted, and the stock could be entered again the same day."""
+    b, z = live
+    z.sl_status = "REJECTED"                                  # Zerodha refuses the stop-loss order
+    b.cycle()
+    assert b.state.positions == {}
+    rows = live_rows()
+    assert len(rows) == 1 and rows[0]["reason"] == "stop order failed" and rows[0]["symbol"] == "SBIN"
+    assert float(rows[0]["net"]) < 0 and abs(b.state.d["day_pnl"] - float(rows[0]["net"])) < 0.01
+    assert b.state.d["trades_today"] == 1 and b.state.d["traded_symbols"] == ["SBIN"]      # not entered again today
+    assert b.state.d["loss_streak"] == 1
+
+
+def test_the_part_closed_after_a_failed_stop_is_booked_and_the_rest_is_the_position(live):
+    b, z = live
+    z.sl_status = "REJECTED"
+    z.fill = [None, 3, 0, 0]                                  # the entry fills; the closing orders fill only 3
+    b.cycle()
+    pos = b.state.positions["SBIN"]
+    rows = live_rows()
+    assert len(rows) == 1 and int(rows[0]["qty"]) == 3 and rows[0]["reason"] == "stop order failed"
+    assert pos["qty"] == z.sent("LIMIT")[0]["quantity"] - 3 and "closed" not in pos
+    assert b.state.d["trades_today"] == 1                     # one trade, not two
+
+
+def test_late_entry_shares_that_were_closed_are_booked_without_touching_the_position():
+    z = Zerodha()
+    z.fill, z.cancel_slow = [4], True
+    b = lb(z)
+    b.enter("SBIN", "LONG", 10, 800.0, 790.0)                                    # 4 filled; the order still open
+    entry = z.sent("LIMIT")[0]
+    z.book[entry["order_id"]].update(status="COMPLETE", filled_quantity=7, average_price=801.6)
+    z.cancel_slow = False
+    b.settle()                                                                   # the 3 late shares are closed
+    trips = b.take_round_trips()
+    assert len(trips) == 1 and trips[0]["qty"] == 3 and trips[0]["direction"] == "LONG"
+    assert trips[0]["entry"] == 801.6 and trips[0]["exit"] > 0 and b.take_round_trips() == []
+
+
+def test_book_round_trip_counts_like_any_other_result(tmp_path):
+    import risk
+    st = risk.State(str(tmp_path / "s.json"), 100000.0)
+    st.new_day_if_needed(dt.date(2026, 11, 19))
+    st.record_entry("INFY", "LONG", 5, 1500.0, 1490.0, None, "t0")               # an ordinary open position
+    row = risk.book_round_trip(st, "SBIN", "LONG", 10, 800.0, 798.0, "t1", stop=790.0, count_trade=True)
+    assert row["gross"] == -20.0 and row["net"] < -20.0 and abs(row["r"] - row["net"] / 100.0) < 1e-9
+    assert abs(st.d["day_pnl"] - row["net"]) < 1e-9 and abs(st.d["cash"] - (100000.0 + row["net"])) < 1e-9
+    assert st.d["trades_today"] == 2 and st.d["traded_symbols"] == ["INFY", "SBIN"] and st.d["loss_streak"] == 1
+    assert list(st.positions) == ["INFY"]                     # the open position is untouched
+    again = risk.book_round_trip(st, "INFY", "LONG", 3, 1500.0, 1501.0, "t2")    # extra shares of an open position
+    assert st.d["trades_today"] == 2 and again["r"] == 0.0 and st.positions["INFY"]["qty"] == 5

@@ -151,6 +151,8 @@ class LiveBroker:
         self.lost = {}              # tag -> order sent with no answer and not (yet) in the order book
         self.late_exits = []        # shares of a position's closing order that filled after the bot stopped counting
         self._closing_tracked = True   # False while closing shares the bot never had on record (a late entry fill)
+        self._closing_entry_px = None  # ... and the price those shares were bought (sold) at
+        self.round_trips = []       # shares bought and sold again by the broker itself, for the bot to book
         self.messages = []          # plain lines for the bot's log and events (the bot takes and clears them)
         self.last_final = True
 
@@ -225,7 +227,8 @@ class LiveBroker:
                 self.journal.record(tag, "SENT", order_id=oid, note=f"reply lost ({kind}); found in the order book")
                 log.warning("order %s %s %s: reply lost (%s) but the order exists", oid, side, symbol, kind)
                 return oid, tag
-            self.lost[tag] = {**rec, "looks": 0, "tracked": self._closing_tracked}
+            self.lost[tag] = {**rec, "looks": 0, "tracked": self._closing_tracked,
+                              "entry_px": self._closing_entry_px}
             if asked:
                 self.journal.record(tag, "NOT SENT", note=f"send failed ({kind}: {e}); not in the order book")
                 # watched for a while longer by settle(), in case it turns up late
@@ -298,7 +301,8 @@ class LiveBroker:
         if status not in FINAL:
             self.last_final = False
             self.unsettled[tag] = {"order_id": oid, "role": role, "symbol": symbol, "side": side, "qty": int(qty),
-                                   "accounted": filled, "price": price, "tracked": self._closing_tracked}
+                                   "accounted": filled, "price": price, "tracked": self._closing_tracked,
+                                   "entry_px": self._closing_entry_px}
             self._flag(f"{symbol}: order {oid} is neither filled nor cancelled yet")
         return filled, avg
 
@@ -368,13 +372,16 @@ class LiveBroker:
         sl_id = self._protect(symbol, direction, filled, stop)
         if sl_id is None:
             self._say(f"{symbol}: the stop-loss order could not be placed - closing the position now", logging.ERROR)
-            done, _ = self.exit(symbol, {"direction": direction, "qty": filled}, avg, "stop order failed")
+            done, exit_avg = self.exit(symbol, {"direction": direction, "qty": filled}, avg, "stop order failed")
             left = filled - done
+            # what was bought and sold again here never becomes a position: the bot books its result from this
+            closed = ({"closed": {"qty": done, "entry": avg, "exit": exit_avg, "stop": stop}} if done > 0 else {})
             if left > 0:      # could not close it all: the bot must keep track of what is left and retry
                 self._say(f"{symbol}: {left} shares are still open WITHOUT an exchange stop - the bot keeps "
                           f"trying; check Kite NOW", logging.ERROR)
-                return left, avg, {"sl_order_id": None}
-            return 0, 0.0, {"reason": "the stop-loss order could not be placed, so the position was closed"}
+                return left, avg, {"sl_order_id": None, **closed}
+            return 0, 0.0, {"reason": "the stop-loss order could not be placed, so the position was closed",
+                            **closed}
         return filled, avg, {"sl_order_id": sl_id}
 
     MAX_PRICE_JUMP_PCT = 20.0   # a "last price" further than this from the bot's own is treated as a bad reading
@@ -587,11 +594,14 @@ class LiveBroker:
             direction = "LONG" if side == "BUY" else "SHORT"
             self._say(f"{sym}: {extra} shares of an entry order filled late @ {avg:.2f} - closing them now",
                       logging.ERROR)
-            self._closing_tracked = False        # these shares were never a position on the bot's record
+            self._closing_tracked, self._closing_entry_px = False, float(avg)   # never a position on record
             try:
-                done, _ = self.exit(sym, {"direction": direction, "qty": extra}, avg, "late fill")
+                done, exit_avg = self.exit(sym, {"direction": direction, "qty": extra}, avg, "late fill")
             finally:
-                self._closing_tracked = True
+                self._closing_tracked, self._closing_entry_px = True, None
+            if done > 0:
+                self.round_trips.append({"symbol": sym, "direction": direction, "qty": int(done),
+                                         "entry": float(avg), "exit": float(exit_avg), "why": "late fill closed"})
             if done < extra:
                 self._say(f"{sym}: {extra - done} late-filled shares could NOT be closed - check Kite NOW",
                           logging.ERROR)
@@ -603,6 +613,16 @@ class LiveBroker:
             self._say(f"{sym}: {extra} more shares of a closing order filled late @ {avg:.2f}", logging.WARNING)
             if o.get("tracked", True):
                 self.late_exits.append({"symbol": sym, "qty": int(extra), "avg": float(avg)})
+            elif o.get("entry_px"):             # the close of late-filled entry shares itself filled late
+                self.round_trips.append({"symbol": sym, "direction": "LONG" if side == "SELL" else "SHORT",
+                                         "qty": int(extra), "entry": float(o["entry_px"]), "exit": float(avg),
+                                         "why": "late fill closed"})
+
+    def take_round_trips(self):
+        """Shares the broker bought and sold again by itself since the last call:
+        [{symbol, direction, qty, entry, exit, why}]."""
+        out, self.round_trips = self.round_trips, []
+        return out
 
     def take_late_exits(self):
         """Late fills of positions' closing orders since the last call: [{symbol, qty, avg}]."""

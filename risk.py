@@ -174,6 +174,31 @@ class State:
                 "charges": charges, "net": net, "r": net / risk if risk else 0.0}
 
 
+def book_round_trip(state, symbol, direction, qty, entry, exit_price, when, stop=None, count_trade=False):
+    """Book shares that were bought and sold again WITHOUT ever being a position on the bot's record: an entry
+    the broker closed at once because its stop-loss could not be placed, or shares of an entry order that filled
+    late and were closed. Their result counts like any other: cash, the day's result (so the daily loss limit),
+    charges and the losing streak. `count_trade` also counts it as one of today's trades in this stock.
+    Returns the row for the trade log."""
+    gross = costs.gross_pnl(entry, exit_price, qty, direction)
+    charges = costs.round_trip(entry, exit_price, qty, direction)
+    net = gross - charges
+    state.d["cash"] += net
+    state.d["realized_pnl"] += net
+    state.d["charges_paid"] += charges
+    state.d["day_pnl"] += net
+    if count_trade:
+        state.d["trades_today"] += 1
+        if symbol not in state.d["traded_symbols"]:
+            state.d["traded_symbols"].append(symbol)
+    state._count_streak(net, when)
+    state.save()
+    risk = abs(entry - stop) * qty if stop else 0.0
+    return {"symbol": symbol, "direction": direction, "qty": qty, "entry": entry, "exit": exit_price,
+            "stop": stop, "target": None, "opened": str(when), "closed": str(when), "gross": gross,
+            "charges": charges, "net": net, "r": net / risk if risk else 0.0}
+
+
 def round_tick(price, direction_up: bool, tick: float):
     """Round to a multiple of the stock's price step `tick`: up (direction_up) or down, away from the market for
     marketable limits. A price already on the step stays where it is (2157.0 / 0.1 is 21569.999... in floats)."""

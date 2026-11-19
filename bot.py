@@ -600,6 +600,21 @@ class Bot:
                   f"net ₹{row['net']:.2f} ({row['r']:+.2f}R)"
                   + (f"; {left['qty']} shares are still open" if left else ""), logging.WARNING)
 
+    def book_round_trip(self, rt, when, count_trade=None):
+        """REAL MONEY: book shares the broker bought and sold again by itself (see risk.book_round_trip). They
+        were never a position on record, and their result used to appear nowhere: not in the day's result,
+        not in the daily loss limit, not in the trade log."""
+        sym = rt["symbol"]
+        if count_trade is None:     # a stock with no position and no trade today: this was its trade
+            count_trade = sym not in self.state.positions and sym not in self.state.d["traded_symbols"]
+        row = risk.book_round_trip(self.state, sym, rt["direction"], int(rt["qty"]), float(rt["entry"]),
+                                   float(rt["exit"]), when, stop=rt.get("stop"), count_trade=count_trade)
+        row["reason"] = rt.get("why") or "closed by the broker"
+        log_trade(row, self.mode)
+        icon = T.EXIT_WIN if row["net"] > 0 else T.EXIT_LOSS
+        self.note(f"{icon} EXIT {row['direction']} {sym} x{row['qty']} bought/sold @ {row['entry']:.2f}, closed "
+                  f"@ {row['exit']:.2f} ({row['reason']}) net ₹{row['net']:.2f}", logging.WARNING)
+
     def book_closed(self, sym, qty, price, reason, when):
         """Book `qty` shares of a position as closed at `price`: the whole position, or part of it (the rest
         stays on record without a stop order id, so the next round places a stop for it)."""
@@ -731,6 +746,8 @@ class Bot:
             # shares that a closing order filled late are booked before anything else is done with the position
             for fill in (self.broker.take_late_exits() if hasattr(self.broker, "take_late_exits") else []):
                 self.book_late_exit(fill, now)
+            for rt in (self.broker.take_round_trips() if hasattr(self.broker, "take_round_trips") else []):
+                self.book_round_trip(rt, now)
             if (self.last_recon is None or self.recon_missing
                     or (now - self.last_recon).total_seconds() >= C.RECON_EVERY_SEC):
                 self.reconcile(startup=False)
@@ -872,6 +889,10 @@ class Bot:
             qty = decision.qty
             filled, fill_price, extra = self.broker.enter(sym, direction, qty, ref, stop)
             self.drain_broker()
+            closed = (extra or {}).pop("closed", None)      # shares the broker had to close again at once
+            if closed:
+                self.book_round_trip({"symbol": sym, "direction": direction, "why": "stop order failed", **closed},
+                                     now, count_trade=filled <= 0)
             if filled <= 0:
                 why = (extra or {}).get("reason")
                 self.note(f"{sym}: entry not filled" + (f" - {why}" if why else ""), logging.WARNING)
