@@ -1,6 +1,6 @@
 # Ayodhya ORB 2.0: production-readiness report
 
-Built 2026-11-19 01:33 by `readiness.py` from the evidence listed here. Code version `v1.9.0-58-gef5f2c5`.
+Built 2026-11-19 12:53 by `readiness.py` from the evidence listed here. Code version `v1.9.0-63-gf6978a5`.
 
 This report states what the evidence shows. It is not advice on whether to trade.
 
@@ -22,8 +22,8 @@ This report states what the evidence shows. It is not advice on whether to trade
 ### Strategy
 
 - **FAIL** one-year backtest of the present rules: 336 trades, -16.31%, average -0.20R (range -0.25 to -0.15)
-- **FAIL** lab: 6 ideas tested by walk-forward, none passed
-- **FAIL** forward test on unseen data: nothing has passed (0 registered)
+- **FAIL** lab: 7 ideas tested by walk-forward, none passed
+- **FAIL** forward test on unseen data: nothing has passed (2 registered)
 - **OPEN** real-money record: 1 closed trade(s), net ₹-3.96; the checkpoint needs 30 trades and even then is not proof
 
 ### Operations
@@ -31,11 +31,11 @@ This report states what the evidence shows. It is not advice on whether to trade
 - **OPEN** Closing session change on 7 Dec 2026: NOT yet verified: trading hours and MIS timings change that day and must be checked again before it.
 - **OPEN** alerts reach only the dashboard; nothing reaches a phone when the PC is unattended
 - **OPEN** prices are polled as 15-minute candles; Kite's live tick stream is not used
-- **OPEN** 2 more item(s) about this PC's own set-up are listed on the dashboard's Readiness page and are not written to this file.
+- **OPEN** 1 more item(s) about this PC's own set-up are listed on the dashboard's Readiness page and are not written to this file.
 
 ## Tests
 
-844 passed, 0 failed, 0 skipped, in 71 test files.
+875 passed, 0 failed, 0 skipped, in 73 test files.
 
 | | Area | Requirement | Tests passed | Result |
 |---|---|---|---|---|
@@ -44,15 +44,15 @@ This report states what the evidence shows. It is not advice on whether to trade
 | K3 | Capital protection (Kavach) | No real-money entry on delayed, stale, missing or invalid prices | 23 | PASS |
 | K4 | Capital protection (Kavach) | Positions are sized from the real balance and skipped when not even one share is affordable | 30 | PASS |
 | E1 | Execution | Paper and real money are separate; real money needs both Windows settings and the day's arming | 81 | PASS |
-| E2 | Execution | Every order is recorded before it is sent, carries its own tag and is never sent twice; an order ID is not treated as a fill | 39 | PASS |
-| E3 | Execution | The bot's record is compared with Zerodha at start and every few minutes; a mismatch holds new entries | 35 | PASS |
-| E4 | Execution | Every open position keeps an exchange stop-loss, checked on every round | 37 | PASS |
+| E2 | Execution | Every order is recorded before it is sent, carries its own tag and is never sent twice; an order ID is not treated as a fill | 40 | PASS |
+| E3 | Execution | The bot's record is compared with Zerodha at start and every few minutes; a mismatch holds new entries | 36 | PASS |
+| E4 | Execution | Every open position keeps an exchange stop-loss, checked on every round | 38 | PASS |
 | E5 | Execution | Only one module can send or cancel an order; the dashboard and the analysis pages cannot reach it | 31 | PASS |
 | E6 | Execution | Positions are closed before the broker's own square-off | 7 | PASS |
 | D1 | Market data | Candles are validated; delays and gaps are measured and shown | 37 | PASS |
 | D2 | Market data | Kite's request limits are respected and a data failure falls back safely | 19 | PASS |
 | D3 | Market data | Scanner and Review build in the background with progress and Cancel | 19 | PASS |
-| S1 | Strategy testing | No strategy can see a future candle; the lab's copy of the live rules matches them candle by candle | 19 | PASS |
+| S1 | Strategy testing | No strategy can see a future candle; the lab's copy of the live rules matches them candle by candle | 25 | PASS |
 | S2 | Strategy testing | Backtests include charges and slippage and give the same answer every time | 27 | PASS |
 | S3 | Strategy testing | Thirty trades is treated as an early checkpoint, not as proof | 4 | PASS |
 | A1 | Research and portfolio | Chanakya shows measured evidence and Kavach's answer; no probabilities, no orders | 19 | PASS |
@@ -92,6 +92,7 @@ The real trading loop (`bot.Bot.cycle`) was driven through 238 archived trading 
 | failed_breakout | 133 | -0.48 | FAIL |
 | orb | 128 | -0.21 | FAIL |
 | orb_atr | 70 | -0.35 | FAIL |
+| orb_late | 163 | -0.16 | FAIL |
 | orb_regime | 84 | -0.15 | FAIL |
 | orb_retest | 68 | -0.65 | FAIL |
 | vwap_pullback | 162 | -0.42 | FAIL |
