@@ -834,3 +834,61 @@ def test_a_stop_on_the_wrong_side_of_unrecorded_shares_is_not_kept():
     z.net = {"SBIN": -10}                                                        # ... but Zerodha shows a short
     rep = LiveBroker(z, sleep=lambda s: None).recover({}, startup=True)
     assert rep["kept_stops"] == [] and len(rep["cancelled"]) == 1                # it would add to the position
+
+
+# ---------------------------------------------------------------- P1, second half: the same, seen from the price
+def price_feed(monkeypatch, price):
+    feed = data_yahoo.fetch
+    monkeypatch.setattr(data_yahoo, "fetch", lambda s, i, r, **kw: (feed(s, i, r)[0], price[0], None))
+
+
+def test_bot_closes_when_the_price_is_through_the_stop_limit_whatever_the_status_says(live, monkeypatch):
+    """Kite forum, Dec 2025: a stop stayed TRIGGER PENDING after the price went through it. The status alone is
+    not trusted: a Kite price beyond the stop's limit, with the stop unfilled, closes the position."""
+    b, z = live
+    b.cycle()
+    pos = dict(b.state.positions["SBIN"])
+    monkeypatch.setattr(b, "price_source", lambda: "kite")
+    price = [pos["stop"] * 0.99]                              # 1% below the stop: beyond its 0.5% limit
+    price_feed(monkeypatch, price)
+    assert z.book[pos["sl_order_id"]]["status"] == "TRIGGER PENDING"             # Zerodha says nothing happened
+    b.cycle()
+    assert "SBIN" not in b.state.positions and z.book[pos["sl_order_id"]]["status"] == "CANCELLED"
+    sells = [o for o in z.sent("LIMIT") if o["transaction_type"] == "SELL"]
+    assert len(sells) == 1 and sells[0]["quantity"] == pos["qty"] and sells[0]["price"] < price[0]
+    assert any("is through the stop-loss limit" in e for e in b.events)
+
+
+def test_a_price_between_the_trigger_and_the_limit_is_left_to_the_exchange_stop(live, monkeypatch):
+    b, z = live
+    b.cycle()
+    pos = dict(b.state.positions["SBIN"])
+    n = len(z.book)
+    monkeypatch.setattr(b, "price_source", lambda: "kite")
+    price_feed(monkeypatch, [pos["stop"] * 0.998])            # below the trigger, above the limit: it can still fill
+    b.cycle()
+    assert "SBIN" in b.state.positions and len(z.book) == n
+
+
+def test_a_price_that_is_not_from_kite_this_round_never_closes_a_position(live, monkeypatch):
+    b, z = live
+    b.cycle()
+    pos = dict(b.state.positions["SBIN"])
+    n = len(z.book)
+    monkeypatch.setattr(b, "price_source", lambda: "yahoo")   # delayed fallback prices
+    price_feed(monkeypatch, [pos["stop"] * 0.99])
+    b.cycle()
+    assert "SBIN" in b.state.positions and len(z.book) == n
+    monkeypatch.setattr(b, "price_source", lambda: "kite")
+    b.prices["SBIN"] = pos["stop"] * 0.99                     # an old low price is on record ...
+    monkeypatch.setattr(data_yahoo, "fetch", lambda s, i, r, **kw: (_ for _ in ()).throw(data_yahoo.DataError("down")))
+    b.cycle()                                                 # ... but this round's price request failed
+    assert "SBIN" in b.state.positions and len(z.book) == n
+
+
+def test_through_stop_limit_both_directions():
+    b = lb(Zerodha())
+    long, short = {"direction": "LONG", "stop": 100.0}, {"direction": "SHORT", "stop": 100.0}
+    assert b.through_stop_limit(long, 99.4) and not b.through_stop_limit(long, 99.6)
+    assert b.through_stop_limit(short, 100.6) and not b.through_stop_limit(short, 100.4)
+    assert not b.through_stop_limit(long, None) and not b.through_stop_limit({"direction": "LONG"}, 50.0)

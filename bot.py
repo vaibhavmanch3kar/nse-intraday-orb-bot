@@ -741,6 +741,16 @@ class Bot:
                               logging.ERROR)
                     self.close_position(sym, px, "stop triggered, not filled", now)
                     continue
+                elif (stop_state == "ok" and sym in bars_by_sym and self.price_source() == "kite"
+                      and self.broker.through_stop_limit(pos, self.prices.get(sym))):
+                    # The same thing, seen from the price. Zerodha has been reported to leave a triggered stop at
+                    # "TRIGGER PENDING" (Kite forum, Dec 2025), so its status alone is not trusted: a Kite price
+                    # read THIS round beyond the stop's limit, with the stop not filled, means it cannot fill.
+                    self.note(f"{T.WARN_ICON} {sym}: the price ({px:.2f}) is through the stop-loss limit and the "
+                              f"exchange stop has not filled - closing the position at the market price now",
+                              logging.ERROR)
+                    self.close_position(sym, px, "stop triggered, not filled", now)
+                    continue
             if close_all:
                 self.close_position(sym, px, "closed from dashboard", now)
                 continue

@@ -138,6 +138,7 @@ class PaperBroker:
 
 class LiveBroker:
     live = True
+    STOP_LIMIT_PCT = 0.5        # the stop-loss is a stop-LIMIT: its limit sits this far beyond its trigger
 
     def __init__(self, kite, sleep=time.sleep, journal=None, ticks=None):
         self.kite = kite
@@ -325,7 +326,8 @@ class LiveBroker:
         exit_side = _side(direction, closing=True)
         tick = self.tick(symbol)
         trig = round_tick(stop, direction == "SHORT", tick)
-        lim = round_tick(stop * (1 - 0.5 / 100) if exit_side == "SELL" else stop * (1 + 0.5 / 100),
+        band = self.STOP_LIMIT_PCT / 100
+        lim = round_tick(stop * (1 - band) if exit_side == "SELL" else stop * (1 + band),
                          exit_side == "BUY", tick)
         try:
             sl_id, tag = self._place(symbol, exit_side, qty, self.kite.ORDER_TYPE_SL, price=lim, trigger=trig,
@@ -374,6 +376,15 @@ class LiveBroker:
                 return left, avg, {"sl_order_id": None}
             return 0, 0.0, {"reason": "the stop-loss order could not be placed, so the position was closed"}
         return filled, avg, {"sl_order_id": sl_id}
+
+    def through_stop_limit(self, pos, price):
+        """Is `price` beyond the LIMIT of the position's stop-loss order? There the order can no longer fill: a
+        sell limit rests above the market (a buy limit below it), so the exchange is not protecting the position."""
+        stop = pos.get("stop")
+        if not price or not stop:
+            return False
+        band = self.STOP_LIMIT_PCT / 100
+        return price < stop * (1 - band) if pos["direction"] == "LONG" else price > stop * (1 + band)
 
     def stopped_out(self, symbol, pos):
         oid = pos.get("sl_order_id")
