@@ -1,6 +1,6 @@
 # Ayodhya ORB 2.0: production-readiness report
 
-Built 2026-11-19 15:50 by `readiness.py` from the evidence listed here. Code version `v1.9.0-76-ge6d4f5e`.
+Built 2026-11-19 16:36 by `readiness.py` from the evidence listed here. Code version `v1.9.0-78-g41bde58`.
 
 This report states what the evidence shows. It is not advice on whether to trade.
 
@@ -23,7 +23,7 @@ This report states what the evidence shows. It is not advice on whether to trade
 
 - **FAIL** one-year backtest of the present rules: 298 trades, -15.36%, average -0.22R (range -0.27 to -0.17)
 - **FAIL** lab: 7 ideas tested by walk-forward, none passed
-- **FAIL** forward test on unseen data: nothing has passed (4 registered)
+- **FAIL** forward test on unseen data: nothing has passed (2 registered)
 - **OPEN** real-money record: 1 closed trade(s), net ₹-3.96; the checkpoint needs 30 trades and even then is not proof
 
 ### Operations
