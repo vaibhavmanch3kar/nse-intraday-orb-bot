@@ -892,3 +892,31 @@ def test_through_stop_limit_both_directions():
     assert b.through_stop_limit(long, 99.4) and not b.through_stop_limit(long, 99.6)
     assert b.through_stop_limit(short, 100.6) and not b.through_stop_limit(short, 100.4)
     assert not b.through_stop_limit(long, None) and not b.through_stop_limit({"direction": "LONG"}, 50.0)
+
+
+# ---------------------------------------------------------------- exit attempts are priced from the price now
+def test_each_exit_attempt_is_priced_from_the_price_now():
+    """Review, 19 Nov 2026: every exit attempt reused the price read at the start of the round."""
+    z = Zerodha()
+    prices = iter([790.0, 780.0, 770.0])
+    z.ltp = lambda key: {key: {"last_price": next(prices)}}
+    z.fill = [0, 0, None]                                     # two attempts do not fill, the third does
+    b = lb(z)
+    done, avg = b.exit("SBIN", {"direction": "LONG", "qty": 10}, 800.0, "time stop")
+    sells = [o["price"] for o in z.sent("LIMIT")]
+    assert done == 10 and len(sells) == 3
+    assert sells[0] < 790.0 and sells[1] < 780.0 and sells[2] < 770.0 and sells[0] > sells[1] > sells[2]
+    assert sells[0] > 780.0                                   # the first is priced from 790, not from a later price
+
+
+def test_exit_uses_the_bots_price_when_zerodha_gives_none_or_a_bad_one():
+    z = Zerodha()                                             # no quote at all (as in every other test here)
+    b = lb(z)
+    b.exit("SBIN", {"direction": "LONG", "qty": 10}, 800.0, "target")
+    assert 798.0 < z.sent("LIMIT")[0]["price"] < 800.0
+    z2 = Zerodha()
+    z2.ltp = lambda key: {key: {"last_price": 8.0}}           # a nonsense reading, 99% away
+    b2 = lb(z2)
+    assert b2.last_price("SBIN", near=800.0) is None and b2.last_price("SBIN") == 8.0
+    b2.exit("SBIN", {"direction": "LONG", "qty": 10}, 800.0, "target")
+    assert 798.0 < z2.sent("LIMIT")[0]["price"] < 800.0

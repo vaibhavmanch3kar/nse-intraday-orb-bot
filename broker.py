@@ -377,6 +377,20 @@ class LiveBroker:
             return 0, 0.0, {"reason": "the stop-loss order could not be placed, so the position was closed"}
         return filled, avg, {"sl_order_id": sl_id}
 
+    MAX_PRICE_JUMP_PCT = 20.0   # a "last price" further than this from the bot's own is treated as a bad reading
+
+    def last_price(self, symbol, near=None):
+        """The stock's last traded price at Zerodha right now, or None if it can't be read (or is implausibly
+        far from `near`, the price the bot already has). Read-only."""
+        try:
+            key = f"{self.kite.EXCHANGE_NSE}:{symbol}"
+            px = float(((self.kite.ltp(key) or {}).get(key) or {}).get("last_price") or 0.0)
+        except Exception:  # noqa: BLE001 - no quote just now: the caller uses the price it has
+            return None
+        if px <= 0 or (near and abs(px / near - 1) * 100 > self.MAX_PRICE_JUMP_PCT):
+            return None
+        return px
+
     def through_stop_limit(self, pos, price):
         """Is `price` beyond the LIMIT of the position's stop-loss order? There the order can no longer fill: a
         sell limit rests above the market (a buy limit below it), so the exchange is not protecting the position."""
@@ -463,8 +477,12 @@ class LiveBroker:
             return done_qty, stop_avg
         side = _side(pos["direction"], closing=True)
         for attempt in range(C.EXIT_RETRIES):
+            # Each attempt is priced from the stock's price NOW. They used to reuse the price the bot had read at
+            # the start of the round for every attempt, up to several minutes old by the last one: in a fast
+            # move the limit stayed behind the market and no attempt could fill.
+            price = self.last_price(symbol, near=ref_price) or ref_price
             try:
-                filled, avg = self._limit_and_wait(symbol, side, remaining, ref_price,
+                filled, avg = self._limit_and_wait(symbol, side, remaining, price,
                                                    C.LIMIT_BUFFER_PCT * (attempt + 1), role="X")
             except OrderNotSent:
                 continue                      # Zerodha has no such order: safe to try again
