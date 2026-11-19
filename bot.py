@@ -286,6 +286,7 @@ class Bot:
             return False
         self.kite = kite_proxy.get_kite()
         self.broker = LiveBroker(self.kite)
+        self.note("REAL MONEY: Zerodha's price step per stock - " + self.broker.tick_report(C.WATCHLIST))
         self.reconcile()
         self.sync_live_balance(now_ist())
         return True

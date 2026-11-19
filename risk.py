@@ -174,7 +174,8 @@ class State:
                 "charges": charges, "net": net, "r": net / risk if risk else 0.0}
 
 
-def round_tick(price, direction_up: bool):
-    """Round to the 0.05 tick, away from the market for marketable limits."""
-    n = price / C.TICK
-    return round((math.ceil(n) if direction_up else math.floor(n)) * C.TICK, 2)
+def round_tick(price, direction_up: bool, tick: float):
+    """Round to a multiple of the stock's price step `tick`: up (direction_up) or down, away from the market for
+    marketable limits. A price already on the step stays where it is (2157.0 / 0.1 is 21569.999... in floats)."""
+    n = round(price / tick, 6)
+    return round((math.ceil(n) if direction_up else math.floor(n)) * tick, 4)

@@ -25,14 +25,19 @@ Execution safety (2.0), all in LiveBroker, the ONLY place that sends an order to
     opens or closes a position the bot has no record of.
 """
 
+import datetime as dt
+import json
 import logging
+import os
 import time
 
 import config as C
 import orders
+import safefile
 from risk import round_tick
 
 log = logging.getLogger("broker")
+IST = dt.timezone(dt.timedelta(hours=5, minutes=30))
 
 FINAL = ("COMPLETE", "CANCELLED", "REJECTED")
 # Zerodha said no (wrong input, no margin, not allowed, not logged in): the order does not exist.
@@ -57,6 +62,62 @@ def _side(direction, closing=False):
     return "BUY" if buy else "SELL"
 
 
+class TickSizes:
+    """Each NSE stock's price step (tick), from Kite's instrument list. Zerodha refuses an order whose price is not
+    a multiple of it, and NSE sets it per stock (0.01, 0.05, 0.10, ...), so every real order is rounded to its own
+    stock's step. Read once a day and kept in data/kite_ticks_NSE.json. If the list can't be read, get() says
+    None and it is tried again after RETRY_SEC (not on every order)."""
+    RETRY_SEC = 300
+
+    def __init__(self, kite, path=None, clock=None):
+        self.kite = kite
+        self.path = path or os.path.join(C.DATA_DIR, "kite_ticks_NSE.json")
+        self.clock = clock or (lambda: dt.datetime.now(IST))
+        self.day = None
+        self.ticks = {}
+        self.failed_at = None
+
+    def _load(self):
+        now = self.clock()
+        today = now.date().isoformat()
+        if self.day == today:
+            return
+        try:
+            with open(self.path, encoding="utf-8") as f:
+                cached = json.load(f)
+            if cached.get("day") == today and cached.get("ticks"):
+                self.day, self.ticks = today, cached["ticks"]
+                return
+        except (OSError, ValueError, AttributeError):
+            pass
+        if self.failed_at is not None and (now - self.failed_at).total_seconds() < self.RETRY_SEC:
+            return
+        try:
+            rows = self.kite.instruments("NSE") or []
+            ticks = {}
+            for r in rows:
+                t = float(r.get("tick_size") or 0)
+                if t > 0 and r.get("tradingsymbol"):
+                    ticks[r["tradingsymbol"]] = t
+            if not ticks:
+                raise ValueError("no price steps in Kite's instrument list")
+        except Exception as e:  # noqa: BLE001 - network, proxy, session: unknown for now, tried again later
+            self.failed_at = now
+            log.warning("Kite's instrument list (price steps) could not be read: %s", type(e).__name__)
+            return
+        self.day, self.ticks, self.failed_at = today, ticks, None
+        try:
+            safefile.write_json(self.path, {"day": today, "ticks": ticks})
+        except OSError as e:
+            log.warning("price steps not saved (%s); they are kept in memory", e)
+
+    def get(self, symbol):
+        """The stock's price step, or None if it is not known."""
+        self._load()
+        t = self.ticks.get(symbol) if self.day else None
+        return float(t) if t else None
+
+
 class PaperBroker:
     live = False
     uncertain = None
@@ -78,9 +139,11 @@ class PaperBroker:
 class LiveBroker:
     live = True
 
-    def __init__(self, kite, sleep=time.sleep, journal=None):
+    def __init__(self, kite, sleep=time.sleep, journal=None, ticks=None):
         self.kite = kite
         self.sleep = sleep
+        self.ticks = ticks if ticks is not None else TickSizes(kite)   # each stock's price step
+        self.tick_warned = set()
         self.journal = journal or orders.Journal("live")
         self.uncertain = None       # plain words while an order's fate is unknown: no new entry meanwhile
         self.unsettled = {}         # tag -> order left neither filled nor cancelled (settle() finishes it)
@@ -89,6 +152,22 @@ class LiveBroker:
         self.last_final = True
 
     # -- helpers
+    def tick(self, symbol):
+        """The price step to round this stock's stop and exit orders to: its own, or FALLBACK_TICK if it is not
+        known (a closing order must never be held back). enter() sends nothing when it is not known."""
+        t = self.ticks.get(symbol)
+        if t:
+            return t
+        if symbol not in self.tick_warned:
+            self.tick_warned.add(symbol)
+            self._say(f"{symbol}: Zerodha's price step is not known - its stop and exit orders are rounded to "
+                      f"{C.FALLBACK_TICK:.2f}", logging.ERROR)
+        return C.FALLBACK_TICK
+
+    def tick_report(self, symbols):
+        """One plain line: the price step of each stock (for the log at the start of real-money trading)."""
+        return ", ".join(f"{s} {self.ticks.get(s):.2f}" if self.ticks.get(s) else f"{s} NOT KNOWN" for s in symbols)
+
     def _say(self, text, level=logging.WARNING):
         log.log(level, text)
         self.messages.append((level, text))
@@ -185,7 +264,7 @@ class LiveBroker:
         """A marketable limit order, watched until it is final. Returns (filled, average price).
         self.last_final says whether Zerodha confirmed the order finished (filled, cancelled or rejected)."""
         up = side == "BUY"
-        price = round_tick(ref_price * (1 + buffer_pct / 100 if up else 1 - buffer_pct / 100), up)
+        price = round_tick(ref_price * (1 + buffer_pct / 100 if up else 1 - buffer_pct / 100), up, self.tick(symbol))
         self.last_final = True
         oid, tag = self._place(symbol, side, qty, self.kite.ORDER_TYPE_LIMIT, price=price, role=role)
         deadline = time.monotonic() + C.ORDER_FILL_TIMEOUT_SEC
@@ -242,9 +321,10 @@ class LiveBroker:
     def _protect(self, symbol, direction, qty, stop):
         """Place the exchange stop-loss for `qty` and check Zerodha took it. Returns its order id, or None."""
         exit_side = _side(direction, closing=True)
-        trig = round_tick(stop, direction == "SHORT")
+        tick = self.tick(symbol)
+        trig = round_tick(stop, direction == "SHORT", tick)
         lim = round_tick(stop * (1 - 0.5 / 100) if exit_side == "SELL" else stop * (1 + 0.5 / 100),
-                         exit_side == "BUY")
+                         exit_side == "BUY", tick)
         try:
             sl_id, tag = self._place(symbol, exit_side, qty, self.kite.ORDER_TYPE_SL, price=lim, trigger=trig,
                                      role="S")
@@ -266,6 +346,9 @@ class LiveBroker:
         side = _side(direction)
         if self.uncertain:
             return 0, 0.0, {"reason": f"order state uncertain ({self.uncertain})"}
+        if not self.ticks.get(symbol):
+            return 0, 0.0, {"reason": "Zerodha's price step for this stock is not known (Kite's instrument list "
+                                      "could not be read), so no order is sent"}
         ok, why = self.margin_ok(symbol, side, qty, ref_price)
         if not ok:
             return 0, 0.0, {"reason": why}

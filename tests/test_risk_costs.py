@@ -101,6 +101,6 @@ def test_state_persists(tmp_path):
 
 
 def test_round_tick():
-    assert risk.round_tick(100.01, True) == 100.05
-    assert risk.round_tick(100.04, False) == 100.0
-    assert risk.round_tick(100.05, True) == 100.05
+    assert risk.round_tick(100.01, True, 0.05) == 100.05
+    assert risk.round_tick(100.04, False, 0.05) == 100.0
+    assert risk.round_tick(100.05, True, 0.05) == 100.05

@@ -40,6 +40,10 @@ class FakeKite:
     def order_history(self, oid):
         return [self.orders[oid]]
 
+    def instruments(self, exchange=None):
+        """Kite's instrument list: a 0.05 price step for any stock a test trades."""
+        return [{"tradingsymbol": s, "tick_size": 0.05} for s in sorted(set(C.WATCHLIST) | {"SBIN", "INFY"})]
+
     def cancel_order(self, variety, oid):
         self.cancelled.append(oid)
         if self.orders[oid]["status"] in ("OPEN", "TRIGGER PENDING"):

@@ -174,7 +174,11 @@ EXIT_RETRIES = _env("EXIT_RETRIES", 5, int)
 CANCEL_WAIT_SEC = _env("CANCEL_WAIT_SEC", 10, int)            # wait this long for Zerodha to confirm a cancel
 MARGIN_CHECK = _env("MARGIN_CHECK", True, bool)               # ask Zerodha for the margin before each entry
 RECON_EVERY_SEC = _env("RECON_EVERY_SEC", 300, int)           # compare positions with Zerodha this often
-TICK = 0.05                                                   # valid for every NSE equity tick size
+# Zerodha refuses a price that is not a multiple of the stock's own price step (tick). NSE sets it per stock
+# (0.01, 0.05, 0.10, 0.50, ...): real orders use each stock's step from Kite's instrument list (broker.TickSizes).
+# When that list can't be read, no entry is sent, and stops and exits round to FALLBACK_TICK, which is valid for
+# every stock with a step of 0.10 or less.
+FALLBACK_TICK = 0.10
 
 # ── Loop / files ───────────────────────────────────────────────────────────
 POLL_SEC = _env("POLL_SEC", 60, int)

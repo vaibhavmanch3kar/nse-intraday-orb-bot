@@ -62,6 +62,10 @@ class Zerodha:
             raise ConnectionError("reply lost")
         return oid
 
+    def instruments(self, exchange=None):
+        """Kite's instrument list: a 0.05 price step for any stock a test trades."""
+        return [{"tradingsymbol": s, "tick_size": 0.05} for s in sorted(set(C.WATCHLIST) | {"SBIN", "INFY"})]
+
     def order_history(self, oid):
         if self.status_down:
             self.status_down -= 1
