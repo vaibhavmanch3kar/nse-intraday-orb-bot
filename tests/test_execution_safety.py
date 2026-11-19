@@ -508,3 +508,64 @@ def test_real_money_trade_logs_its_best_and_worst_price(live, monkeypatch):
     assert row["reason"] == "exchange stop"
     assert float(row["best_price"]) == round(entry + 0.7, 2) and float(row["worst_price"]) == round(stop - 0.05, 2)
     assert float(row["best_r"]) > 0 and float(row["worst_r"]) <= -1.0
+
+
+# ---------------------------------------------------------------- P2: an exit after the stop has partly filled
+def test_exit_after_a_partly_filled_stop_closes_only_the_rest():
+    """Red-team finding, 19 Nov 2026: the stop sold 4 of 10, then the bot's exit sold all 10 again."""
+    z = Zerodha()
+    b = lb(z)
+    qty, _, extra = b.enter("SBIN", "LONG", 10, 800.0, 790.0)
+    sl = extra["sl_order_id"]
+    z.book[sl].update(status="OPEN", filled_quantity=4, average_price=789.5)   # triggered, 4 shares sold so far
+    done, avg = b.exit("SBIN", {"direction": "LONG", "qty": 10, "sl_order_id": sl}, 786.0, "time stop")
+    closing = [o for o in z.sent("LIMIT") if o["transaction_type"] == "SELL"]
+    assert len(closing) == 1 and closing[0]["quantity"] == 6                   # only the other 6
+    assert done == 10 and abs(avg - (4 * 789.5 + 6 * closing[0]["price"]) / 10) < 1e-9
+    assert z.book[sl]["status"] == "CANCELLED"
+    assert any("had already sold 4 of 10" in text for _, text in b.messages)
+
+
+def test_exit_sends_nothing_while_the_stop_cancel_is_not_confirmed():
+    z = Zerodha()
+    b = lb(z)
+    qty, _, extra = b.enter("SBIN", "LONG", 10, 800.0, 790.0)
+    n = len(z.book)
+    z.cancel_slow = True                                                       # accepted, not confirmed
+    done, _ = b.exit("SBIN", {"direction": "LONG", "qty": 10, "sl_order_id": extra["sl_order_id"]}, 805.0, "target")
+    assert done == 0 and len(z.book) == n                                      # no closing order next to a live stop
+    assert z.book[extra["sl_order_id"]]["status"] == "TRIGGER PENDING"
+    assert any("cancel of the stop-loss order is not confirmed" in text for _, text in b.messages)
+
+
+def test_exit_waits_for_a_slow_cancel_before_it_sells():
+    z = Zerodha()
+    b = lb(z)
+    qty, _, extra = b.enter("SBIN", "LONG", 10, 800.0, 790.0)
+    sl = extra["sl_order_id"]
+    asked = []
+    real = z.order_history
+
+    def slow(oid):                                    # the cancel shows only on the second look
+        if oid == sl and z.cancelled:
+            asked.append(oid)
+            if len(asked) >= 2:
+                z.book[sl]["status"] = "CANCELLED"
+        return real(oid)
+    z.cancel_slow, z.order_history = True, slow
+    done, _ = b.exit("SBIN", {"direction": "LONG", "qty": 10, "sl_order_id": sl}, 805.0, "target")
+    assert done == 10 and len(asked) >= 2
+
+
+def test_a_stop_that_fills_while_being_cancelled_is_the_exit():
+    z = Zerodha()
+    b = lb(z)
+    qty, _, extra = b.enter("SBIN", "LONG", 10, 800.0, 790.0)
+    sl = extra["sl_order_id"]
+    n = len(z.book)
+
+    def cancel(variety, oid):                         # too late: the exchange had filled it
+        z.book[oid].update(status="COMPLETE", filled_quantity=10, average_price=789.0)
+    z.cancel_order = cancel
+    done, avg = b.exit("SBIN", {"direction": "LONG", "qty": 10, "sl_order_id": sl}, 805.0, "target")
+    assert (done, avg) == (10, 789.0) and len(z.book) == n                     # no second sale

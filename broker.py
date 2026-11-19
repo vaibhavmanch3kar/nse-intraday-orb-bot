@@ -403,15 +403,11 @@ class LiveBroker:
 
     def exit(self, symbol, pos, ref_price, reason):
         oid = pos.get("sl_order_id")
+        stop_qty, stop_avg = 0, 0.0         # shares the stop-loss order itself sold before it was cancelled
         if oid:
             try:
                 status, filled, avg = self._status(oid)
                 if status == "COMPLETE":
-                    return filled, avg
-                self._cancel(oid)
-                self.sleep(1)
-                status, filled, avg = self._status(oid)
-                if status == "COMPLETE":  # stop filled while we were cancelling
                     return filled, avg
             except StatusUnknown:
                 # can't ask about the stop: sending a closing order now could sell twice. Leave the exchange
@@ -419,7 +415,32 @@ class LiveBroker:
                 self._say(f"{symbol}: Zerodha can't be asked about the stop order just now - exit postponed "
                           f"(the exchange stop stays in place)", logging.ERROR)
                 return 0, 0.0
-        remaining, done_qty, value = int(pos["qty"]), 0, 0.0
+            # Cancel the stop and WAIT for Zerodha to confirm it. Until the cancel is confirmed the stop can
+            # still fill, and a closing order sent meanwhile would sell the same shares twice.
+            self._cancel(oid)
+            status = ""
+            for _ in range(max(1, C.CANCEL_WAIT_SEC)):
+                self.sleep(1)
+                try:
+                    status, filled, avg = self._status(oid, tries=1)
+                except StatusUnknown:
+                    continue
+                if status in FINAL:
+                    break
+            if status == "COMPLETE":        # the stop filled while it was being cancelled
+                return filled, avg
+            if status not in FINAL:
+                self._say(f"{symbol}: the cancel of the stop-loss order is not confirmed yet - exit postponed to "
+                          f"the next round (no closing order is sent while the stop may still fill)", logging.ERROR)
+                return 0, 0.0
+            stop_qty, stop_avg = int(filled or 0), float(avg or 0.0)
+            if stop_qty:
+                self._say(f"{symbol}: the stop-loss order had already sold {stop_qty} of {int(pos['qty'])} shares "
+                          f"@ {stop_avg:.2f} - closing only the other {int(pos['qty']) - stop_qty}", logging.WARNING)
+        remaining = int(pos["qty"]) - stop_qty
+        done_qty, value = stop_qty, stop_qty * stop_avg
+        if remaining <= 0:
+            return done_qty, stop_avg
         side = _side(pos["direction"], closing=True)
         for attempt in range(C.EXIT_RETRIES):
             try:
