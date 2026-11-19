@@ -111,7 +111,7 @@ def test_every_idea_runs_through_the_one_engine_and_the_bot_never_loads_the_lab(
     assert "place_order" not in src and "broker" not in src.split('"""', 2)[2]
     bot_files = buildinfo.bot_files()
     assert "yantra.py" not in bot_files and "yantra_strategies.py" not in bot_files
-    assert set(Y.STRATEGIES) == set(Y.WHAT) and sum(len(c.grid) for c in Y.STRATEGIES.values()) == 15
+    assert set(Y.STRATEGIES) == set(Y.WHAT) and sum(len(c.grid) for c in Y.STRATEGIES.values()) == 17
 
 
 def test_default_engine_still_uses_the_live_rules(rules, monkeypatch, tmp_path):
@@ -239,3 +239,63 @@ def test_the_lab_never_touches_the_old_holdout_to_pass_anything():
     src = open(os.path.join(ROOT, "yantra.py"), encoding="utf-8").read()
     body = src.split('"""', 2)[2]
     assert "DEV_START, DEV_END" in body and body.count("USED_END") == 1    # the used period is named, never run
+
+
+# ---------------------------------------------------------------- orb_late: the late entry after a low-volume breakout
+def late_day(third_close=100.9, third_vol=1500, width_high=100.5):
+    """Five quiet sessions (every candle 1000 shares), then a day whose opening candle sets the range, the third
+    candle breaks out on normal volume (1.0x, refused by the live 1.2x rule) and the fourth closes at
+    `third_close` on `third_vol` shares."""
+    bars, d = [], dt.date(2026, 1, 5)
+    while len({b["t"].date() for b in bars}) < 5:
+        if d.weekday() < 5:
+            t = dt.datetime.combine(d, dt.time(9, 15), tzinfo=IST)
+            for k in range(25):
+                bars.append({"t": t, "o": 100.0, "h": 100.2, "l": 99.9, "c": 100.0 + (0.05 if k % 2 else 0), "v": 1000})
+                t += dt.timedelta(minutes=15)
+        d += dt.timedelta(days=1)
+    while d.weekday() >= 5:
+        d += dt.timedelta(days=1)
+    t0 = dt.datetime.combine(d, dt.time(9, 15), tzinfo=IST)
+    day = [(100.0, width_high, 99.8, 100.2, 1000), (100.2, 100.4, 100.1, 100.3, 1000),
+           (100.3, 100.8, 100.25, 100.7, 1000), (100.7, 101.0, 100.6, third_close, third_vol)]
+    for k, (o, h, lo, c, v) in enumerate(day):
+        bars.append({"t": t0 + dt.timedelta(minutes=15 * k), "o": o, "h": max(h, c), "l": min(lo, c), "c": c, "v": v})
+    return bars
+
+
+def signals(strat, bars):
+    return [(bars[i]["t"].strftime("%H:%M"), strat.evaluate(bars, i)["signal"]) for i in range(len(bars) - 4, len(bars))]
+
+
+def test_late_entry_buys_a_low_volume_breakout_once_its_volume_comes(rules):
+    bars = late_day()
+    assert signals(Y.Orb(), bars) == [("09:15", None), ("09:30", None), ("09:45", None), ("10:00", None)]
+    ev = Y.OrbLate(wait=2).evaluate(bars, len(bars) - 1)
+    assert ev["signal"] == "LONG" and ev["stop"] == 99.8           # the stop is the live rule's: the range low
+
+
+def test_no_late_entry_when_price_went_back_inside_the_range(rules):
+    bars = late_day(third_close=100.45)                            # the fourth candle closes back inside
+    assert Y.OrbLate(wait=2).evaluate(bars, len(bars) - 1)["signal"] is None
+
+
+def test_no_late_entry_without_the_volume(rules):
+    bars = late_day(third_vol=1000)
+    assert Y.OrbLate(wait=2).evaluate(bars, len(bars) - 1)["signal"] is None
+
+
+def test_no_late_entry_for_a_breakout_refused_for_another_reason(rules):
+    bars = late_day(width_high=101.6)                              # a 1.8% opening range: too wide, not low volume
+    for i in range(len(bars) - 4, len(bars)):
+        assert Y.OrbLate(wait=2).evaluate(bars, i)["signal"] is None
+
+
+def test_late_entry_takes_every_breakout_the_live_rules_take(rules):
+    bars = market(days=40, seed=11)
+    orb, late = Y.Orb(), Y.OrbLate(wait=2)
+    taken = [i for i in range(len(bars)) if orb.evaluate(bars, i)["signal"]]
+    assert taken, "the random market should have some live-rule breakouts"
+    for i in taken:
+        assert late.evaluate(bars, i)["signal"] == orb.evaluate(bars, i)["signal"]
+        assert late.evaluate(bars, i)["stop"] == orb.evaluate(bars, i)["stop"]

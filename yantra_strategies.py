@@ -305,7 +305,37 @@ class OrbRegime(Base):
         return d, (f.or_low[i] if d == "LONG" else f.or_high[i])
 
 
-STRATEGIES = {c.name: c for c in (Orb, OrbRetest, FailedBreakout, VwapPullback, OrbAtr, OrbRegime)}
+class OrbLate(Base):
+    """The live breakout, plus a late entry: a breakout refused ONLY for low volume may still be bought up to
+    `wait` candles later, on the first candle that is still beyond the range, has the volume, and passes every
+    other filter of the live rules. (Added 19 Nov 2026 for a forward paper test after a missed low-volume
+    breakout; on the archive it lost slightly more than the live rules.)"""
+    name = "orb_late"
+    grid = [{"wait": 2}, {"wait": 4}]
+
+    def signal(self, bars, i, f):
+        d = self.breakout(bars, i, f)
+        if d and self.orb_filters(bars, i, f, d):
+            return d, (f.or_low[i] if d == "LONG" else f.or_high[i])
+        if f.or_high[i] is None:
+            return None
+        for j in range(max(f.day_start[i], i - self.params.get("wait", 2)), i):
+            dj = self.breakout(bars, j, f)
+            if not dj or self.orb_filters(bars, j, f, dj):
+                continue                       # no breakout at j, or it was taken then
+            if not self.orb_filters(bars, j, f, dj, vol_mult=1e-9):
+                continue                       # refused at j for something other than volume
+            if not all((bars[k]["c"] > f.or_high[i]) if dj == "LONG" else (bars[k]["c"] < f.or_low[i])
+                       for k in range(j, i + 1)):
+                continue                       # price went back inside the range: the breakout failed
+            if any(self.orb_filters(bars, k, f, dj) for k in range(j + 1, i)):
+                continue                       # an earlier candle already had the volume (bought then)
+            if self.orb_filters(bars, i, f, dj):
+                return dj, (f.or_low[i] if dj == "LONG" else f.or_high[i])
+        return None
+
+
+STRATEGIES = {c.name: c for c in (Orb, OrbRetest, FailedBreakout, VwapPullback, OrbAtr, OrbRegime, OrbLate)}
 WHAT = {
     "orb": "The live bot's rules (the yardstick)",
     "orb_retest": "Breakout, then a pullback to the range edge that holds",
@@ -313,6 +343,7 @@ WHAT = {
     "vwap_pullback": "Trend day: pullback to VWAP that closes back with the trend",
     "orb_atr": "Breakout with an ATR stop and a stricter volume test",
     "orb_regime": "Breakout only when the index is already moving the same way",
+    "orb_late": "Breakout, or a late entry when a low-volume breakout gets its volume within a few candles",
 }
 
 
