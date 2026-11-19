@@ -132,8 +132,49 @@ def setup_logging():
                  f"{split[0]} to {split[-1]}); the original is kept there as bot_until_{split[-1]}.log")
 
 
+# best_price / worst_price: the most favourable and the most adverse price seen while the trade was open (from the
+# 15-minute candles since the entry and, in real money, the price read every round); best_r / worst_r: in multiples of
+# the risk taken. They show how far a trade went before it was closed. Trades closed before 19 Nov 2026, and
+# backtest trades, leave them empty.
+EXCURSION_COLS = ["best_price", "worst_price", "best_r", "worst_r"]
 TRADE_COLS = ["closed", "symbol", "direction", "qty", "entry", "exit", "stop", "target",
-              "gross", "charges", "net", "r", "reason", "opened"] + strategy.CONTEXT_COLS
+              "gross", "charges", "net", "r", "reason", "opened"] + strategy.CONTEXT_COLS + EXCURSION_COLS
+
+
+def track_excursion(pos, *prices):
+    """Remember the best and the worst price an open position has seen. Record-keeping only: nothing reads
+    these to decide an entry, an exit or a size, and a bad value here must never stop the trading loop."""
+    try:
+        seen = [float(p) for p in prices if p]
+        if not seen:
+            return
+        long = pos["direction"] == "LONG"
+        hi, lo = max(seen), min(seen)
+        best, worst = (hi, lo) if long else (lo, hi)
+        old_best, old_worst = pos.get("best_price"), pos.get("worst_price")
+        new_best = best if old_best is None else (max(old_best, best) if long else min(old_best, best))
+        new_worst = worst if old_worst is None else (min(old_worst, worst) if long else max(old_worst, worst))
+    except (KeyError, TypeError, ValueError):
+        return
+    pos["best_price"], pos["worst_price"] = new_best, new_worst
+
+
+def with_excursion(row):
+    """The closed trade's row with its best/worst price completed by the exit price, and both in R. A position
+    that was never tracked (opened by an older version) keeps the columns empty rather than guessed."""
+    if row.get("best_price") is None or row.get("worst_price") is None:
+        return row
+    out = dict(row)
+    try:
+        track_excursion(out, out.get("exit"))
+        risk = abs(float(out["entry"]) - float(out["stop"]))
+        if risk > 0:
+            sign = 1 if out["direction"] == "LONG" else -1
+            out["best_r"] = (float(out["best_price"]) - float(out["entry"])) * sign / risk
+            out["worst_r"] = (float(out["worst_price"]) - float(out["entry"])) * sign / risk
+    except (KeyError, TypeError, ValueError):
+        return row                 # the trade is still logged, without the extra columns worked out
+    return out
 
 
 def _upgrade_trade_log(path, cols):
@@ -160,7 +201,7 @@ def log_trade(row, mode):
         w = csv.DictWriter(f, fieldnames=cols, extrasaction="ignore")
         if new:
             w.writeheader()
-        w.writerow({k: (round(v, 2) if isinstance(v, float) else v) for k, v in row.items()})
+        w.writerow({k: (round(v, 2) if isinstance(v, float) else v) for k, v in with_excursion(row).items()})
 
 
 def position_details(p, price, bars, now):
@@ -616,11 +657,19 @@ class Bot:
                 pos["checked_upto"] = b["t"].isoformat()
                 pos["held"] = pos.get("held", 0) + 1
                 hit = strategy.manage_exit(pos, sym_bars, i, pos["held"])
+                # the candle's high and low count toward the best/worst price, except in the candle where a stop
+                # or target was hit: what it did after the exit is not part of the trade
+                if not hit or not hit[0].startswith(("stop", "target")):
+                    track_excursion(pos, b["h"], b["l"])
                 if hit:
                     reason, level = hit
                     # paper fills at the level; live exits at the market now
                     self.close_position(sym, px if self.live else level, reason, now)
                     break
+            # REAL MONEY: the price just read also counts, once every exit check above has left the position
+            # open. A paper position is filled and closed on candles, so only candles count for it.
+            if self.live and sym in self.state.positions:
+                track_excursion(self.state.positions[sym], self.prices.get(sym))
         self.state.save()
 
         # 2) entries
@@ -689,6 +738,7 @@ class Bot:
             target = strategy.target_for(fill_price, stop, direction)
             self.state.record_entry(sym, direction, filled, fill_price, stop, target, now,
                                     {**extra, "checked_upto": last["t"].isoformat(),
+                                     "best_price": fill_price, "worst_price": fill_price,
                                      **(ev["context"] or {})})
             self.note(f"{T.ENTER_ICON} ENTER {direction} {sym} x{filled} @ {fill_price:.2f} "
                       f"{T.name('stop')} (stop) {stop:.2f} "

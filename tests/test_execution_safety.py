@@ -3,7 +3,9 @@ is not a fill; an order left open-ended is watched to its end and late fills are
 first; the stop-loss is verified when placed and on every round; and the bot's record is compared with Zerodha's.
 All against a fake Zerodha: no real order is ever sent from a test."""
 
+import csv
 import datetime as dt
+import os
 
 import pytest
 
@@ -479,3 +481,30 @@ def test_no_paper_path_touches_any_of_this(monkeypatch):
     assert not b.live and b.entry_hold() is None
     b.reconcile()
     assert b.recon == {} and not hasattr(b.broker, "recover")
+
+
+# ---------------------------------------------------------------- best / worst price of a real-money trade
+def test_real_money_trade_logs_its_best_and_worst_price(live, monkeypatch):
+    b, z = live
+    b.cycle()
+    pos = b.state.positions["SBIN"]
+    entry, stop = pos["entry"], pos["stop"]
+    assert pos["best_price"] == pos["worst_price"] == entry                    # tracked from the fill
+    feed = data_yahoo.fetch
+    price = [entry + 0.7]
+    monkeypatch.setattr(data_yahoo, "fetch", lambda s, i, r, **kw: (feed(s, i, r)[0], price[0], None))
+    b.cycle()                                                                  # the price read this round: +0.7
+    price[0] = entry - 0.4
+    b.cycle()                                                                  # ... then -0.4
+    pos = b.state.positions["SBIN"]
+    assert pos["best_price"] == entry + 0.7 and pos["worst_price"] == entry - 0.4
+    # the exchange stop fills; the price read in that round (far below) came after the exit and is not counted
+    z.book[pos["sl_order_id"]].update(status="COMPLETE", filled_quantity=pos["qty"], average_price=stop - 0.05)
+    price[0] = stop - 3.0
+    b.cycle()
+    assert "SBIN" not in b.state.positions
+    with open(os.path.join(C.DATA_DIR, "trades_live.csv"), newline="", encoding="utf-8") as f:
+        row = list(csv.DictReader(f))[0]
+    assert row["reason"] == "exchange stop"
+    assert float(row["best_price"]) == round(entry + 0.7, 2) and float(row["worst_price"]) == round(stop - 0.05, 2)
+    assert float(row["best_r"]) > 0 and float(row["worst_r"]) <= -1.0
