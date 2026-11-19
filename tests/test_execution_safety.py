@@ -793,3 +793,44 @@ def test_closing_shares_the_bot_never_recorded_does_not_touch_a_position():
     z.cancel_slow = False
     b.settle()
     assert b.take_late_exits() == []                          # and its late fill is not booked against the position
+
+
+# ---------------------------------------------------------------- P5: a crash between the entry and its record
+def test_start_after_a_crash_keeps_the_stop_of_shares_the_bot_did_not_record():
+    """Red-team finding, 19 Nov 2026: the bot died after the entry and its stop reached Zerodha but before the
+    position was saved. At the next start the stop was cancelled as a leftover: an open position with no stop."""
+    z = Zerodha()
+    b = lb(z)
+    qty, _, extra = b.enter("SBIN", "LONG", 10, 800.0, 790.0)                     # ... and the bot dies here
+    z.net = {"SBIN": 10}
+    fresh = LiveBroker(z, sleep=lambda s: None)                                  # the bot after the restart
+    rep = fresh.recover({}, startup=True)
+    assert z.book[extra["sl_order_id"]]["status"] == "TRIGGER PENDING"           # the stop is still there
+    assert rep["cancelled"] == [] and rep["kept_stops"] == ["SBIN"]
+    assert any(p.startswith("SBIN: Zerodha shows +10 MIS shares from the bot's own orders")
+               and "LEFT IN PLACE" in p for p in rep["problems"])
+    assert fresh.recover({}, startup=False)["cancelled"] == []                   # and it stays on later comparisons
+    z.net = {"SBIN": 0}                                                          # you closed the shares in Kite
+    assert len(fresh.recover({}, startup=False)["cancelled"]) == 1               # now it IS a leftover
+    assert z.book[extra["sl_order_id"]]["status"] == "CANCELLED"
+
+
+def test_a_leftover_stop_is_still_cancelled_when_it_protects_nothing():
+    z = Zerodha()
+    b = lb(z)
+    qty, _, extra = b.enter("SBIN", "LONG", 10, 800.0, 790.0)
+    stray = b._protect("SBIN", "LONG", 10, 790.0)                                # a second stop nobody tracks
+    mine = {"SBIN": {"direction": "LONG", "qty": 10, "sl_order_id": extra["sl_order_id"]}}
+    z.net = {"SBIN": 10}
+    rep = b.recover(mine, startup=True)                       # the bot HAS the position and knows its stop:
+    assert z.book[stray]["status"] == "CANCELLED" and z.book[extra["sl_order_id"]]["status"] == "TRIGGER PENDING"
+    assert rep["kept_stops"] == [] and rep["problems"] == []
+
+
+def test_a_stop_on_the_wrong_side_of_unrecorded_shares_is_not_kept():
+    z = Zerodha()
+    b = lb(z)
+    b.enter("SBIN", "LONG", 10, 800.0, 790.0)                                    # a SELL stop ...
+    z.net = {"SBIN": -10}                                                        # ... but Zerodha shows a short
+    rep = LiveBroker(z, sleep=lambda s: None).recover({}, startup=True)
+    assert rep["kept_stops"] == [] and len(rep["cancelled"]) == 1                # it would add to the position

@@ -477,6 +477,18 @@ class LiveBroker:
                 out[p["tradingsymbol"]] = int(p.get("quantity") or 0)
         return out
 
+    @staticmethod
+    def _protects_unrecorded_shares(o, tag, positions, net):
+        """Is this working order a stop-loss of the bot that protects shares Zerodha shows but the bot has no
+        record of? That is what a crash leaves behind when it comes between an entry filling (with its stop
+        placed) and the position being saved. Such a stop used to be cancelled as a "leftover" at the next start,
+        which removed the only protection those shares had. It stays until the shares are gone."""
+        sym = o.get("tradingsymbol")
+        have = net.get(sym, 0)
+        if orders.role_of(tag) != "S" or sym in positions or have == 0:
+            return False
+        return (have > 0) == (o.get("transaction_type") == "SELL")       # it must reduce the position, not add to it
+
     def closing_fills(self, symbol, direction, need):
         """(shares, average price) of the newest `need` shares that today's closing-side MIS orders in this
         stock have filled at Zerodha: the bot's own stop and exit orders, Zerodha's forced square-off, or an
@@ -582,7 +594,7 @@ class LiveBroker:
                  "notes": [what was checked]}.
         It cancels stale working orders of the bot (never a stop of a position the bot holds). It never opens a
         position and never closes one it has no record of. Raises if Zerodha can't be read."""
-        out = {"drop": [], "resize": {}, "cancelled": [], "problems": [], "notes": []}
+        out = {"drop": [], "resize": {}, "cancelled": [], "problems": [], "notes": [], "kept_stops": []}
         book = self.kite.orders() or []
         net = self.open_mis_quantities()
         by_tag = {o.get("tag"): o for o in book if orders.is_ours(o.get("tag"))}
@@ -606,6 +618,9 @@ class LiveBroker:
                 continue
             if orders.role_of(tag) == "S" and o.get("tradingsymbol") in positions and not startup:
                 continue                      # a stop just placed this round, not yet saved with its position
+            if self._protects_unrecorded_shares(o, tag, positions, net):
+                out["kept_stops"].append(o.get("tradingsymbol"))
+                continue                      # see _protects_unrecorded_shares: never cancel their only protection
             self._cancel(oid)
             out["cancelled"].append(f"{o.get('tradingsymbol')} {o.get('transaction_type')} {oid} "
                                     f"({orders.ROLES.get(orders.role_of(tag), 'order')})")
@@ -628,8 +643,11 @@ class LiveBroker:
             ours = any(orders.is_ours(o.get("tag")) and o.get("tradingsymbol") == sym
                        and int(o.get("filled_quantity") or 0) > 0 for o in book)
             if ours:
+                kept = (" Their stop-loss order was found working and has been LEFT IN PLACE."
+                        if sym in out["kept_stops"] else " They have NO stop-loss order.")
                 out["problems"].append(f"{sym}: Zerodha shows {have:+d} MIS shares from the bot's own orders that "
-                                       f"the bot has no record of - close them in Kite, or check the order record")
+                                       f"the bot has no record of - close them in Kite, or check the order record."
+                                       + kept)
             else:
                 out["notes"].append(f"{sym}: {have:+d} MIS shares at Zerodha are not the bot's (left alone)")
         out["notes"].append(f"checked {len(positions)} bot position(s), "
