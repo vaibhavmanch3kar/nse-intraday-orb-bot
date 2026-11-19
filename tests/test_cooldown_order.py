@@ -2,6 +2,7 @@
 losses first, whatever order they are recorded in. Before this, a win recorded between two same-candle losses
 wiped the count, so the result depended on recording order and the bot and the backtest could disagree."""
 
+import datetime as dt
 import itertools
 import os
 
@@ -109,3 +110,43 @@ def test_bot_and_backtest_share_this_one_place():
         src = open(os.path.join(root, name), encoding="utf-8").read()
         assert "record_exit(" in src and "loss_streak\"] +=" not in src and "loss_streak'] +=" not in src
     assert "def _count_streak" in open(os.path.join(root, "risk.py"), encoding="utf-8").read()
+
+
+# ---------------------------------------------------------------- the cool-down is counted in trading days
+def three_losses_on(tmp_path, day, name):
+    st = risk.State(os.path.join(str(tmp_path), name), 100000)
+    st.new_day_if_needed(day)
+    for sym in ("A", "B", "C"):
+        st.record_entry(sym, "LONG", 10, 100.0, 99.0, None, f"{day} 10:00:00+05:30")
+    for sym in ("A", "B", "C"):
+        st.record_exit(sym, 99.0, f"{day} 11:00:00+05:30")
+    return st
+
+
+def test_three_losses_on_a_friday_keep_the_bot_out_for_two_trading_days(tmp_path):
+    """Review, 19 Nov 2026: the two days off were Saturday and Sunday, and Monday traded as usual."""
+    fri = dt.date(2026, 11, 13)
+    st = three_losses_on(tmp_path, fri, "fri.json")
+    assert st.d["cooldown_until"] == "2026-11-18"                                # Mon and Tue off, back on Wednesday
+    for day, allowed in ((dt.date(2026, 11, 16), False), (dt.date(2026, 11, 17), False), (dt.date(2026, 11, 18), True)):
+        st.new_day_if_needed(day)
+        assert st.can_enter("D", day)[0] is allowed, day
+
+
+def test_the_real_holiday_calendar_is_used(tmp_path):
+    """Tuesday 24 Nov 2026 is a market holiday (Guru Nanak Jayanti) in the bundled NSE list: after three losses
+    on Friday the 20th the two trading days off are Monday the 23rd and Wednesday the 25th."""
+    st = three_losses_on(tmp_path, dt.date(2026, 11, 20), "fri2.json")
+    assert st.d["cooldown_until"] == "2026-11-26"
+
+
+def test_a_cool_down_in_the_middle_of_the_week_is_what_it_was(tmp_path):
+    st = three_losses_on(tmp_path, dt.date(2026, 11, 16), "mon.json")            # Monday
+    assert st.d["cooldown_until"] == "2026-11-19"                                # Tue and Wed off, back on Thursday
+
+
+def test_a_market_holiday_is_not_one_of_the_days_off(tmp_path, monkeypatch):
+    import holidays
+    monkeypatch.setattr(holidays, "holiday_name", lambda d: "Test holiday" if d == dt.date(2026, 11, 17) else None)
+    st = three_losses_on(tmp_path, dt.date(2026, 11, 16), "hol.json")            # Monday; Tuesday is a holiday
+    assert st.d["cooldown_until"] == "2026-11-20"                                # Wed and Thu off, back on Friday

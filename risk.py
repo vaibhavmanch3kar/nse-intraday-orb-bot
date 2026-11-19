@@ -6,6 +6,7 @@ import math
 import os
 
 import config as C
+import holidays
 import safefile
 import costs
 
@@ -138,8 +139,13 @@ class State:
             self.d["streak_moment"], self.d["streak_before_win"] = moment, None
 
         def cool_down():
-            until = dt.date.fromisoformat(self.d["day"] or str(dt.date.today())) + dt.timedelta(days=C.COOLDOWN_DAYS + 1)
-            self.d["cooldown_until"] = until.isoformat()
+            # COOLDOWN_DAYS TRADING days off: trading is back on the trading day after them. It used to count
+            # calendar days, so three losses on a Friday meant a "two-day" cool-down of Saturday and Sunday and
+            # trading as usual on Monday (review, 19 Nov 2026).
+            day = dt.date.fromisoformat(self.d["day"] or str(dt.date.today()))
+            for _ in range(C.COOLDOWN_DAYS + 1):
+                day = holidays.next_trading_day(day)
+            self.d["cooldown_until"] = day.isoformat()
 
         if net < 0:
             if self.d.get("streak_before_win") is None:
