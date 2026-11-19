@@ -976,3 +976,33 @@ def test_book_round_trip_counts_like_any_other_result(tmp_path):
     assert list(st.positions) == ["INFY"]                     # the open position is untouched
     again = risk.book_round_trip(st, "INFY", "LONG", 3, 1500.0, 1501.0, "t2")    # extra shares of an open position
     assert st.d["trades_today"] == 2 and again["r"] == 0.0 and st.positions["INFY"]["qty"] == 5
+
+
+# ---------------------------------------------------------------- the daily loss limit closes what is open
+def test_real_money_positions_are_closed_when_the_daily_limit_is_reached(live, monkeypatch):
+    b, z = live
+    b.cycle()
+    pos = dict(b.state.positions["SBIN"])
+    price = [pos["entry"] - 0.3]                              # a small open loss, far from the stop
+    price_feed(monkeypatch, price)
+    b.cycle()
+    assert "SBIN" in b.state.positions                        # the usual 2% limit is far away
+    b.state.d["day_pnl"] = -b.state.d["day_start_equity"] * C.MAX_DAILY_LOSS_PCT / 100 + 1.0   # 1 rupee short of it
+    b.cycle()                                                 # ... and this position's open loss takes it over
+    assert "SBIN" not in b.state.positions and z.book[pos["sl_order_id"]]["status"] == "CANCELLED"
+    sells = [o for o in z.sent("LIMIT") if o["transaction_type"] == "SELL"]
+    assert len(sells) == 1 and sells[0]["quantity"] == pos["qty"]
+    assert live_rows()[0]["reason"] == "daily loss limit"
+    assert any("Daily loss limit of" in e and "closing 1 open position" in e for e in b.events)
+
+
+def test_a_price_from_an_earlier_round_does_not_trip_the_daily_limit(live, monkeypatch):
+    b, z = live
+    b.cycle()
+    pos = dict(b.state.positions["SBIN"])
+    n = len(z.book)
+    b.state.d["day_pnl"] = -b.state.d["day_start_equity"] * C.MAX_DAILY_LOSS_PCT / 100 + 1.0
+    b.prices["SBIN"] = pos["entry"] - 0.3                     # an old lower price is on record ...
+    monkeypatch.setattr(data_yahoo, "fetch", lambda s, i, r, **kw: (_ for _ in ()).throw(data_yahoo.DataError("down")))
+    b.cycle()                                                 # ... but this round's price request failed
+    assert "SBIN" in b.state.positions and len(z.book) == n   # valued at its entry price: nothing is closed

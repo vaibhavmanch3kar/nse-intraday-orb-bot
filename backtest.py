@@ -142,6 +142,17 @@ def simulate(data, start_cash, verbose=True, index_data=None, vix=None, trades_p
                     pending[s] = {"direction": ev["signal"], "stop": ev["stop"], "day": day,
                                   "rank": ev["vol_ratio"] or 0.0, "context": ev["context"],
                                   "volume": b.get("v")}
+        # 4) the daily loss limit also closes what is open: when the day's loss, booked plus open at this bar's
+        #    closes, has reached the limit, every open position is closed at its close (as the bot does)
+        if st.positions and st.daily_limit_hit({s: last_close[s] for s in st.positions if s in last_close}):
+            for s in list(st.positions):
+                pos = st.positions[s]
+                px = last_close.get(s, pos["entry"])
+                slip = px * C.SLIPPAGE_PCT / 100
+                px = px - slip if pos["direction"] == "LONG" else px + slip
+                row = st.record_exit(s, px, t + dt.timedelta(minutes=C.INTERVAL_MIN))
+                row["reason"] = "daily loss limit"
+                trades.append(row)
         # mark open positions to this bar's close, so drawdowns inside open trades are counted
         equity_curve.append((t, st.equity(last_close)))
 

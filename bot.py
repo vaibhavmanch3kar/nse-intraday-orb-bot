@@ -600,6 +600,34 @@ class Bot:
                   f"net ₹{row['net']:.2f} ({row['r']:+.2f}R)"
                   + (f"; {left['qty']} shares are still open" if left else ""), logging.WARNING)
 
+    def enforce_daily_limit(self, bars_by_sym, now):
+        """The daily loss limit also closes what is open. It used to stop new entries only, so the day's loss could
+        go on growing in the positions already open (review, 19 Nov 2026). When the day's loss, booked plus
+        open, has reached MAX_DAILY_LOSS_PCT, every open position is closed.
+
+        What "open" is valued at: in REAL MONEY the price read this round (a position without one counts at
+        its entry price); in PAPER the close of the last finished candle since the position was opened, which
+        is exactly what the backtest uses, so the two keep agreeing."""
+        if not self.state.positions:
+            return
+        marks = {}
+        for sym, pos in self.state.positions.items():
+            if self.live:
+                if sym in bars_by_sym and self.prices.get(sym):
+                    marks[sym] = self.prices[sym]
+            else:
+                opened = dt.datetime.fromisoformat(pos["opened"])
+                since = [b for b in bars_by_sym.get(sym, [])
+                         if b["t"] + dt.timedelta(minutes=C.INTERVAL_MIN) > opened]
+                if since:
+                    marks[sym] = since[-1]["c"]
+        if not self.state.daily_limit_hit(marks):
+            return
+        self.note(f"{T.WARN_ICON} Daily loss limit of {C.MAX_DAILY_LOSS_PCT}% reached (booked + open): closing "
+                  f"{len(self.state.positions)} open position(s). No new entry today.", logging.ERROR)
+        for sym, pos in list(self.state.positions.items()):
+            self.close_position(sym, marks.get(sym, self.prices.get(sym, pos["entry"])), "daily loss limit", now)
+
     def book_round_trip(self, rt, when, count_trade=None):
         """REAL MONEY: book shares the broker bought and sold again by itself (see risk.book_round_trip). They
         were never a position on record, and their result used to appear nowhere: not in the day's result,
@@ -831,6 +859,7 @@ class Bot:
             if self.live and sym in self.state.positions:
                 track_excursion(self.state.positions[sym], self.prices.get(sym))
         self.state.save()
+        self.enforce_daily_limit(bars_by_sym, now)
 
         # 2) entries
         # Apply Now or a Paper | Real Money switch waiting: no new entries (open positions are still managed above)

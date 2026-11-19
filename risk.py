@@ -99,13 +99,19 @@ class State:
             return 0.0
         return self.equity({s: prices[s] for s in self.positions if s in prices}) - self.d["cash"]
 
+    def daily_limit_hit(self, prices=None):
+        """Has the day's loss, booked plus open at `prices`, reached MAX_DAILY_LOSS_PCT of the day's opening
+        equity? At the limit no new position opens (can_enter), and what is open is closed (the bot's
+        enforce_daily_limit, and the same step in backtest.simulate)."""
+        day_loss = self.d["day_pnl"] + self.open_pnl(prices)
+        return day_loss <= -self.d["day_start_equity"] * C.MAX_DAILY_LOSS_PCT / 100
+
     def can_enter(self, symbol, today: dt.date, prices=None):
         """Entry gates. `prices` (symbol -> latest price) lets the daily loss limit count losses
         in open positions too, not only booked ones."""
         if self.d["cooldown_until"] and today.isoformat() < self.d["cooldown_until"]:
             return False, f"cooldown until {self.d['cooldown_until']} after {C.LOSS_STREAK_LIMIT} losses"
-        day_loss = self.d["day_pnl"] + self.open_pnl(prices)
-        if day_loss <= -self.d["day_start_equity"] * C.MAX_DAILY_LOSS_PCT / 100:
+        if self.daily_limit_hit(prices):
             return False, f"daily loss limit {C.MAX_DAILY_LOSS_PCT}% hit (booked + open)"
         if self.d["trades_today"] >= C.MAX_TRADES_PER_DAY:
             return False, f"{C.MAX_TRADES_PER_DAY} trades today"
