@@ -1,6 +1,6 @@
 # Ayodhya ORB 2.0: production-readiness report
 
-Built 2026-11-19 12:53 by `readiness.py` from the evidence listed here. Code version `v1.9.0-63-gf6978a5`.
+Built 2026-11-19 15:50 by `readiness.py` from the evidence listed here. Code version `v1.9.0-76-ge6d4f5e`.
 
 This report states what the evidence shows. It is not advice on whether to trade.
 
@@ -15,15 +15,15 @@ This report states what the evidence shows. It is not advice on whether to trade
 ### Platform
 
 - **PASS** 25 of 25 requirements have passing tests
-- **PASS** paper replay of 238 days: the trading loop and the backtest took the same trade 100.0% of the time (330 shared, 0 only in the loop, 0 only in the backtest), 0 errors
+- **PASS** paper replay of 239 days: the trading loop and the backtest took the same trade 100.0% of the time (292 shared, 0 only in the loop, 0 only in the backtest), 0 errors
 - **PASS** nothing is NOT working right now
 - **PASS** no risk limit is looser than its built-in value
 
 ### Strategy
 
-- **FAIL** one-year backtest of the present rules: 336 trades, -16.31%, average -0.20R (range -0.25 to -0.15)
+- **FAIL** one-year backtest of the present rules: 298 trades, -15.36%, average -0.22R (range -0.27 to -0.17)
 - **FAIL** lab: 7 ideas tested by walk-forward, none passed
-- **FAIL** forward test on unseen data: nothing has passed (2 registered)
+- **FAIL** forward test on unseen data: nothing has passed (4 registered)
 - **OPEN** real-money record: 1 closed trade(s), net ₹-3.96; the checkpoint needs 30 trades and even then is not proof
 
 ### Operations
@@ -35,18 +35,18 @@ This report states what the evidence shows. It is not advice on whether to trade
 
 ## Tests
 
-875 passed, 0 failed, 0 skipped, in 73 test files.
+928 passed, 0 failed, 0 skipped, in 76 test files.
 
 | | Area | Requirement | Tests passed | Result |
 |---|---|---|---|---|
 | K1 | Capital protection (Kavach) | One risk engine decides every new position, in paper, real money and backtests alike | 22 | PASS |
-| K2 | Capital protection (Kavach) | Risk per trade, open positions, trades per day, daily loss limit and the cool-down after losses are enforced | 43 | PASS |
+| K2 | Capital protection (Kavach) | Risk per trade, open positions, trades per day, daily loss limit and the cool-down after losses are enforced | 47 | PASS |
 | K3 | Capital protection (Kavach) | No real-money entry on delayed, stale, missing or invalid prices | 23 | PASS |
 | K4 | Capital protection (Kavach) | Positions are sized from the real balance and skipped when not even one share is affordable | 30 | PASS |
 | E1 | Execution | Paper and real money are separate; real money needs both Windows settings and the day's arming | 81 | PASS |
-| E2 | Execution | Every order is recorded before it is sent, carries its own tag and is never sent twice; an order ID is not treated as a fill | 40 | PASS |
-| E3 | Execution | The bot's record is compared with Zerodha at start and every few minutes; a mismatch holds new entries | 36 | PASS |
-| E4 | Execution | Every open position keeps an exchange stop-loss, checked on every round | 38 | PASS |
+| E2 | Execution | Every order is recorded before it is sent, carries its own tag and is never sent twice; an order ID is not treated as a fill | 71 | PASS |
+| E3 | Execution | The bot's record is compared with Zerodha at start and every few minutes; a mismatch holds new entries | 67 | PASS |
+| E4 | Execution | Every open position keeps an exchange stop-loss, checked on every round | 69 | PASS |
 | E5 | Execution | Only one module can send or cancel an order; the dashboard and the analysis pages cannot reach it | 31 | PASS |
 | E6 | Execution | Positions are closed before the broker's own square-off | 7 | PASS |
 | D1 | Market data | Candles are validated; delays and gaps are measured and shown | 37 | PASS |
@@ -67,15 +67,15 @@ This report states what the evidence shows. It is not advice on whether to trade
 
 ## Paper replay of the trading loop
 
-The real trading loop (`bot.Bot.cycle`) was driven through 238 archived trading days (2025-12-03 to 2026-11-18, 5950 rounds) on virtual money, with a simulated clock, and compared with the backtest of the same days.
+The real trading loop (`bot.Bot.cycle`) was driven through 239 archived trading days (2025-12-03 to 2026-11-19, 5975 rounds) on virtual money, with a simulated clock, and compared with the backtest of the same days.
 
 | | Trading loop | Backtest |
 |---|---|---|
-| Trades | 330 | 330 |
-| Net result | ₹-15,907.42 | ₹-15,904.74 |
+| Trades | 292 | 292 |
+| Net result | ₹-14,953.71 | ₹-14,928.21 |
 
-- The same trade (day, stock, direction) in both: 330 (100.0% agreement).
-- Of those, same quantity: 315; same exit reason: 330.
+- The same trade (day, stock, direction) in both: 292 (100.0% agreement).
+- Of those, same quantity: 276; same exit reason: 292.
 - Only in the loop: 0. Only in the backtest: 0.
 - Rounds that raised an error: 0.
 - What a replay cannot show: real order fills, a broker outage, or delays in live prices.
@@ -112,8 +112,8 @@ The real trading loop (`bot.Bot.cycle`) was driven through 238 archived trading 
 
 ## The running system when this was built
 
-- Health: ok.
-- Zerodha login on disk: protected.
+- Health: warn; needs a look: watchdog, login.
+- Zerodha login on disk: none.
 - Risk limits looser than built: none.
 - Where this PC keeps its secrets is shown on the dashboard's Readiness page, not in this file.
 
