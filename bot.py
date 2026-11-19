@@ -641,6 +641,14 @@ class Bot:
                     pos["sl_order_id"] = None
                     self.close_position(sym, px, "stop order missing", now)
                     continue
+                elif stop_state == "triggered":
+                    # the price went through the stop's limit: it used to be left like this until the 15-minute
+                    # candle closed. The bot finishes the exit now (broker.exit counts what the stop sold).
+                    self.note(f"{T.WARN_ICON} {sym}: the exchange stop-loss was triggered but has not filled (the "
+                              f"price went through its limit) - closing the position at the market price now",
+                              logging.ERROR)
+                    self.close_position(sym, px, "stop triggered, not filled", now)
+                    continue
             if close_all:
                 self.close_position(sym, px, "closed from dashboard", now)
                 continue

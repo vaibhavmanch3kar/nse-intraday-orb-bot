@@ -385,16 +385,23 @@ class LiveBroker:
 
     def ensure_stop(self, symbol, pos):
         """Is the position's exchange stop still there? Returns (state, new order id or None):
-        'ok', 'filled' (the stop was hit), 'unknown' (Zerodha can't be asked just now), 'replaced' (it was gone
-        and a new one is placed) or 'missing' (it is gone and could not be placed again)."""
+        'ok', 'filled' (the stop was hit), 'triggered' (it was hit but has not, or not fully, filled),
+        'unknown' (Zerodha can't be asked just now), 'replaced' (it was gone and a new one is placed) or
+        'missing' (it is gone and could not be placed again)."""
         oid = pos.get("sl_order_id")
         if oid:
             try:
-                status, _, _ = self._status(oid)
+                status, filled, _ = self._status(oid)
             except StatusUnknown:
                 return "unknown", None
             if status == "COMPLETE":
                 return "filled", None
+            if status == "OPEN" or filled > 0:
+                # The stop is a stop-LIMIT order. OPEN means its trigger was hit and the limit order behind it
+                # is resting unfilled: the price went through the limit, so the exchange no longer protects
+                # the position. Shares already sold (filled > 0, whatever the status) mean the same. Only the
+                # bot can finish the exit now, and a new stop for the full quantity would oversell.
+                return "triggered", None
             if status not in ("CANCELLED", "REJECTED"):
                 return "ok", None
             self._say(f"{symbol}: the exchange stop-loss order {oid} is {status} - placing it again", logging.ERROR)

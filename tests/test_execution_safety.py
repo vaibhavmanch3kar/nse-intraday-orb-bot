@@ -569,3 +569,52 @@ def test_a_stop_that_fills_while_being_cancelled_is_the_exit():
     z.cancel_order = cancel
     done, avg = b.exit("SBIN", {"direction": "LONG", "qty": 10, "sl_order_id": sl}, 805.0, "target")
     assert (done, avg) == (10, 789.0) and len(z.book) == n                     # no second sale
+
+
+# ---------------------------------------------------------------- P1: a stop that triggers but does not fill
+def test_a_triggered_stop_that_has_not_filled_is_not_ok():
+    """Red-team finding, 19 Nov 2026: a stop-limit whose trigger was hit but whose limit did not fill (status
+    OPEN) counted as a healthy stop, so the position sat unprotected until the 15-minute candle closed."""
+    z = Zerodha()
+    b = lb(z)
+    qty, _, extra = b.enter("SBIN", "LONG", 10, 800.0, 790.0)
+    pos = {"direction": "LONG", "qty": 10, "stop": 790.0, "sl_order_id": extra["sl_order_id"]}
+    n = len(z.book)
+    z.book[pos["sl_order_id"]]["status"] = "OPEN"                                 # triggered, resting unfilled
+    assert b.ensure_stop("SBIN", pos) == ("triggered", None)
+    z.book[pos["sl_order_id"]].update(status="OPEN", filled_quantity=4)           # ... or partly filled
+    assert b.ensure_stop("SBIN", pos) == ("triggered", None)
+    z.book[pos["sl_order_id"]].update(status="CANCELLED", filled_quantity=4)      # cancelled after selling 4
+    assert b.ensure_stop("SBIN", pos) == ("triggered", None)
+    assert len(z.book) == n                               # and never a new stop for all 10 on top of those 4
+
+
+def test_bot_closes_at_once_when_the_stop_triggered_without_filling(live):
+    b, z = live
+    b.cycle()
+    pos = b.state.positions["SBIN"]
+    qty, sl = pos["qty"], pos["sl_order_id"]
+    z.book[sl]["status"] = "OPEN"                                                 # the price went through the limit
+    z.net = {"SBIN": qty}
+    b.cycle()
+    assert "SBIN" not in b.state.positions
+    sells = [o for o in z.sent("LIMIT") if o["transaction_type"] == "SELL"]
+    assert len(sells) == 1 and sells[0]["quantity"] == qty and z.book[sl]["status"] == "CANCELLED"
+    assert any("stop-loss was triggered but has not filled" in e for e in b.events)
+    with open(os.path.join(C.DATA_DIR, "trades_live.csv"), newline="", encoding="utf-8") as f:
+        assert list(csv.DictReader(f))[0]["reason"] == "stop triggered, not filled"
+
+
+def test_bot_closes_only_the_rest_when_the_stop_filled_partly(live):
+    b, z = live
+    b.cycle()
+    pos = b.state.positions["SBIN"]
+    qty, sl = pos["qty"], pos["sl_order_id"]
+    assert qty >= 2
+    z.book[sl].update(status="OPEN", filled_quantity=1, average_price=pos["stop"])
+    z.net = {"SBIN": qty - 1}
+    b.last_recon = bot.now_ist()                          # (the comparison with Zerodha is P3's subject)
+    b.cycle()
+    assert "SBIN" not in b.state.positions
+    sells = [o for o in z.sent("LIMIT") if o["transaction_type"] == "SELL"]
+    assert len(sells) == 1 and sells[0]["quantity"] == qty - 1                   # not the full quantity again
