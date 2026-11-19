@@ -475,6 +475,30 @@ class LiveBroker:
                 out[p["tradingsymbol"]] = int(p.get("quantity") or 0)
         return out
 
+    def closing_fills(self, symbol, direction, need):
+        """(shares, average price) of the newest `need` shares that today's closing-side MIS orders in this
+        stock have filled at Zerodha: the bot's own stop and exit orders, Zerodha's forced square-off, or an
+        order you placed yourself. (0, 0.0) if there are none. Raises if the order book can't be read."""
+        k = self.kite
+        side = _side(direction, closing=True)
+        book = list(k.orders() or [])
+        if book and all(o.get("order_timestamp") for o in book):
+            book.sort(key=lambda o: str(o["order_timestamp"]))
+        left, got, value = int(need), 0, 0.0
+        for o in reversed(book):                        # newest first: earlier fills were booked when they happened
+            if left <= 0:
+                break
+            if o.get("tradingsymbol") != symbol or o.get("transaction_type") != side:
+                continue
+            if o.get("product") not in (None, k.PRODUCT_MIS) or o.get("exchange") not in (None, k.EXCHANGE_NSE):
+                continue
+            filled, price = int(o.get("filled_quantity") or 0), float(o.get("average_price") or 0.0)
+            if filled <= 0 or price <= 0:
+                continue
+            take = min(filled, left)
+            got, value, left = got + take, value + take * price, left - take
+        return got, (value / got if got else 0.0)
+
     # -- finishing what was left open
     def settle(self):
         """Run every round. Finishes orders that were not final when the bot stopped waiting, and looks again

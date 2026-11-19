@@ -290,6 +290,7 @@ class Bot:
         self.feed_warned = set()          # (stock, data problem) already said in the log today
         self.recon = {}                   # last comparison of the bot's record with Zerodha (reconcile)
         self.recon_hold = None            # why new entries are held after that comparison (None = not held)
+        self.recon_missing = set()        # positions Zerodha does not show and no closing order explains
         self.recon_said = set()           # mismatches already said in the log
         self.last_recon = None            # when the record was last compared with Zerodha
         self.launcher_gone = lambda: False   # main() sets this when run_bot.ps1 passes --launcher-pid
@@ -460,7 +461,14 @@ class Bot:
         start and every RECON_EVERY_SEC. What is safe is corrected here: a position Zerodha no longer holds is
         dropped, a smaller one is resized (its stop is placed again for the new size), a leftover working order
         is cancelled. Anything else is a problem only you can decide: it is said loudly and new entries are held
-        until it is gone. The bot never opens or closes a position because of a mismatch."""
+        until it is gone. The bot never opens or closes a position because of a mismatch.
+
+        A position that was closed at Zerodha (its stop filled, Zerodha squared it off, or you closed it in Kite)
+        is BOOKED at the price of that closing order before it is dropped, so the loss counts toward the daily
+        loss limit, the losing streak and the trade log. A position Zerodha does not show but whose closing
+        order is not in the order book is NOT dropped: one wrong answer from Zerodha must not make the bot
+        forget a position (and later cancel its stop as a leftover). It is kept, nothing is sent for it, new
+        entries are held, and it is compared again every round."""
         if not self.live or not hasattr(self.broker, "recover"):
             return
         now = now_ist()
@@ -474,16 +482,46 @@ class Bot:
                 self.note(f"could not compare the bot's positions with Zerodha at the start ({type(e).__name__}) "
                           f"- it will be tried again", logging.WARNING)
             return
+        dropped, self.recon_missing = [], set()
         for sym in rep["drop"]:
-            self.note(f"{sym}: no open MIS position on Kite - dropping it from state", logging.WARNING)
-            self.state.positions.pop(sym, None)
+            pos = self.state.positions[sym]
+            qty = int(pos["qty"])
+            if str(pos.get("opened") or "")[:10] < now.date().isoformat():
+                # an intraday position cannot outlive its day, and today's order book no longer has its close
+                self.note(f"{sym}: a position from an earlier day is not at Zerodha any more - dropped from the "
+                          f"bot's record (its closing price is not in today's order book, so no result is booked)",
+                          logging.WARNING)
+                self.state.positions.pop(sym, None)
+                dropped.append(sym)
+                continue
+            got, price, how = self.closed_at_zerodha(sym, pos, qty)
+            if got >= qty:
+                row = self.book_closed(sym, qty, price, how, now)
+                icon = T.EXIT_WIN if row["net"] > 0 else T.EXIT_LOSS
+                self.note(f"{icon} EXIT {row['direction']} {sym} x{qty} @ {price:.2f} ({how}: found closed at "
+                          f"Zerodha) net ₹{row['net']:.2f} ({row['r']:+.2f}R)", logging.WARNING)
+                dropped.append(sym)
+            else:
+                rep["problems"].append(
+                    f"{sym}: Zerodha shows no position, but its order book has closing orders for only {got} of "
+                    f"the {qty} shares - kept on the bot's record, and no order is sent for it until this is clear")
+                self.recon_missing.add(sym)
         for sym, qty in rep["resize"].items():
             pos = self.state.positions[sym]
-            self.note(f"{sym}: Zerodha holds {qty} shares, the bot had {pos['qty']} on record - corrected, and the "
-                      f"stop-loss is placed again for {qty}", logging.WARNING)
+            closed = int(pos["qty"]) - int(qty)
             if pos.get("sl_order_id"):
                 self.broker.cancel(pos["sl_order_id"])
-            pos.update(qty=qty, sl_order_id=None)       # ensure_stop places a stop for the new size this round
+            got, price, how = self.closed_at_zerodha(sym, {**pos, "sl_order_id": None}, closed)
+            if got >= closed:
+                row = self.book_closed(sym, closed, price, how, now)    # the other `qty` shares stay, without a stop
+                self.note(f"{sym}: Zerodha holds {qty} shares, the bot had {qty + closed} on record - the other "
+                          f"{closed} were closed at Zerodha @ {price:.2f} (net ₹{row['net']:.2f}), and the stop-loss "
+                          f"is placed again for {qty}", logging.WARNING)
+            else:
+                self.note(f"{sym}: Zerodha holds {qty} shares, the bot had {pos['qty']} on record - corrected, and "
+                          f"the stop-loss is placed again for {qty} (the closing order of the other {closed} was "
+                          f"not found, so their result is not booked)", logging.WARNING)
+                pos.update(qty=qty, sl_order_id=None)   # ensure_stop places a stop for the new size this round
         for text in rep["cancelled"]:
             self.note(f"cancelled a leftover order of the bot: {text}", logging.WARNING)
         for text in rep["problems"]:
@@ -497,8 +535,38 @@ class Bot:
                            if rep["problems"] else None)
         self.recon = {"at": now.isoformat(timespec="seconds"), "ok": True, "startup": startup,
                       "problems": rep["problems"], "notes": rep["notes"], "cancelled": rep["cancelled"],
-                      "dropped": rep["drop"], "resized": rep["resize"]}
+                      "dropped": dropped, "resized": rep["resize"]}
         self.state.save()
+
+    def closed_at_zerodha(self, sym, pos, qty):
+        """(shares, price, how) for `qty` shares of a position that Zerodha no longer shows: from the position's
+        own stop order if that filled, else from today's closing orders in the stock. (0, 0.0, how) if nothing
+        explains it or Zerodha can't be asked."""
+        try:
+            px = self.broker.stopped_out(sym, pos)
+            if px:
+                return qty, float(px), "exchange stop"
+            got, price = self.broker.closing_fills(sym, pos["direction"], qty)
+            return got, price, "closed at Zerodha"
+        except Exception as e:  # noqa: BLE001 - network, proxy: nothing is known, so nothing is dropped
+            log.warning("%s: Zerodha's order book could not be read for the closing price (%s)", sym, type(e).__name__)
+            return 0, 0.0, "closed at Zerodha"
+
+    def book_closed(self, sym, qty, price, reason, when):
+        """Book `qty` shares of a position as closed at `price`: the whole position, or part of it (the rest
+        stays on record without a stop order id, so the next round places a stop for it)."""
+        pos = self.state.positions[sym]
+        keep = None
+        if qty < int(pos["qty"]):
+            keep = {**pos, "qty": int(pos["qty"]) - qty, "sl_order_id": None}
+            pos["qty"] = qty
+        row = self.state.record_exit(sym, price, when)
+        row["reason"] = reason
+        log_trade(row, self.mode)
+        if keep:
+            self.state.positions[sym] = keep
+            self.state.save()
+        return row
 
     def drain_broker(self):
         """Put what the live broker had to say (order problems, late fills) in the log and the events list."""
@@ -611,7 +679,8 @@ class Bot:
             except Exception as e:  # noqa: BLE001 - never stops the round; positions keep their exchange stops
                 self.note(f"could not finish checking open-ended orders ({type(e).__name__})", logging.WARNING)
             self.drain_broker()
-            if self.last_recon is None or (now - self.last_recon).total_seconds() >= C.RECON_EVERY_SEC:
+            if (self.last_recon is None or self.recon_missing
+                    or (now - self.last_recon).total_seconds() >= C.RECON_EVERY_SEC):
                 self.reconcile(startup=False)
 
         # 1) manage open positions ("Close all positions now" on the dashboard closes them all, once)
@@ -621,6 +690,8 @@ class Bot:
         for sym, pos in list(self.state.positions.items()):
             px = self.prices.get(sym, pos["entry"])
             pos["last_price"] = px
+            if self.live and sym in self.recon_missing:
+                continue        # Zerodha shows no such position and no closing order explains it: send nothing
             filled_stop = self.broker.stopped_out(sym, pos)
             if filled_stop is not None:
                 row = self.state.record_exit(sym, filled_stop, now)

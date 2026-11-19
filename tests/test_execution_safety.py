@@ -456,6 +456,9 @@ def test_bot_reconciles_at_start_and_holds_entries_on_a_mismatch(live):
     b.state.positions["ITC"] = {"direction": "LONG", "qty": 5, "entry": 300.0, "stop": 297.0, "opened": str(bot.now_ist())}
     b.state.positions["INFY"] = {"direction": "LONG", "qty": 3, "entry": 1100.0, "stop": 1090.0, "opened": str(bot.now_ist())}
     z.net = {"INFY": -3}
+    z.book["m1"] = {"order_id": "m1", "tag": None, "status": "COMPLETE", "tradingsymbol": "ITC",     # sold in Kite
+                    "transaction_type": "SELL", "quantity": 5, "order_type": "MARKET", "filled_quantity": 5,
+                    "average_price": 299.0}
     b.reconcile(startup=True)
     assert "ITC" not in b.state.positions                                        # Zerodha no longer holds it
     assert b.recon["ok"] and b.recon["dropped"] == ["ITC"] and len(b.recon["problems"]) == 1
@@ -618,3 +621,95 @@ def test_bot_closes_only_the_rest_when_the_stop_filled_partly(live):
     assert "SBIN" not in b.state.positions
     sells = [o for o in z.sent("LIMIT") if o["transaction_type"] == "SELL"]
     assert len(sells) == 1 and sells[0]["quantity"] == qty - 1                   # not the full quantity again
+
+
+# ---------------------------------------------------------------- P3: a position found closed at Zerodha is booked
+def live_rows():
+    with open(os.path.join(C.DATA_DIR, "trades_live.csv"), newline="", encoding="utf-8") as f:
+        return list(csv.DictReader(f))
+
+
+def test_a_stop_that_filled_before_the_comparison_is_booked_not_forgotten(live):
+    """Red-team finding, 19 Nov 2026: when the 5-minute comparison ran before the stop check, the position was
+    dropped and its loss never reached the daily loss limit, the losing streak or the trade log."""
+    b, z = live
+    b.cycle()
+    pos = dict(b.state.positions["SBIN"])
+    z.book[pos["sl_order_id"]].update(status="COMPLETE", filled_quantity=pos["qty"], average_price=pos["stop"] - 0.05)
+    z.net = {}
+    b.reconcile(startup=False)
+    assert "SBIN" not in b.state.positions and b.recon["dropped"] == ["SBIN"] and b.entry_hold() is None
+    row = live_rows()[0]
+    assert row["reason"] == "exchange stop" and float(row["exit"]) == round(pos["stop"] - 0.05, 2)
+    assert b.state.d["day_pnl"] < 0 and b.state.d["loss_streak"] == 1            # the loss counts
+
+
+def test_a_position_closed_by_hand_in_kite_is_booked_at_that_price(live):
+    b, z = live
+    b.cycle()
+    pos = dict(b.state.positions["SBIN"])
+    z.book["m1"] = {"order_id": "m1", "tag": None, "status": "COMPLETE", "tradingsymbol": "SBIN",
+                    "transaction_type": "SELL", "quantity": pos["qty"], "order_type": "MARKET",
+                    "filled_quantity": pos["qty"], "average_price": pos["entry"] + 1.0}
+    z.net = {}
+    b.reconcile(startup=False)
+    row = live_rows()[0]
+    assert "SBIN" not in b.state.positions and row["reason"] == "closed at Zerodha"
+    assert float(row["exit"]) == round(pos["entry"] + 1.0, 2) and float(row["gross"]) > 0
+
+
+def test_a_position_zerodha_does_not_show_is_kept_when_nothing_explains_it(live):
+    """One wrong (empty) answer from Zerodha must not make the bot forget a position."""
+    b, z = live
+    b.cycle()
+    pos = dict(b.state.positions["SBIN"])
+    n = len(z.book)
+    z.net = {}                                                                   # ... and no closing order anywhere
+    b.reconcile(startup=False)
+    assert "SBIN" in b.state.positions and b.recon["dropped"] == []
+    assert b.entry_hold().startswith("the bot's record does not match Zerodha (SBIN: Zerodha shows no position")
+    b.cycle()                                                                    # compared again; nothing is sent
+    assert len(z.book) == n and z.book[pos["sl_order_id"]]["status"] == "TRIGGER PENDING"
+    assert not os.path.exists(os.path.join(C.DATA_DIR, "trades_live.csv"))
+    z.net = {"SBIN": pos["qty"]}                                                 # Zerodha answers properly again
+    b.cycle()
+    assert b.recon_missing == set() and b.entry_hold() is None and "SBIN" in b.state.positions
+
+
+def test_a_position_from_an_earlier_day_is_dropped_without_a_made_up_result(live):
+    b, z = live
+    old = (bot.now_ist() - dt.timedelta(days=1)).isoformat()
+    b.state.positions["ITC"] = {"direction": "LONG", "qty": 5, "entry": 300.0, "stop": 297.0, "opened": old}
+    z.net = {}
+    b.reconcile(startup=True)
+    assert "ITC" not in b.state.positions and b.entry_hold() is None
+    assert not os.path.exists(os.path.join(C.DATA_DIR, "trades_live.csv"))
+
+
+def test_a_smaller_position_at_zerodha_books_the_shares_that_were_closed(live):
+    b, z = live
+    b.cycle()
+    pos = dict(b.state.positions["SBIN"])
+    qty = pos["qty"]
+    assert qty >= 3
+    z.book[pos["sl_order_id"]].update(status="OPEN", filled_quantity=2, average_price=pos["stop"])   # 2 sold by the stop
+    z.net = {"SBIN": qty - 2}
+    b.reconcile(startup=False)
+    left = b.state.positions["SBIN"]
+    assert left["qty"] == qty - 2 and left["sl_order_id"] is None
+    row = live_rows()[0]
+    assert int(row["qty"]) == 2 and float(row["exit"]) == round(pos["stop"], 2) and row["reason"] == "closed at Zerodha"
+
+
+def test_closing_fills_take_the_newest_shares_first():
+    z = Zerodha()
+    b = lb(z)
+    for oid, q, px in (("a", 7, 101.0), ("b", 3, 99.0)):                        # an earlier exit, then the stop
+        z.book[oid] = {"order_id": oid, "tag": None, "status": "COMPLETE", "tradingsymbol": "SBIN",
+                       "transaction_type": "SELL", "quantity": q, "order_type": "LIMIT", "filled_quantity": q,
+                       "average_price": px}
+    z.book["c"] = {**z.book["a"], "order_id": "c", "transaction_type": "BUY"}   # the entry: other side, ignored
+    assert b.closing_fills("SBIN", "LONG", 3) == (3, 99.0)
+    got, avg = b.closing_fills("SBIN", "LONG", 10)
+    assert got == 10 and abs(avg - 100.4) < 1e-9
+    assert b.closing_fills("INFY", "LONG", 3) == (0, 0.0)
