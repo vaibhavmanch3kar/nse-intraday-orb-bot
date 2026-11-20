@@ -251,10 +251,67 @@ def _inr(v, signed=False):
     return f"{sign}₹{abs(v):,.2f}"
 
 
+# ---- profit and loss figures ------------------------------------------------------------------------------
+# Every profit or loss on the dashboard (money, percent or R) is shown as its absolute value with a direction
+# mark, never with a +/- sign: ▲ profit (green, --up), ▼ loss (red, --dn), ● no change (grey, --muted). The
+# mark carries the direction, so it is never told by colour alone, and a hidden word ("profit", "loss",
+# "no change") is read out by screen readers. Display only: the numbers stay signed everywhere else.
+PNL_MARKS = {"up": "▲", "dn": "▼", "flat": "●"}
+PNL_WORDS = {"up": "profit", "dn": "loss", "flat": "no change"}
+
+
+def pnl_dir(v, nd=2):
+    """'up' (profit), 'dn' (loss) or 'flat' for a figure that shows as zero at nd decimals; None if missing."""
+    if v is None:
+        return None
+    x = round(float(v), nd)
+    return "up" if x > 0 else "dn" if x < 0 else "flat"
+
+
+def _pnl_abs(v, unit, nd):
+    a = abs(float(v))
+    if unit == "pct":
+        return f"{a:,.{nd}f}%"
+    if unit == "r":
+        return f"{a:,.{nd}f}R"
+    return f"₹{a:,.{nd}f}"
+
+
+def pnl_text(v, unit="inr", nd=2):
+    """Plain text '▲ ₹1,234.50' / '▼ 15.36%' / '● 0.00R' ('-' if missing): for titles, tooltips and chart data.
+    unit: 'inr', 'pct' or 'r'."""
+    if v is None:
+        return "-"
+    return f"{PNL_MARKS[pnl_dir(v, nd)]} {_pnl_abs(v, unit, nd)}"
+
+
+def pnl_html(v, unit="inr", nd=2):
+    """The coloured figure for a page: the mark (hidden from screen readers), a hidden word, the absolute value."""
+    if v is None:
+        return "-"
+    d = pnl_dir(v, nd)
+    return (f"<span class='pnl {d}'><span class='sr'>{PNL_WORDS[d]} </span>"
+            f"<span aria-hidden='true'>{PNL_MARKS[d]}</span> {_pnl_abs(v, unit, nd)}</span>")
+
+
+def pnl_inr(v, nd=2):
+    """A rupee profit or loss: ▲ ₹8,436.00 / ▼ ₹8,436.00 / ● ₹0.00, coloured, with the hidden word."""
+    return pnl_html(v, "inr", nd)
+
+
+def pnl_pct(v, nd=2):
+    """A profit or loss in percent: ▲ 15.36% / ▼ 15.36% / ● 0.00%."""
+    return pnl_html(v, "pct", nd)
+
+
+def pnl_r(v, nd=2):
+    """A result in R (multiples of the risk): ▲ 0.23R / ▼ 0.37R / ● 0.00R."""
+    return pnl_html(v, "r", nd)
+
+
 def _pl(v):
-    """Signed ₹ amount coloured green/red."""
-    cls = "" if not v else ("up" if v > 0 else "dn")
-    return f"<b class='{cls}'>{_inr(v, signed=True)}</b>"
+    """A rupee profit or loss in bold (the account cards)."""
+    return f"<b>{pnl_inr(v)}</b>"
 
 
 def _clock(iso):
@@ -464,11 +521,8 @@ def _badge(text, cls, tip=""):
 
 
 def _signed(v, nd=2):
-    """▲ ₹1,234.50 / ▼ ₹1,234.50 / ₹0.00 - the arrow means the sign is never told by colour alone."""
-    if v is None:
-        return "-"
-    arrow = "▲ " if v > 0 else "▼ " if v < 0 else ""
-    return f"{arrow}₹{abs(v):,.{nd}f}"
+    """Plain text ▲ ₹1,234.50 / ▼ ₹1,234.50 / ● ₹0.00 (kept for older callers; pages use pnl_inr)."""
+    return pnl_text(v, "inr", nd)
 
 
 def _cls(v):
@@ -553,7 +607,7 @@ def position_row(p):
     if gb:
         gb_txt = (f"<span class='lbl' title='The best open profit this position has had, and how much of it the "
                   f"price has given back since. Information only: the bot does not trade on it.'>Best so far "
-                  f"{gb['best_r']:+.2f}R ({_inr(gb['best_inr'])})"
+                  f"{pnl_r(gb['best_r'])} ({_inr(gb['best_inr'])})"
                   + (f" · given back {gb['back_r']:.2f}R ({_inr(gb['back_inr'])})" if gb["back_r"] >= 0.005
                      else " · at its best now" if gb["best_r"] >= 0.005 else "") + "</span>")
     mine = int(p.get("manual_qty") or 0)
@@ -566,8 +620,8 @@ def position_row(p):
             f"{html.escape(str(p.get('direction')))}</span>{badges}"
             f"<span class='lbl'>{qty_txt} · in trade {_held(p.get('held_min'))}</span></div>"
             f"<div><span class='lbl'>Entry → price</span>{_fmt(entry)} → <b>{_fmt(price)}</b></div>"
-            f"<div><span class='lbl'>Open P&amp;L</span><b class='{_cls(unreal)}'>{_signed(unreal)}"
-            f"{'' if r is None else f' · {r:+.2f}R'}</b>{gb_txt}</div>"
+            f"<div><span class='lbl'>Open P&amp;L</span><b>{pnl_inr(unreal)}"
+            f"{'' if r is None else ' · ' + pnl_r(r)}</b>{gb_txt}</div>"
             f"<div class='railbox'>{rail}</div>"
             f"<div class='small'><span class='lbl'>{T.term('time_stop')}</span>{time_txt}"
             f"<span class='lbl' style='margin-top:4px'>{T.term('trail')} · {trail}</span>"
@@ -715,10 +769,9 @@ def live_kpis(view, s):
         n_open = sum(1 for r in a["positions"] if r["qty"])
         cells = (_kpi("Account value", _inr(a["equity"]), f"opening {_inr(a['opening'])}")
                  + _kpi("Available funds", _inr(a["available"]), funds_sub(a))
-                 + _kpi("Today's P&amp;L", _signed(a["pnl"]), f"booked {_inr(a['realised'], True)} · open {_inr(a['unrealised'], True)}",
-                        _cls(a["pnl"]))
-                 + _kpi("Open P&amp;L", _signed(a["unrealised"]), f"{n_open} open position{'s' if n_open != 1 else ''}",
-                        _cls(a["unrealised"]))
+                 + _kpi("Today's P&amp;L", pnl_inr(a["pnl"]),
+                        f"booked {pnl_inr(a['realised'])} · open {pnl_inr(a['unrealised'])}")
+                 + _kpi("Open P&amp;L", pnl_inr(a["unrealised"]), f"{n_open} open position{'s' if n_open != 1 else ''}")
                  + _kpi("Invested", _inr(a["invested"]), "open positions at average price")
                  + _kpi("Margin used", _inr(a["margin_used"]), "Zerodha's figure"))
         warn = "".join(f"<div class='warn small warnline'>⚠ {html.escape(w)}</div>" for w in a.get("warnings", []))
@@ -732,16 +785,15 @@ def live_kpis(view, s):
     n = len(a["positions"])
     today = a["realised_today"] + a["unrealised"]
     rsum = sum(p.get("r_unreal") or 0 for p in s.get("positions", [])) if s.get("mode") == "paper" else None
-    cells = (_kpi("Total equity", _inr(a["equity"]), f"<span class='{_cls(a['total_pnl'])}'>{_signed(a['total_pnl'])}</span> "
-                  f"since the {_inr(a['start'])} start")
+    cells = (_kpi("Total equity", _inr(a["equity"]), f"{pnl_inr(a['total_pnl'])} since the {_inr(a['start'])} start")
              + _kpi("Available funds", _inr(a["available"]),
                     f"{_inr(a['invested'])} in {n} position{'s' if n != 1 else ''}")
-             + _kpi("Today's P&amp;L", _signed(today), f"booked {_inr(a['realised_today'], True)} · open {_inr(a['unrealised'], True)}",
-                    _cls(today))
-             + _kpi("Open P&amp;L", _signed(a["unrealised"]),
-                    (f"{rsum:+.2f}R · " if rsum and n else "") + "before exit charges", _cls(a["unrealised"])))
+             + _kpi("Today's P&amp;L", pnl_inr(today),
+                    f"booked {pnl_inr(a['realised_today'])} · open {pnl_inr(a['unrealised'])}")
+             + _kpi("Open P&amp;L", pnl_inr(a["unrealised"]),
+                    (f"{pnl_r(rsum)} · " if rsum and n else "") + "before exit charges"))
     cells += (_limits_kpis(s, a["equity"], a["unrealised"]) if s.get("mode", "paper") == "paper" else
-              _kpi("Realised since start", _signed(a["realised"]), f"charges {_inr(a['charges'])}", _cls(a["realised"]))
+              _kpi("Realised since start", pnl_inr(a["realised"]), f"charges {_inr(a['charges'])}")
               + _kpi("Charges paid", _inr(a["charges"]), "Zerodha charges, simulated"))
     warnings = list(a.get("warnings", []))
     lag = s.get("data_lag_min")
@@ -750,7 +802,7 @@ def live_kpis(view, s):
                         f"({'Kite' if (s.get('data_source') or {}).get('using') == 'kite' else 'Yahoo'} data).")
     warn = "".join(f"<div class='warn small warnline'>⚠ {html.escape(w)}</div>" for w in warnings)
     note = (f"<div class='muted small warnline'>Paper account (virtual money) · from the bot's last round at "
-            f"{_clock(a.get('as_of'))} IST · realised since start {_inr(a['realised'], True)} · charges {_inr(a['charges'])} · "
+            f"{_clock(a.get('as_of'))} IST · realised since start {pnl_inr(a['realised'])} · charges {_inr(a['charges'])} · "
             f"available = equity − invested</div>")
     return f"<section class='card acct paper kwrap' id='acct'><div class='kgrid'>{cells}</div>{warn}{note}</section>"
 
@@ -796,7 +848,7 @@ def live_positions(s, view):
         note = (f"<div class='muted small warnline'>YOURS = shares you traded in Kite, from the bot's last comparison "
                 f"with Zerodha (every {C.RECON_EVERY_SEC // 60} min). In a stock the bot holds they are managed with "
                 f"its shares; in other stocks the bot leaves them alone. Your result today"
-                + (f" {_signed(mp)} (before charges)" if mp else "") + " counts toward the daily loss limit.</div>")
+                + (f" {pnl_inr(mp)} (before charges)" if mp else "") + " counts toward the daily loss limit.</div>")
     return (f"<section class='card flush' id='positions'><div class='hd'><span class='theme'>{T.term('positions')}</span> <span class='end'><span class='tag'>held by the bot · "
             f"{html.escape(T.mode_label(mode))}</span></span></div>{cards}{note}</section>")
 
@@ -811,7 +863,7 @@ def manual_row(m):
             + _badge("YOURS", "warn", "You traded this in Kite. The bot does not manage it: no stop and no exit from the bot")
             + f"<span class='lbl'>× {m.get('qty')} · bought in Kite</span></div>"
             f"<div><span class='lbl'>Average → price</span>{_fmt(m.get('avg'))} → <b>{_fmt(m.get('price'))}</b></div>"
-            f"<div><span class='lbl'>P&amp;L (Zerodha, before charges)</span><b class='{_cls(pnl)}'>{_signed(pnl)}</b></div>"
+            f"<div><span class='lbl'>P&amp;L (Zerodha, before charges)</span><b>{pnl_inr(pnl)}</b></div>"
             f"<div class='railbox'><div class='rail-t'>not managed by the bot</div></div>"
             f"<div class='small'><span class='lbl'>Stop-loss and exit are yours to set in Kite. Zerodha closes MIS "
             f"shares itself at about 15:20 if they are still open.</span></div></div>")
@@ -1781,7 +1833,7 @@ def render_review(day=None, refresh=False):
                             f"({html.escape(str(tm['error']))})</span>")
             if tm.get("history_text"):
                 outcome += f"<br><span class='muted'>📜 {html.escape(tm['history_text'])}</span>"
-            r_cell = f"<b class='{'up' if res > 0 else 'dn'}'>{res:+.2f}R</b>"
+            r_cell = f"<b>{pnl_r(res)}</b>"
         else:
             outcome = f"<span class='muted'>{html.escape(x.get('note') or '-')}</span>"
             r_cell = "-"
@@ -1809,9 +1861,9 @@ built {built} from 15-min data</span></div>{note}
 <form method="get" action="/review" style="display:inline;margin:0"><input type="hidden" name="day" value="{r['day']}">
 <input type="hidden" name="refresh" value="1"><button class="ghost small">↻ Refresh</button></form></div>
 <div class="kgrid k4">{_kpi("Signals", f"{r.get('signals', 0)}")}{_kpi("Winners", f"{r.get('wins', 0)}")}
-{_kpi("Total", f"{total:+.2f}R", "after slippage and charges", _cls(total))}
-{_kpi(f"At {C.RISK_PER_TRADE_PCT:g}% risk on {_inr(cap)}", _signed(at_risk),
-      f"about · {html.escape(cap_label)} · less when a position limit applies", _cls(at_risk))}</div>{progress_note}
+{_kpi("Total", pnl_r(total), "after slippage and charges")}
+{_kpi(f"At {C.RISK_PER_TRADE_PCT:g}% risk on {_inr(cap)}", pnl_inr(at_risk),
+      f"about · {html.escape(cap_label)} · less when a position limit applies")}</div>{progress_note}
 {review_funnel(r)}
 <section class="card flush"><div class="hd">Stocks <span class="end"><span class="tag">chart = 15-min closes ·
 {T.ui('band_colour')} band = opening range</span></span></div><table class="rt">
@@ -2060,8 +2112,8 @@ def render_readiness():
                   f"on virtual money and compared with the backtest of the same days. Trades: loop "
                   f"<b>{c['loop_trades']}</b>, backtest <b>{c['backtest_trades']}</b>; the same trade in both: "
                   f"<b>{c['same_trade']}</b> ({c['agreement_pct']:.1f}%); same quantity {c['same_quantity']}, same "
-                  f"exit reason {c['same_exit_reason']}. Net: loop {_inr(c['loop_net'], True)}, backtest "
-                  f"{_inr(c['backtest_net'], True)}. Rounds with an error: {len(rp.get('errors') or [])}. A replay "
+                  f"exit reason {c['same_exit_reason']}. Net: loop {pnl_inr(c['loop_net'])}, backtest "
+                  f"{pnl_inr(c['backtest_net'])}. Rounds with an error: {len(rp.get('errors') or [])}. A replay "
                   f"cannot show real fills, a broker outage or live price delays.</div>")
     else:
         replay = ("<p class='muted small' style='padding:8px 14px 12px'>Not run. <code>paper_replay.py --out "
@@ -2069,7 +2121,7 @@ def render_readiness():
     lab = "".join(
         f"<tr><td class='first' data-label='Idea'>{html.escape(str(x['strategy']))}</td>"
         f"<td data-label='Walk-forward trades' class='r'>{x['trades'] if x['trades'] is not None else '-'}</td>"
-        f"<td data-label='Average R' class='r'>{format(x['avg_r'], '+.2f') if x.get('avg_r') is not None else '-'}</td>"
+        f"<td data-label='Average R' class='r'>{pnl_r(x.get('avg_r'))}</td>"
         f"<td data-label='Verdict'>{html.escape(str(x['verdict']))}</td></tr>" for x in r["strategy"].get("lab") or [])
     rules = "".join(
         f"<tr><td class='first' data-label='Rule' style='white-space:normal'><b>{html.escape(c['name'])}</b></td>"
@@ -2125,12 +2177,12 @@ def render_backtest():
     proven = rng.get("r_low") is not None and (rng["r_high"] < 0 or rng["r_low"] > 0)
     verdict = (
         f"<div class='banner' role='note' style='border-color:var(--{'dn' if lost else 'warn'})'><b>"
-        + (f"Over this period these rules lost {_inr(-net)} ({res.get('return_pct'):+.2f}%) on {_inr(r['start_cash'])}, "
+        + (f"Over this period these rules lost {_inr(-net)} ({pnl_pct(res.get('return_pct'))}) on {_inr(r['start_cash'])}, "
            f"after {_inr(res.get('charges'))} of charges." if lost else
-           f"Over this period these rules made {_inr(net)} ({res.get('return_pct'):+.2f}%) on {_inr(r['start_cash'])}, "
+           f"Over this period these rules made {_inr(net)} ({pnl_pct(res.get('return_pct'))}) on {_inr(r['start_cash'])}, "
            f"after {_inr(res.get('charges'))} of charges.")
-        + f"</b> Simply holding the same stocks returned {res.get('buy_hold_pct'):+.2f}%. "
-        + (f"The average trade was {rng['avg_r']:+.2f}R, and the range that chance alone allows "
+        + f"</b> Simply holding the same stocks returned {pnl_pct(res.get('buy_hold_pct'))}. "
+        + (f"The average trade was {pnl_r(rng['avg_r'])}, and the range that chance alone allows "
            f"({rng['r_low']:+.2f} to {rng['r_high']:+.2f}) "
            + ("is entirely below zero: the loss is not bad luck." if rng["r_high"] < 0 else
               "is entirely above zero." if proven else "includes zero: this proves nothing either way.")
@@ -2211,8 +2263,8 @@ def render_chanakya():
         losing = rec["r_high"] < 0
         record = (f"<div class='banner' role='note' style='border-color:var(--{'dn' if losing else 'warn'})'>"
                   f"<b>The record of the bot's rules:</b> {rec['trades']} trades from {html.escape(str(period[0]))} to "
-                  f"{html.escape(str(period[1]))}, average {rec['avg_r']:+.2f}R a trade after charges "
-                  f"(range {rec['r_low']:+.2f} to {rec['r_high']:+.2f}), net {_inr(rec['net'], True)} on ₹1,00,000. "
+                  f"{html.escape(str(period[1]))}, average {pnl_r(rec['avg_r'])} a trade after charges "
+                  f"(range {rec['r_low']:+.2f} to {rec['r_high']:+.2f}), net {pnl_inr(rec['net'])} on ₹1,00,000. "
                   + ("<b>Over that year these rules lost money.</b> A high count of agreeing checks below does not "
                      "change that." if losing else "") + "</div>")
     elif (r.get("record") or {}).get("error"):
@@ -2224,7 +2276,7 @@ def render_chanakya():
         h = a.get("history") or {}
         kav = ("-" if not k else f"<span class='st sig'>allowed, {k['qty']}</span>" if k.get("ok") else
                f"<span class='st dn'>refused</span> <span class='muted small'>{html.escape(str(k.get('reason')))}</span>")
-        past = (f"{h['trades']} trades, {h['avg_r']:+.2f}R <span class='muted small'>({h['r_low']:+.2f} to "
+        past = (f"{h['trades']} trades, {pnl_r(h['avg_r'])} <span class='muted small'>({h['r_low']:+.2f} to "
                 f"{h['r_high']:+.2f})</span>" if h.get("trades") else "<span class='muted'>none</span>")
         score = (f"<b>{a['score']}</b> of {a['of']} agree · {a['against']} disagree" if a.get("direction") else
                  "<span class='muted'>no setup</span>")
@@ -2406,7 +2458,7 @@ def render_rajya(q=None):
     mix_txt = (f"<div class='small' style='padding:8px 14px 12px'><b>Today's positions, replayed over "
                f"{mix['days']} past trading days</b> ({mix['from']} to {mix['to']}): a usual day moved the account by "
                f"{_inr(mix['vol_day'])} ({_pct(mix['vol_day_pct'], 2)}); on 1 day in 20 it lost more than "
-               f"{_inr(mix['loss_1in20'])}; the worst day ({mix['worst_day']}) was {_inr(mix['worst_move'], True)}; "
+               f"{_inr(mix['loss_1in20'])}; the worst day ({mix['worst_day']}) was {pnl_inr(mix['worst_move'])}; "
                f"held unchanged, the largest fall from a high was {_inr(mix['drawdown'])} "
                f"({_pct(mix['drawdown_pct'], 1)}). Past movement, not a forecast."
                + (f" <b>Left out, no price history: {html.escape(', '.join(mix['left_out']))}.</b>"
@@ -2433,17 +2485,17 @@ def render_rajya(q=None):
         f"<tr><td class='first' data-label='What if' style='white-space:normal'><b>{html.escape(x['name'])}</b>"
         f"<div class='muted small'>{html.escape(x['what'])}</div></td>"
         f"<td data-label='Result' class='r'>{_pl(-x['loss'])}</td>"
-        f"<td data-label='Of the account' class='r'>{_pct(-x['pct'] if x['pct'] is not None else None, 2, True)}</td></tr>"
+        f"<td data-label='Of the account' class='r'>{pnl_pct(-x['pct'] if x['pct'] is not None else None)}</td></tr>"
         for x in r["stress"])
     stress = (f"<table class='rt'><tr><th>What if</th><th class='r'>Result</th><th class='r'>Of the account</th></tr>"
               f"{st_rows}</table><div class='muted small' style='padding:8px 14px 12px'>Each row is one stated "
               f"assumption applied to today's positions. None is a forecast, and none is a limit on what can happen."
               f"</div>" if st_rows else "<p class='muted small' style='padding:8px 14px 12px'>Nothing is held, so "
               "no scenario changes the account.</p>")
-    record = (f"{rec['trades']} closed trade(s) since {html.escape(str(rec['first']))}: {_inr(rec['gross'], True)} "
-              f"before charges, {_inr(rec['charges'])} charges, <b>{_inr(rec['net'], True)}</b> after. Largest fall "
+    record = (f"{rec['trades']} closed trade(s) since {html.escape(str(rec['first']))}: {pnl_inr(rec['gross'])} "
+              f"before charges, {_inr(rec['charges'])} charges, <b>{pnl_inr(rec['net'])}</b> after. Largest fall "
               f"from a high: {_inr(rec['drawdown'])}; now {_inr(rec['below_high'])} below its high. Today: "
-              f"{rec['today_trades']} closed, {_inr(rec['today_net'], True)}." if rec["trades"] else
+              f"{rec['today_trades']} closed, {pnl_inr(rec['today_net'])}." if rec["trades"] else
               "No closed trade in this account's log yet, so there is no booked result or drawdown to show.")
     body = f"""{head}{note}{warn}
 <div class="kgrid">{kp}</div>{lev}
@@ -2473,7 +2525,7 @@ def _lab_row(label, m, judged=False):
             f"{'<b>' if judged else ''}{html.escape(label)}{'</b>' if judged else ''}</td>"
             f"<td data-label='Trades' class='r'>{m['trades']}</td>"
             f"<td data-label='Wins' class='r'>{m['win_rate']:.0%}</td>"
-            f"<td data-label='Average per trade' class='r {_cls(m['avg_r'])}'>{m['avg_r']:+.2f}R "
+            f"<td data-label='Average per trade' class='r'>{pnl_r(m['avg_r'])} "
             f"<span class='muted'>({m['r_low']:+.2f} to {m['r_high']:+.2f})</span></td>"
             f"<td data-label='Profit factor' class='r'>{pf}</td>"
             f"<td data-label='Net' class='r'>{_pl(m['net'])}</td>"
@@ -2667,8 +2719,7 @@ def breakdown_table(rows, key, title):
         wins = sum(1 for r in g if _num(r.get("net")) > 0)
         avg_r = sum(_num(r.get("r")) for r in g) / len(g)
         out.append(f"<tr><td>{html.escape(k)}</td><td>{len(g)}</td><td>{wins / len(g):.0%}</td>"
-                   f"<td class='{'up' if net > 0 else 'dn'}'>{'-' if net < 0 else ''}₹{abs(net):,.0f}</td>"
-                   f"<td class='{'up' if avg_r > 0 else 'dn'}'>{avg_r:+.2f}R</td></tr>")
+                   f"<td>{pnl_inr(net, 0)}</td><td>{pnl_r(avg_r)}</td></tr>")
     return (f"<div style='flex:1 1 260px'><h2>{html.escape(title)}</h2><table><tr><th></th><th>Trades</th>"
             f"<th>Won</th><th>Net</th><th>Avg</th></tr>{''.join(out)}</table></div>")
 
@@ -2703,10 +2754,9 @@ def trade_kpis(st, label, frame=""):
     n, net = st["n"], st["net"]
     cells = (_kpi(f"{html.escape(label)} trades", f"{n}")
              + _kpi("Win rate", f"{(st['wins'] / n * 100 if n else 0):.0f}%", f"{st['wins']} won · {n - st['wins']} lost")
-             + _kpi("Net P&amp;L", _signed(net), "after charges", _cls(net))
+             + _kpi("Net P&amp;L", pnl_inr(net), "after charges")
              + _kpi("Max drawdown", f"{st['max_dd']:.2f}%", "from the highest equity", "dn" if st["max_dd"] else "")
-             + _kpi("Average", "-" if st["avg_r"] is None else f"{st['avg_r']:+.2f}R", "per trade",
-                    _cls(st["avg_r"] or 0))
+             + _kpi("Average", pnl_r(st["avg_r"]), "per trade")
              + _kpi("Charges", _inr(st["charges"]), "Zerodha charges"))
     cls = f"card acct {frame} kwrap" if frame else "kwrap card"
     return f"<section class='{cls}'><div class='kgrid'>{cells}</div></section>"
@@ -2715,7 +2765,7 @@ def trade_kpis(st, label, frame=""):
 def trade_charts(rows, st, label, start_cash):
     import charts
     import chartjs
-    tips = [f"{r.get('symbol', '')} {r.get('direction', '')} {r.get('closed', '')[:10]} ({_num(r.get('r')):+.2f}R)"
+    tips = [f"{r.get('symbol', '')} {r.get('direction', '')} {r.get('closed', '')[:10]} ({pnl_text(_num(r.get('r')), 'r')})"
             for r in rows]
     days = [(r.get("closed") or "")[:10] for r in rows]
     eq_pts = [[_day_label(d), round(v, 2), d, t] for d, v, t in zip(days, st["equity"], tips)]
@@ -2756,8 +2806,8 @@ def trade_log(rows, src, label, limit=200):
             f"<td data-label='Entry → exit' class='r'>{html.escape(r.get('entry', ''))} → {html.escape(r.get('exit', ''))}</td>"
             f"<td data-label='Exit reason'>{html.escape(T.reason_label(r.get('reason', '')))}</td>"
             f"<td data-label='Charges' class='r'>₹{_num(r.get('charges')):,.2f}</td>"
-            f"<td data-label='Net' class='r'><b class='{_cls(net)}'>{_signed(net)}</b></td>"
-            f"<td data-label='R' class='r'>{_num(r.get('r')):+.2f}R</td>"
+            f"<td data-label='Net' class='r'><b>{pnl_inr(net)}</b></td>"
+            f"<td data-label='R' class='r'>{pnl_r(_num(r.get('r')))}</td>"
             f"<td data-label='Chart'><a class='sig' href='/journey?src={src}&amp;i={i}' "
             f"title='{T.name('journey')}: the trade on its chart'>{T.PATH} chart</a></td></tr>")
     syms = sorted({r.get("symbol", "") for _, r in idx_rows if r.get("symbol")})
@@ -2786,10 +2836,8 @@ def trade_section(rows, src, label, start_cash, show_log=True):
 
 
 def _pct_arrow(v):
-    """▲ 1.23% / ▼ 1.23% / 0.00%: the arrow carries the sign, as _signed does for rupees."""
-    if v is None:
-        return "-"
-    return f"{'▲ ' if v > 0.004 else '▼ ' if v < -0.004 else ''}{abs(v):.2f}%"
+    """Plain text ▲ 1.23% / ▼ 1.23% / ● 0.00% (kept for older callers; pages use pnl_pct)."""
+    return pnl_text(v, "pct")
 
 
 def scoreboard_card(mode):
@@ -2801,16 +2849,13 @@ def scoreboard_card(mode):
             "a yardstick, not advice</span></h2>")
     if sb.get("reason"):
         return f"<section class='card' id='scoreboard'>{head}<div class='muted'>{html.escape(scoreboard.sentence(sb))}</div></section>"
-    cells = (_kpi("The bot", _pct_arrow(sb["bot_pct"]), f"its trades on {sb['bot_days']} day(s), after all charges",
-                  _cls(round(sb["bot_pct"], 2)))
-             + _kpi("Holding the watchlist", _pct_arrow(sb["hold_pct"]),
-                    f"{sb['stocks']} stocks bought once and held, less {sb['buy_cost_pct']:g}% to buy",
-                    _cls(round(sb["hold_pct"], 2)))
-             + _kpi("Nifty 50", _pct_arrow(sb["index_pct"]), "price change of the index", _cls(round(sb["index_pct"], 2))))
-    rows = "".join(f"<tr><td>{html.escape(_day_label(r['day']))}</td><td class='{_cls(round(r['bot_pct'], 2))}'>"
-                   f"{_pct_arrow(r['bot_pct'])}{'' if r['bot_ran'] else ' <span class=muted>(bot off)</span>'}</td>"
-                   f"<td class='{_cls(round(r['hold_pct'], 2))}'>{_pct_arrow(r['hold_pct'])}</td>"
-                   f"<td class='{_cls(round(r['index_pct'], 2))}'>{_pct_arrow(r['index_pct'])}</td></tr>"
+    cells = (_kpi("The bot", pnl_pct(sb["bot_pct"]), f"its trades on {sb['bot_days']} day(s), after all charges")
+             + _kpi("Holding the watchlist", pnl_pct(sb["hold_pct"]),
+                    f"{sb['stocks']} stocks bought once and held, less {sb['buy_cost_pct']:g}% to buy")
+             + _kpi("Nifty 50", pnl_pct(sb["index_pct"]), "price change of the index"))
+    rows = "".join(f"<tr><td>{html.escape(_day_label(r['day']))}</td>"
+                   f"<td>{pnl_pct(r['bot_pct'])}{'' if r['bot_ran'] else ' <span class=muted>(bot off)</span>'}</td>"
+                   f"<td>{pnl_pct(r['hold_pct'])}</td><td>{pnl_pct(r['index_pct'])}</td></tr>"
                    for r in sb["rows"][-10:])
     few = (f"<div class='warn small warnline'>⚠ {sb['market_days']} market day(s) is far too few to judge: this "
            f"line starts to mean something after a few months.</div>" if sb["few_days"] else "")
@@ -2882,13 +2927,17 @@ TRADES_JS = """
 
 
 def _money(v):
-    if v is None:
-        return "–"
-    return f"<span class='{'up' if v > 0 else 'dn' if v < 0 else ''}'>{'-' if v < 0 else ''}₹{abs(v):,.0f}</span>"
+    """A whole-rupee profit or loss (the journal): ▲ ₹1,234 / ▼ ₹1,234 / ● ₹0; '–' if unknown."""
+    return "–" if v is None else pnl_inr(v, 0)
 
 
 def _maybe(v, fmt):
     return "–" if v is None else fmt.format(v)
+
+
+def _maybe_pnl(v, fn):
+    """A profit or loss through fn (pnl_pct, pnl_r, ...), or '–' when unknown."""
+    return "–" if v is None else fn(v)
 
 
 def journal_card(mode, view, period):
@@ -2921,9 +2970,9 @@ def journal_card(mode, view, period):
                 f"<td class='{status_cls.get(st, 'dn')}'>{html.escape(st)}</td>"
                 f"<td>{trades}</td><td>{int(journal._f(r.get('wins')))}</td>"
                 f"<td>{_money(journal._opt(r.get('net_pnl')))}</td>"
-                f"<td>{_maybe(journal._opt(r.get('return_pct')), '{:+.2f}%')}</td>"
+                f"<td>{_maybe_pnl(journal._opt(r.get('return_pct')), pnl_pct)}</td>"
                 f"<td>₹{journal._f(r.get('charges')):,.0f}</td>"
-                f"<td>{_maybe(journal._f(r.get('total_r')) / trades if trades else None, '{:+.2f}R')}</td>"
+                f"<td>{_maybe_pnl(journal._f(r.get('total_r')) / trades if trades else None, pnl_r)}</td>"
                 f"<td>{_maybe(journal._opt(r.get('max_drawdown_pct')), '{:.2f}%')}</td>"
                 f"<td title='{tip}'>{sig_txt}</td>"
                 f"<td>{_maybe(journal._opt(r.get('outage_min')), '{:.0f} min')}</td>"
@@ -2940,8 +2989,8 @@ def journal_card(mode, view, period):
             body.append(
                 f"<tr><td>{html.escape(s['label'])}</td><td>{days_txt}</td><td>{s['trades']}</td>"
                 f"<td>{_maybe(s['win_rate'], '{:.0f}%')}</td><td>{_money(s['net'])}</td>"
-                f"<td>{s['return_pct']:+.2f}%</td><td>₹{s['charges']:,.0f}</td>"
-                f"<td>{_maybe(s['avg_r'], '{:+.2f}R')}</td>"
+                f"<td>{pnl_pct(s['return_pct'])}</td><td>₹{s['charges']:,.0f}</td>"
+                f"<td>{_maybe_pnl(s['avg_r'], pnl_r)}</td>"
                 f"<td>{_money(s['best_day'])} / {_money(s['worst_day'])}</td>"
                 f"<td>{journal.drawdown_text(s)}</td>"
                 f"<td title='{html.escape(s['skip_reasons'])}'>{_maybe(s['skipped'], '{:.0f}')}</td>"
@@ -2989,7 +3038,7 @@ def manual_closed_card(mode):
         f"<tr><td>{html.escape(str(r.get('closed') or '')[:16])}</td><td><b>{html.escape(r.get('symbol') or '')}</b></td>"
         f"<td>{html.escape(r.get('direction') or '')}</td><td class='r'>{html.escape(str(r.get('qty') or ''))}</td>"
         f"<td class='r'>{_fmt(num(r.get('your_avg')))}</td><td class='r'>{_fmt(num(r.get('exit')))}</td>"
-        f"<td class='r {_cls(num(r.get('gross')))}'>{_signed(num(r.get('gross')))}</td>"
+        f"<td class='r'>{pnl_inr(num(r.get('gross')))}</td>"
         f"<td>{html.escape(r.get('how') or '')}</td></tr>" for r in reversed(rows[-50:]))
     return (f"<section class='card flush' id='manual-closed'><div class='hd'>Your shares the bot closed "
             f"<span class='end'><span class='tag'>bought by you in Kite · not in the bot's results</span></span></div>"
@@ -3121,7 +3170,7 @@ def render_journey(src, i):
 <span class="tag {'up' if side == 'LONG' else 'dn'}">{html.escape(side)}</span>
 <span class="tag">{opened:%a %d %b %Y}</span> <span class="tag">{html.escape(src)}</span></h1>
 <span class="sub"><a href="{back}">← back to {T.term('trades')}</a></span></div>
-<div class="kgrid">{_kpi("Result", f"{_signed(net)}", f"{rr:+.2f}R", _cls(net))}
+<div class="kgrid">{_kpi("Result", pnl_inr(net), pnl_r(rr))}
 {_kpi("Entry", _fmt(_num(r.get('entry'))), f"at {opened:%H:%M}")}
 {_kpi("Exit", _fmt(_num(r.get('exit'))), f"at {closed.strftime('%H:%M') if closed else '-'}")}
 {_kpi("Exit reason", html.escape(T.reason_label(r.get('reason', '-'))))}
@@ -3151,9 +3200,9 @@ def edge_card(rows, label, compact=False):
     if n:
         pf = c["profit_factor"]
         rng = "-" if n < 2 else f"{c['r_low']:+.2f} to {c['r_high']:+.2f}R"
-        stats = (f"<div class='kpis' style='margin-top:10px'><div>Expectancy<b class='{'up' if c['avg_r'] > 0 else 'dn'}'>"
-                 f"{c['avg_r']:+.2f}R</b></div><div>Per trade<b>₹{c['avg_net']:,.0f}</b></div>"
-                 f"<div>Avg win / loss<b>₹{c['avg_win']:,.0f} / ₹{c['avg_loss']:,.0f}</b></div>"
+        stats = (f"<div class='kpis' style='margin-top:10px'><div>Expectancy<b>{pnl_r(c['avg_r'])}</b></div>"
+                 f"<div>Per trade<b>{pnl_inr(c['avg_net'], 0)}</b></div>"
+                 f"<div>Avg win / loss<b>{pnl_inr(c['avg_win'], 0)} / {pnl_inr(c['avg_loss'], 0)}</b></div>"
                  f"<div>Profit factor<b>{'-' if pf is None else f'{pf:.2f}'}</b></div>"
                  f"<div>95% range<b>{rng}</b></div></div>")
     head = "" if compact else ("<div class='muted'>Rule from Trading With Sidhant: after 30 trades, check that the average "
@@ -3203,7 +3252,7 @@ def _theme_preview(t):
             f"<span class='pv-name' style='margin-left:auto'>{html.escape(terms['live_page'])} · Live</span></span>"
             f"<span class='pv-body'>"
             f"<span class='pv-kpi'><small>Today's P&amp;L (sample)</small><b class='pv-up'>▲ ₹207.51</b></span>"
-            f"<span class='pv-kpi'><small>Open P&amp;L (sample)</small><b class='pv-dn'>▼ −₹42.10</b></span>"
+            f"<span class='pv-kpi'><small>Open P&amp;L (sample)</small><b class='pv-dn'>▼ ₹42.10</b></span>"
             f"<span class='pv-chip'>{html.escape(terms['paper'])} · PAPER</span>"
             f"<span class='pv-btn'>⏸ {html.escape(terms['pause'])} · Pause new entries</span>"
             f"</span></span>")

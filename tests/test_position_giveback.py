@@ -17,7 +17,7 @@ def test_long_position_that_came_back_from_its_best():
     assert (round(g["best_r"], 2), round(g["best_inr"], 2)) == (0.8, 80.0)       # best 1008: +8 a share, risk 10
     assert (round(g["back_r"], 2), round(g["back_inr"], 2)) == (0.4, 40.0)       # now 1004: 4 a share given back
     row = web.position_row(pos())
-    assert "Best so far +0.80R (₹80.00) · given back 0.40R (₹40.00)" in row
+    assert f"Best so far {web.pnl_r(0.8)} (₹80.00) · given back 0.40R (₹40.00)" in row
     assert "the bot does not trade on it" in row
 
 
@@ -32,7 +32,7 @@ def test_at_its_best_now_and_never_in_profit():
     g = web.giveback(pos(price=1012.0))
     assert round(g["best_r"], 2) == 1.2 and g["back_r"] == 0.0
     never = web.position_row(pos(price=996.0, best_price=1000.0, unrealised=-40.0, r_unreal=-0.4))
-    assert "Best so far +0.00R (₹0.00)" in never and "· given back" not in never and "at its best" not in never
+    assert f"Best so far {web.pnl_r(0.0)} (₹0.00)" in never and "· given back" not in never and "at its best" not in never
 
 
 def test_missing_figures_show_nothing_and_break_nothing():

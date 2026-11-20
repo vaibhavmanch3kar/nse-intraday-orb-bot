@@ -50,9 +50,9 @@ a{color:var(--accent)} a:hover{text-decoration:underline}
 .skip{position:absolute;left:-999px;top:8px;z-index:20;background:var(--surface);color:var(--text);padding:8px 12px;border-radius:8px}
 .skip:focus{left:8px}
 .num,.kpi .v,td,.mono{font-variant-numeric:tabular-nums}
-.up{color:var(--up)} .dn{color:var(--dn)} .muted{color:var(--muted)} .warn{color:var(--warn)} .info{color:var(--info)}
+.up{color:var(--up)} .dn{color:var(--dn)} .flat{color:var(--muted)} .muted{color:var(--muted)} .warn{color:var(--warn)} .info{color:var(--info)}
 .sig{color:var(--accent);font-weight:600} .msg{color:var(--up)} .tm{color:var(--info);font-size:13px}
-.small{font-size:12.5px} .nowrap{white-space:nowrap} .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.small{font-size:12.5px} .nowrap{white-space:nowrap} .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 h1{font:600 22px var(--serif);color:var(--gold);margin:4px 0 2px;display:flex;flex-wrap:wrap;align-items:center;gap:8px}
 h2{font:600 14px var(--font);margin:0 0 8px;color:var(--text)}
 h2 .theme,.theme{font-family:var(--serif);color:var(--gold);font-weight:600}
@@ -320,17 +320,20 @@ ALERTS_JS = """
   document.body.appendChild(box);
   function save(){try{sessionStorage.setItem(KEY,String(seq))}catch(e){}}
   function inr(x){return '\\u20b9'+Number(x||0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});}
+  // a profit or loss as \\u25b2 / \\u25bc / \\u25cf and the amount, never a +/- sign
+  function dir(x){var r=Math.round(Number(x||0)*100);return r>0?'up':(r<0?'dn':'');}
+  function pnl(x){var d=dir(x);return (d==='up'?'\\u25b2 ':(d==='dn'?'\\u25bc ':'\\u25cf '))+inr(Math.abs(Number(x||0)));}
   function side(q){return q>0?'LONG '+q:(q<0?'SHORT '+(-q):'flat');}
   function posText(p){
     if(!p)return '';
     if(p.change==='opened')return 'New position: '+side(p.after);
-    if(p.change==='closed')return 'Position closed \\u00b7 P&L '+(p.pnl>=0?'+':'\\u2212')+inr(Math.abs(p.pnl))+' (before charges)';
+    if(p.change==='closed')return 'Position closed \\u00b7 P&L '+pnl(p.pnl)+' (before charges)';
     if(p.change==='reversed')return 'Position reversed: now '+side(p.after);
     return 'Position now '+side(p.after);
   }
   function describe(e){
     var who=e.by_bot?'Placed by the bot':'Not placed by the bot (Kite app or another tool)';
-    var p=e.position, tone=(p&&p.change==='closed')?(p.pnl>=0?'up':'dn'):'';
+    var p=e.position, tone=(p&&p.change==='closed')?dir(p.pnl):'';
     if(e.kind==='fill')return {tone:tone, title:e.side+' '+e.qty+' '+e.symbol+' filled @ '+inr(e.price),
       body:posText(p)||('Order complete: '+e.filled+' of '+e.quantity), meta:who};
     if(e.kind==='partial')return {tone:'warn', title:'Partial fill: '+e.side+' '+e.qty+' '+e.symbol+' @ '+inr(e.price),

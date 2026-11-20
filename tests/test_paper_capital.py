@@ -225,6 +225,6 @@ def test_card_and_trades_page_use_the_applied_balance(server):
     capital.request(50000, now=NOW)
     capital.apply_pending(s, now=NOW)
     frag = get(server + "/api/account?view=paper")
-    assert "₹50,000.00" in frag and "+₹62.00" in frag and "₹100,000.00 → ₹50,000.00" in frag
+    assert "₹50,000.00" in frag and web.pnl_inr(62.0) in frag and "₹100,000.00 → ₹50,000.00" in frag
     trades = get(server + "/trades?view=paper")
     assert "use the current opening balance (₹50,000.00)" in trades

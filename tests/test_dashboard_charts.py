@@ -89,10 +89,10 @@ def test_position_details_and_row(monkeypatch):
     assert d["time_check"] == "pending" and d["time_check_at"] == "11:00"
     assert d["trail_ema"] is not None and abs(d["stop_dist_pct"] - 2.97) < 0.01
     row = web.position_row({**p, **d, "symbol": "SBIN", "price": 101.0, "unrealised": 10.0})
-    assert "+0.50R" in row and "ON TRACK" in row and "39 min" in row and "% away" in row
+    assert web.pnl_r(0.5) in row and "ON TRACK" in row and "39 min" in row and "% away" in row
     d2 = bot.position_details({**p, "time_ok": True}, 99.0, bars, now)
     row2 = web.position_row({**p, **d2, "time_ok": True, "symbol": "SBIN", "price": 99.0, "unrealised": -10.0})
-    assert "PASSED" in row2 and "-0.50R" in row2
+    assert "PASSED" in row2 and web.pnl_r(-0.5) in row2
     near = web.position_row({**p, **bot.position_details(p, 98.2, bars, now), "symbol": "SBIN", "price": 98.2,
                              "unrealised": -18.0})
     assert "NEAR STOP" in near and "AT RISK" in near

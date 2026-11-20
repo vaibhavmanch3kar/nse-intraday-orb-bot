@@ -83,7 +83,7 @@ def test_api_live_sends_the_same_parts_as_json(server):
     assert ctype.startswith("application/json") and d["view"] == "paper"
     r = d["regions"]
     assert {"status", "acct", "positions", "watchlist", "events", "controls", "notice"} <= set(r)
-    assert "TCS" in r["positions"] and "+0.50R" in r["positions"] and "Stop bot" in r["controls"]
+    assert "TCS" in r["positions"] and web.pnl_r(0.5) in r["positions"] and "Stop bot" in r["controls"]
     assert "Bot trading: Abhyas · PAPER" in r["status"] and r["notice"] == ""
     assert "2 <small>of 4</small>" not in r["acct"] and "1 <small>of 4</small>" in r["acct"]
 

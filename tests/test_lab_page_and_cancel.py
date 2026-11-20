@@ -47,7 +47,7 @@ def test_lab_page_shows_each_idea_its_verdict_and_the_counts():
     assert page.index("lucky") < page.index("orb_retest")                  # a pass is listed first
     assert "PASS: forward-test candidate" in page and ">FAIL<" in page
     assert "profit factor 0.27 (needs above 1.1)" in page and "an older run" not in page    # newest run per idea
-    assert "Walk-forward (the part that is judged)" in page and "-0.20R" in page and "(-0.30 to -0.10)" in page
+    assert "Walk-forward (the part that is judged)" in page and web.pnl_r(-0.2) in page and "(-0.30 to -0.10)" in page
     assert "With 6 variants tried, the best one looking good is expected by luck alone." in page
     assert "no trades" in page and "<form" not in page.split("<main", 1)[1]   # read-only: no buttons
 

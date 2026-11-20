@@ -113,4 +113,4 @@ def test_the_cards_helper_does_not_replace_the_portfolio_pages_one():
     # 20 Nov 2026: the card first named its helper _pct, the name the Portfolio page already used with two
     # arguments, and that page crashed. Caught by the full test run before anything was merged.
     assert web._pct(12.345, 2) == "12.35%" and web._pct(1.5, 1, signed=True) == "+1.5%"
-    assert web._pct_arrow(-0.3) == "▼ 0.30%" and web._pct_arrow(0.0) == "0.00%" and web._pct_arrow(None) == "-"
+    assert web._pct_arrow(-0.3) == "▼ 0.30%" and web._pct_arrow(0.0) == "● 0.00%" and web._pct_arrow(None) == "-"

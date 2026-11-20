@@ -94,7 +94,7 @@ def test_paper_card_shows_every_figure_and_lag_warning():
                   "Unrealised P&amp;L", "Total P&amp;L", "Charges paid", "Updated 10:30:00 IST"):
         assert label in html_
     assert "₹1,00,000.00" not in html_ and "₹100,000.00" in html_
-    assert "about 25 min behind" in html_ and "+₹68.20" in html_
+    assert "about 25 min behind" in html_ and web.pnl_inr(68.2) in html_
 
 
 @pytest.fixture

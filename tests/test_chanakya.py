@@ -289,7 +289,7 @@ def test_page_before_the_first_build_and_after(isolated, monkeypatch):
     assert "Over that year these rules lost money." in page and "30 trades from 2025-11-17 to 2026-11-17" in page
     assert "id='c-AAA'" in page and "id='c-BBB'" not in page and "No setup right now" in page
     assert "No data for 1 stock(s): CCC" in page
-    assert "10 trades, -0.30R" in page and "The plan the bot would use" in page
+    assert f"10 trades, {web.pnl_r(-0.3)}" in page and "The plan the bot would use" in page
     assert "A stop limits the planned loss; it cannot guarantee" in page
     body = page.split("<main", 1)[1]
     assert body.count("<form") == 1 and 'action="/chanakya"' in body          # only Rebuild: nothing that trades

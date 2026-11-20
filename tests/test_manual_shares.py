@@ -281,7 +281,7 @@ def test_open_positions_show_your_shares():
          "manual": [{"symbol": "ITC", "direction": "LONG", "qty": 5, "avg": 300.0, "price": 297.5, "pnl": -12.5}]}
     page = web.live_positions(s, "zerodha")
     assert "+9 YOURS" in page and "× 1 bot + 9 yours" in page
-    assert "ITC" in page and "not managed by the bot" in page and "▼ ₹12.50" in page
+    assert "ITC" in page and "not managed by the bot" in page and web.pnl_inr(-12.5) in page
     assert "counts toward the daily loss limit" in page
     paper = {**s, "mode": "paper", "positions": [{k: v for k, v in s["positions"][0].items() if k != "manual_qty"}]}
     assert web.live_positions(paper, "paper").count("YOURS") == 0       # the Kite list is real money only
@@ -410,7 +410,7 @@ def test_the_trades_page_lists_your_shares_the_bot_closed(live):
     bot.log_manual_close("live", "2026-11-20 10:45:10+05:30", "KOTAKBANK", "LONG", 5, 504.86, 505.10, "closed with the bot's exit (time stop)")
     bot.log_manual_close("live", "2026-11-20 11:00:00+05:30", "ITC", "LONG", 2, None, 300.0, "closed after the bot's stop was hit")
     card = web.manual_closed_card("live")
-    for text in ("Your shares the bot closed", "KOTAKBANK", "504.86", "505.10", "▲ ₹1.20", "not in the bot's results",
+    for text in ("Your shares the bot closed", "KOTAKBANK", "504.86", "505.10", web.pnl_inr(1.2), "not in the bot's results",
                  "closed after the bot&#x27;s stop was hit", "trades_manual_live.csv"):
         assert text in card, text
     assert web.manual_closed_card("paper") == ""
