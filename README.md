@@ -344,7 +344,7 @@ Each December, add next year's NSE holidays to `nse_holidays.json` (the list is 
 - **[Paid Kite Connect plan for real-time data](docs/KITE-CONNECT-PLAN.md)**: 500 credits a month, adding credits, creating the app, switching the bot
 - **[Versions (CHANGELOG)](CHANGELOG.md)**: what changed in each release, and how to go back to an older one
 
-For developers: `.\.venv\Scripts\python.exe -m pytest -q` runs 91 offline tests;
+For developers: `.\.venv\Scripts\python.exe -m pytest -q` runs 928 offline tests;
 `.\.venv\Scripts\python.exe backtest.py` runs the 60-day backtest.
 
 ![Backtest output](docs/screenshots/05-backtest.png)

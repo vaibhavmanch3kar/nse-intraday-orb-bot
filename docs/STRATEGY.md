@@ -120,6 +120,6 @@ On the 84 backtest trades it says **No edge** (−0.10R per trade, range −0.21
 | `run_bot.ps1`, `dashboard.ps1`, `register_task.ps1` | What the `.bat` files run |
 | `edge.py` | The 30-trade edge check shown on the Trades page |
 | `charts.py` | Equity curve, P&L bars and trade-chart drawings (plain SVG, no extra packages) |
-| `tests/` | 91 offline tests (`.venv\Scripts\python.exe -m pytest -q`) |
+| `tests/` | 928 offline tests (`.venv\Scripts\python.exe -m pytest -q`) |
 | `journal.py`, `reports.py`, `backup.py` | Daily journal, saved weekly/monthly reports, daily data backup (recording only) |
 | `data/` | Created at run time: paper state, trade log, daily journal, reports, one log file per day (not in git) |
