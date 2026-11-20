@@ -1,6 +1,6 @@
 # Ayodhya ORB 2.0: production-readiness report
 
-Built 2026-11-20 14:33 by `readiness.py` from the evidence listed here. Code version `v3.0.0-4-g03f04ed`.
+Built 2026-11-20 16:07 by `readiness.py` from the evidence listed here. Code version `v3.0.0-7-g838cad0`.
 
 This report states what the evidence shows. It is not advice on whether to trade.
 
@@ -34,7 +34,7 @@ This report states what the evidence shows. It is not advice on whether to trade
 
 ## Tests
 
-1016 passed, 0 failed, 2 skipped, in 82 test files.
+1026 passed, 0 failed, 0 skipped, in 83 test files.
 
 | | Area | Requirement | Tests passed | Result |
 |---|---|---|---|---|
@@ -45,7 +45,7 @@ This report states what the evidence shows. It is not advice on whether to trade
 | E1 | Execution | Paper and real money are separate; real money needs both Windows settings and the day's arming | 81 | PASS |
 | E2 | Execution | Every order is recorded before it is sent, carries its own tag and is never sent twice; an order ID is not treated as a fill | 72 | PASS |
 | E3 | Execution | The bot's record is compared with Zerodha at start and every few minutes; a mismatch holds new entries | 68 | PASS |
-| E4 | Execution | Every open position keeps an exchange stop-loss, checked on every round | 68 | PASS |
+| E4 | Execution | Every open position keeps an exchange stop-loss, checked on every round | 70 | PASS |
 | E5 | Execution | Only one module can send or cancel an order; the dashboard and the analysis pages cannot reach it | 31 | PASS |
 | E6 | Execution | Positions are closed before the broker's own square-off | 7 | PASS |
 | D1 | Market data | Candles are validated; delays and gaps are measured and shown | 37 | PASS |
