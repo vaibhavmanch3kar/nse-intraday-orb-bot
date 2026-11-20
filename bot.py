@@ -290,6 +290,7 @@ class Bot:
         self.feed = {}                    # price-feed health of the last round (dashboard; see cycle)
         self.feed_warned = set()          # (stock, data problem) already said in the log today
         self.recon = {}                   # last comparison of the bot's record with Zerodha (reconcile)
+        self.manual_book = {}             # REAL MONEY: your own trades in Kite today, from the last comparison
         self.recon_hold = None            # why new entries are held after that comparison (None = not held)
         self.recon_missing = set()        # positions Zerodha does not show and no closing order explains
         self.clock_hold = None            # why new entries are held because this PC's clock is wrong (check_clock)
@@ -554,6 +555,18 @@ class Bot:
                           f"the stop-loss is placed again for {qty} (the closing order of the other {closed} was "
                           f"not found, so their result is not booked)", logging.WARNING)
                 pos.update(qty=qty, sl_order_id=None)   # ensure_stop places a stop for the new size this round
+        for sym, mine in (rep.get("manual_in") or {}).items():
+            pos = self.state.positions.get(sym)
+            if pos is None or int(pos.get("manual_qty") or 0) == int(mine):
+                continue
+            if mine:
+                self.note(f"{sym}: {mine} share(s) you bought in Kite are managed with the bot's {pos['qty']}: one "
+                          f"stop-loss order covers all {int(pos['qty']) + int(mine)}, and the bot's exit closes all "
+                          f"of them", logging.WARNING)
+            else:
+                self.note(f"{sym}: none of your own shares are open in this stock any more", logging.WARNING)
+            pos["manual_qty"] = int(mine)
+        self.manual_book = {"manual": rep.get("manual") or {}, "day": rep.get("day") or [], "at": now.isoformat()}
         for text in rep["cancelled"]:
             self.note(f"cancelled a leftover order of the bot: {text}", logging.WARNING)
         for text in rep["problems"]:
@@ -669,10 +682,12 @@ class Bot:
 
     def close_position(self, sym, ref_price, reason, when):
         pos = self.state.positions[sym]
-        qty, price = self.broker.exit(sym, pos, ref_price, reason)
+        qty, price = (self.broker.exit(sym, pos, ref_price, reason, whole_stock=True) if self.live else
+                      self.broker.exit(sym, pos, ref_price, reason))
         if qty <= 0:
             self.note(f"{T.WARN_ICON} {sym}: exit FAILED ({reason}) - check Kite", logging.ERROR)
             return
+        mine = (getattr(self.broker, "manual_sold", None) or {}).pop(sym, 0) if self.live else 0
         keep = None
         if qty < pos["qty"]:
             # Part of the position is still open. It used to be forgotten here (the whole position was booked
@@ -680,7 +695,7 @@ class Bot:
             left = pos["qty"] - qty
             self.note(f"{sym}: only {qty}/{pos['qty']} closed - {left} shares are still open; the bot keeps "
                       f"managing them", logging.ERROR)
-            keep = {**pos, "qty": left, "sl_order_id": None}
+            keep = {**pos, "qty": left, "sl_order_id": None, "manual_qty": 0}
             pos["qty"] = qty
         row = self.state.record_exit(sym, price, when)
         row["reason"] = reason
@@ -690,7 +705,8 @@ class Bot:
             self.state.save()
         icon = T.EXIT_WIN if row["net"] > 0 else T.EXIT_LOSS
         self.note(f"{icon} EXIT {row['direction']} {sym} x{qty} @ {price:.2f} ({T.reason_label(reason)}) "
-                  f"net ₹{row['net']:.2f} ({row['r']:+.2f}R)")
+                  f"net ₹{row['net']:.2f} ({row['r']:+.2f}R)"
+                  + (f"; {mine} of your own share(s) in this stock closed with it" if mine else ""))
 
     # -- one cycle
     def cycle(self):
@@ -797,6 +813,11 @@ class Bot:
                 row["reason"] = "exchange stop"
                 log_trade(row, self.mode)
                 self.note(f"{T.EXIT_LOSS} EXIT {sym} by exchange stop ({T.name('stop')}) @ {filled_stop:.2f} net ₹{row['net']:.2f}")
+                if self.live and hasattr(self.broker, "close_rest"):
+                    rest = self.broker.close_rest(sym, pos["direction"], filled_stop)   # yours, if the stop missed them
+                    if rest:
+                        self.note(f"{sym}: {rest} more share(s) in this stock (yours) were closed after the stop",
+                                  logging.WARNING)
                 continue
             if self.live and hasattr(self.broker, "ensure_stop"):
                 # the position's stop-loss must exist at the exchange on every round, not only when it was placed

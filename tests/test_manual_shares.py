@@ -1,0 +1,194 @@
+"""Shares you trade yourself in Kite, next to the bot (20 Nov 2026: the owner added 9 AXISBANK and 5 KOTAKBANK to
+the bot's 1 and 5, and the bot held its new entries for the rest of the day as a "mismatch").
+
+In a stock the bot holds, on the bot's side, your shares are managed with the bot's: no mismatch, one stop-loss
+order covers every share (set to the full quantity when it was left as it was), and the bot's exit reads the real
+quantity at that moment and closes all of it. In other stocks your shares are yours: the bot leaves them alone.
+All against the fake Zerodha of test_execution_safety: no real order is ever sent from a test."""
+
+import csv
+import os
+
+import bot
+import config as C
+from test_execution_safety import Zerodha, live, quick  # noqa: F401 - fixtures used by name
+
+
+class Kite(Zerodha):
+    """The fake Zerodha, with order modification (the stop's quantity)."""
+
+    def __init__(self):
+        super().__init__()
+        self.modified, self.modify_fails = [], False
+
+    def modify_order(self, variety, oid, **p):
+        self.modified.append((oid, p))
+        if self.modify_fails:
+            raise ConnectionError("modify")
+        self.book[oid]["quantity"] = p["quantity"]
+
+
+def wire(b):
+    z = Kite()
+    b.kite, b.broker.kite = z, z
+    return z
+
+
+def you_buy(z, sym, qty, price, oid=None, side="BUY"):
+    oid = oid or f"m{len(z.book) + 1}"
+    z.book[oid] = {"order_id": oid, "tag": None, "status": "COMPLETE", "tradingsymbol": sym, "product": "MIS",
+                   "exchange": "NSE", "transaction_type": side, "quantity": qty, "order_type": "MARKET",
+                   "filled_quantity": qty, "average_price": price}
+
+
+def entered(live):
+    b, _ = live
+    z = wire(b)
+    b.cycle()
+    pos = b.state.positions["SBIN"]
+    return b, z, pos, int(pos["qty"])
+
+
+def trades():
+    with open(os.path.join(C.DATA_DIR, "trades_live.csv"), encoding="utf-8") as f:
+        return list(csv.DictReader(f))
+
+
+# ---------------------------------------------------------------- the comparison
+def test_your_shares_in_the_bots_stock_are_managed_with_it_and_hold_nothing(live):
+    b, z, pos, q = entered(live)
+    you_buy(z, "SBIN", 9, 100.9)
+    z.net = {"SBIN": q + 9}
+    b.reconcile(startup=False)
+    assert b.recon["problems"] == [] and b.entry_hold() is None
+    assert pos["manual_qty"] == 9
+    assert any(f"9 share(s) you bought in Kite are managed with the bot's {q}" in e for e in b.events)
+    b.reconcile(startup=False)
+    assert sum("are managed with the bot's" in e for e in b.events) == 1                  # said once
+
+
+def test_more_shares_than_the_bot_and_you_bought_is_still_a_mismatch(live):
+    b, z, pos, q = entered(live)
+    you_buy(z, "SBIN", 9, 100.9)
+    z.net = {"SBIN": q + 11}
+    b.reconcile(startup=False)
+    assert b.entry_hold().startswith("the bot's record does not match Zerodha (SBIN")
+
+
+def test_selling_some_of_your_shares_in_kite_is_followed(live):
+    b, z, pos, q = entered(live)
+    you_buy(z, "SBIN", 9, 100.9)
+    z.net = {"SBIN": q + 9}
+    b.reconcile(startup=False)
+    you_buy(z, "SBIN", 4, 101.5, side="SELL")
+    z.net = {"SBIN": q + 5}
+    b.reconcile(startup=False)
+    assert pos["manual_qty"] == 5 and b.entry_hold() is None
+
+
+def test_your_shares_in_another_stock_are_yours_and_left_alone(live):
+    b, z, pos, q = entered(live)
+    you_buy(z, "ITC", 5, 300.0)
+    z.net = {"SBIN": q, "ITC": 5}
+    sent = len(z.sent())
+    b.reconcile(startup=False)
+    assert b.entry_hold() is None and len(z.sent()) == sent
+    assert any("ITC: +5 MIS shares at Zerodha are yours" in n for n in b.recon["notes"])
+
+
+# ---------------------------------------------------------------- the stop-loss order
+def test_a_stop_left_at_the_bots_size_is_set_to_every_share(live):
+    b, z, pos, q = entered(live)
+    you_buy(z, "SBIN", 9, 100.9)
+    z.net = {"SBIN": q + 9}
+    b.reconcile(startup=False)
+    state, _ = b.broker.ensure_stop("SBIN", pos)
+    oid = pos["sl_order_id"]
+    assert state == "ok" and z.book[oid]["quantity"] == q + 9
+    (mid, p), = z.modified
+    assert mid == oid and p["quantity"] == q + 9 and p["trigger_price"] == z.book[oid]["trigger_price"]
+    assert b.broker.ensure_stop("SBIN", pos)[0] == "ok" and len(z.modified) == 1           # once is enough
+
+
+def test_a_stop_that_cannot_be_resized_is_said_loudly_once(live):
+    b, z, pos, q = entered(live)
+    you_buy(z, "SBIN", 9, 100.9)
+    z.net = {"SBIN": q + 9}
+    b.reconcile(startup=False)
+    z.modify_fails = True
+    b.broker.ensure_stop("SBIN", pos)
+    b.broker.ensure_stop("SBIN", pos)
+    said = [t for _, t in b.broker.messages if "could NOT be changed" in t]
+    assert len(said) == 1 and f"set its quantity to {q + 9} in Kite" in said[0]
+
+
+def test_a_stop_placed_again_covers_every_share(live):
+    b, z, pos, q = entered(live)
+    you_buy(z, "SBIN", 9, 100.9)
+    z.net = {"SBIN": q + 9}
+    b.reconcile(startup=False)
+    z.book[pos["sl_order_id"]]["status"] = "CANCELLED"
+    state, new = b.broker.ensure_stop("SBIN", pos)
+    assert state == "replaced" and z.book[new]["quantity"] == q + 9
+
+
+# ---------------------------------------------------------------- the exit
+def test_the_bots_exit_closes_every_share_in_the_stock_and_books_its_own(live):
+    b, z, pos, q = entered(live)
+    you_buy(z, "SBIN", 9, 100.9)
+    z.net = {"SBIN": q + 9}
+    b.reconcile(startup=False)
+    b.close_position("SBIN", 101.0, "time stop", bot.now_ist())
+    sells = [o for o in z.sent("LIMIT") if o["transaction_type"] == "SELL"]
+    assert len(sells) == 1 and sells[0]["quantity"] == q + 9
+    assert "SBIN" not in b.state.positions and int(trades()[-1]["qty"]) == q          # the bot books its own
+    assert any("9 of your own share(s) in this stock closed with it" in e for e in b.events)
+
+
+def test_shares_you_added_after_the_last_comparison_are_closed_too(live):
+    b, z, pos, q = entered(live)
+    you_buy(z, "SBIN", 9, 100.9)                 # not compared yet: the record knows nothing of them
+    b.close_position("SBIN", 101.0, "time stop", bot.now_ist())
+    sells = [o for o in z.sent("LIMIT") if o["transaction_type"] == "SELL"]
+    assert sells[0]["quantity"] == q + 9 and int(trades()[-1]["qty"]) == q
+
+
+def test_if_zerodha_cant_be_read_the_exit_closes_what_the_record_knows(live):
+    b, z, pos, q = entered(live)
+    you_buy(z, "SBIN", 9, 100.9)
+    z.net = {"SBIN": q + 9}
+    b.reconcile(startup=False)
+    z.book_down = True
+    b.close_position("SBIN", 101.0, "time stop", bot.now_ist())
+    sells = [o for o in z.sent("LIMIT") if o["transaction_type"] == "SELL"]
+    assert sells[0]["quantity"] == q + 9
+
+
+def test_what_could_not_be_sold_stays_on_the_bots_record(live):
+    b, z, pos, q = entered(live)
+    you_buy(z, "SBIN", 9, 100.9)
+    z.net = {"SBIN": q + 9}
+    b.reconcile(startup=False)
+    z.fill = [q + 5, 0, 0]                       # 4 shares are left unsold
+    b.close_position("SBIN", 101.0, "time stop", bot.now_ist())
+    left = b.state.positions["SBIN"]
+    assert left["qty"] == 4 and left["manual_qty"] == 0 and left["sl_order_id"] is None   # managed until it is out
+
+
+def test_after_the_stop_closed_the_bots_shares_yours_are_closed_too(live):
+    b, z, pos, q = entered(live)
+    you_buy(z, "SBIN", 9, 100.9)                 # the stop still covers only the bot's shares
+    z.book[pos["sl_order_id"]].update(status="COMPLETE", filled_quantity=q, average_price=100.4)
+    b.cycle()
+    assert "SBIN" not in b.state.positions and int(trades()[-1]["qty"]) == q
+    sells = [o for o in z.sent("LIMIT") if o["transaction_type"] == "SELL"]
+    assert len(sells) == 1 and sells[0]["quantity"] == 9
+    assert any("9 more share(s) in this stock (yours) were closed after the stop" in e for e in b.events)
+
+
+def test_the_brokers_own_closes_never_take_your_shares(live):
+    b, z, pos, q = entered(live)
+    you_buy(z, "SBIN", 9, 100.9)
+    done, _ = b.broker.exit("SBIN", {"direction": "LONG", "qty": 2}, 101.0, "late fill")
+    sells = [o for o in z.sent("LIMIT") if o["transaction_type"] == "SELL"]
+    assert done == 2 and sells[-1]["quantity"] == 2
