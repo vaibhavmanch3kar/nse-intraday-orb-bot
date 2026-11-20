@@ -84,7 +84,7 @@ REQUIREMENTS = [
     ("H1", "Security and self-healing", "The login is stored protected and no secret reaches a log",
      ["test_secrets", "test_eventlog"]),
     ("H2", "Security and self-healing", "Health checks and alerts",
-     ["test_health", "test_zerodha_alerts"]),
+     ["test_health", "test_proxycheck", "test_zerodha_alerts"]),
     ("H3", "Security and self-healing", "A crashed or stuck bot is detected, recorded and restarted; files are saved safely",
      ["test_watchdog", "test_safefile", "test_premarket_day"]),
     ("H4", "Security and self-healing", "Daily backups, the trade journal and the candle archive",

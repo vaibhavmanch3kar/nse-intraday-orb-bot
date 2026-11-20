@@ -43,6 +43,17 @@ def no_background_jobs(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def no_proxy_checks(monkeypatch):
+    """The health card's static-IP proxy check (proxycheck.py) never reaches the network from a test, and every
+    test starts with no result."""
+    import proxycheck
+    monkeypatch.setattr(proxycheck, "ENABLED", False)
+    proxycheck.reset()
+    yield
+    proxycheck.reset()
+
+
+@pytest.fixture(autouse=True)
 def no_real_starts(monkeypatch):
     """No test may start the real bot or dashboard through Windows. On 19 Nov 2026 two tests that press every
     dashboard button pressed Start without a stand-in, and the real run_bot.ps1 was started from the test run.

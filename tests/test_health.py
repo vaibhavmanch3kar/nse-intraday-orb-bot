@@ -10,6 +10,7 @@ import pytest
 import buildinfo
 import config as C
 import health
+import proxycheck
 import watchdog
 import web
 
@@ -23,6 +24,8 @@ def clean(monkeypatch):
     health.reset()
     monkeypatch.setattr(health, "logged_in", lambda: True)
     monkeypatch.setattr(C, "LAST_ENTRY", "12:00")
+    # the static-IP proxy was checked a minute ago and works (tests/test_proxycheck.py tests that line)
+    proxycheck.record({"ok": True, "egress_ok": True, "ms": 900, "error": None}, now=NOW - dt.timedelta(seconds=60))
     yield
     health.reset()
 
@@ -55,7 +58,7 @@ def test_everything_working_reads_ok(isolated):
     beat(isolated)
     rows = health.checks(NOW, good(), login=True, disk_free_gb=40.0)
     st = states(rows)
-    assert [r["key"] for r in rows] == ["bot", "heartbeat", "watchdog", "feed", "login", "login_store", "recon",
+    assert [r["key"] for r in rows] == ["bot", "heartbeat", "watchdog", "feed", "login", "login_store", "proxy", "recon",
                                         "entries", "day_loss", "crashes", "backup", "disk"]
     skip = ("backup", "login_store")
     assert {k: v for k, v in st.items() if k not in skip} == {k: "ok" for k in st if k not in skip}

@@ -2,7 +2,9 @@
 Health: one list of checks that answers "is everything working right now?", for the dashboard's health card, the
 /api/health address and the popups. It only reads: the bot's saved status and heartbeat, the watchdog's record,
 whether today's Zerodha login exists, the backups folder and the disk. It starts nothing, stops nothing and never
-contacts the broker (the watchdog does the restarting; Kavach and the bot do the trading checks).
+contacts the broker (the watchdog does the restarting; Kavach and the bot do the trading checks). The one line
+that needs the network, the static-IP proxy, shows the last result of proxycheck.py, which the dashboard runs in
+the background while the bot trades real money; a page never waits for it.
 
 Each check is {"key", "name", "state", "detail"} with state one of:
     ok    working
@@ -77,9 +79,19 @@ def logged_in():
         return False
 
 
-def checks(now=None, status=None, login=None, disk_free_gb=None, store=None):
+def proxy_now(now=None):
+    """The static-IP proxy's last check (proxycheck.latest()), starting a new one in the background when due."""
+    try:
+        import proxycheck
+        proxycheck.ensure(now)
+        return proxycheck.latest()
+    except Exception:  # noqa: BLE001 - the card shows "being checked" rather than break
+        return {}
+
+
+def checks(now=None, status=None, login=None, disk_free_gb=None, store=None, proxy=None):
     """Every check, in the order shown. `status` is the bot's saved status (read from the file when not given);
-    `login`, `disk_free_gb` and `store` are only passed by tests."""
+    `login`, `disk_free_gb`, `store` and `proxy` (a proxycheck.latest() result) are only passed by tests."""
     now = now or now_ist()
     s = status if status is not None else (_read(os.path.join(C.DATA_DIR, "status.json")) or {})
     session = watchdog.in_session(now)
@@ -171,6 +183,34 @@ def checks(now=None, status=None, login=None, disk_free_gb=None, store=None):
     else:
         out.append(_check("login_store", "Login kept safely", OFF, "no login is saved"))
 
+    # 5c. the static-IP proxy that every Kite request and every real-money order goes through
+    if not live or not running:
+        out.append(_check("proxy", "Static-IP proxy", OFF, "only checked while trading real money; Settings > "
+                                                           "Trading mode > Check readiness checks it any time"))
+    else:
+        px = proxy if proxy is not None else proxy_now()
+        last = px.get("last") or {}
+        age = _age(last.get("at"), now)
+        if age is None:
+            out.append(_check("proxy", "Static-IP proxy", OFF, "being checked"))
+        elif last.get("egress_ok") is False:
+            out.append(_check("proxy", "Static-IP proxy", BAD, "Kite traffic does NOT leave from the whitelisted "
+                                                               "address: Zerodha refuses orders from any other"))
+        elif not last.get("ok"):
+            down = _age(px.get("failing_since"), now) or 0
+            if (px.get("fails") or 0) >= 2:
+                out.append(_check("proxy", "Static-IP proxy", BAD, f"NOT reachable for {_mins(down)} "
+                                                                   f"({last.get('error')}): real orders cannot be "
+                                                                   f"sent; checked again every minute"))
+            else:
+                out.append(_check("proxy", "Static-IP proxy", WARN, f"the last check failed ({last.get('error')}); "
+                                                                    f"checked again within a minute"))
+        elif age > 3 * _proxy_every():
+            out.append(_check("proxy", "Static-IP proxy", WARN, f"not checked for {_mins(age)}"))
+        else:
+            out.append(_check("proxy", "Static-IP proxy", OK, f"working, leaves from the whitelisted address; "
+                                                              f"checked {_mins(age)} ago ({last.get('ms')} ms)"))
+
     # 6. the bot's books against Zerodha (real money only)
     recon = s.get("recon") or {}
     if not live or not running:
@@ -245,6 +285,14 @@ def checks(now=None, status=None, login=None, disk_free_gb=None, store=None):
         out.append(_check("disk", "Disk space", WARN if disk_free_gb < DISK_WARN_GB else OK,
                           f"{disk_free_gb:.1f} GB free where the data is kept"))
     return out
+
+
+def _proxy_every():
+    try:
+        import proxycheck
+        return proxycheck.CHECK_EVERY_SEC
+    except Exception:  # noqa: BLE001
+        return 300
 
 
 def _paths(zips):
