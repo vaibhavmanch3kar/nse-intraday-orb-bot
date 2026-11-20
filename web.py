@@ -1968,6 +1968,10 @@ def render_kavach():
         f"<td data-label='Status'>" + (
             "<span class='st dn'>LOOSER than built-in</span>" if x["name"] in loose else
             "<span class='st'>changed (stricter)</span>" if x["changed"] else "<span class='st in'>as built</span>")
+        + (f" <span class='tag' title='Pinned in data\\owner_limits.json: the stricter of your pin "
+           f"({C.PINNED[x['name']]['pin']:g}) and the setting ({C.PINNED[x['name']]['setting']:g}) is used. "
+           f"A pin survives updates, restarts and a lost Windows setting.'>pinned by you</span>"
+           if x["name"] in C.PINNED else "")
         + "</td></tr>" for x in lim)
     warn = (f"<div class='banner' role='alert' style='border-color:var(--dn)'><b>{len(loose)} limit(s) are set looser "
             f"than the built-in value:</b> {html.escape(', '.join(sorted(loose)))}. They come from Windows settings "

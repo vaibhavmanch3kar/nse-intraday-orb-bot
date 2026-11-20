@@ -200,3 +200,48 @@ WEB_PORT = _env("WEB_PORT", 5000, int)                        # must match the K
 
 def is_live() -> bool:
     return (not DRY_RUN) and CONFIRM_LIVE == "YES"
+
+
+# ── Your pinned limits ──────────────────────────────────────────�
+# data\owner_limits.json holds risk limits you have pinned (pins.py). A pin can only make the bot STRICTER: for a
+# pinned limit the stricter of the pin and the setting above is used, never the looser. The file is in the data
+# folder, which no update, deployment or restart touches, so a pinned limit still holds if its Windows setting
+# is lost, and the Windows setting still holds if the file is lost.
+PINNABLE = ("RISK_PER_TRADE_PCT", "MAX_POSITION_PCT", "MAX_EXPOSURE_PCT", "MAX_OPEN_POSITIONS",
+            "MAX_TRADES_PER_DAY", "MAX_DAILY_LOSS_PCT", "LOSS_STREAK_LIMIT", "COOLDOWN_DAYS")
+PINS_FILE = "owner_limits.json"
+PINNED = {}       # name -> {"pin": your pin, "setting": the Windows setting or built-in value, "used": the stricter}
+
+
+def stricter(name, a, b):
+    """The stricter of two values of a limit: a longer cool-down, a smaller number for every other limit."""
+    return max(a, b) if name == "COOLDOWN_DAYS" else min(a, b)
+
+
+def apply_pins(path=None):
+    """Read your pinned limits and tighten the settings with them. A missing or unreadable file, an unknown
+    name or a value that is not a positive number changes nothing. Returns PINNED."""
+    import json
+    PINNED.clear()
+    try:
+        with open(path or os.path.join(DATA_DIR, PINS_FILE), encoding="utf-8") as f:
+            pins = json.load(f)
+    except (OSError, ValueError):
+        return PINNED
+    g = globals()
+    for name in PINNABLE:
+        if not isinstance(pins, dict) or name not in pins:
+            continue
+        try:
+            pin = type(g[name])(pins[name])
+        except (TypeError, ValueError):
+            continue
+        if pin <= 0:
+            continue
+        setting = g[name]
+        g[name] = stricter(name, setting, pin)
+        PINNED[name] = {"pin": pin, "setting": setting, "used": g[name]}
+    return PINNED
+
+
+apply_pins()

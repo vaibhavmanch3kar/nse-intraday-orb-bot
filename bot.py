@@ -1308,6 +1308,9 @@ class Bot:
                       "(using the NIFTY-data fallback meanwhile)", logging.WARNING)
         print(T.banner(f"{T.mode_label(self.mode)} mode"), flush=True)
         self.note(f"{T.BOW} {T.APP} started in {T.mode_label(self.mode)} mode, watching {len(C.WATCHLIST)} stocks")
+        if C.PINNED:
+            self.note("Your pinned limits are in force (data\\owner_limits.json): "
+                      + ", ".join(f"{k} {v['used']:g}" for k, v in C.PINNED.items()))
         if C.DRY_RUN is False and C.CONFIRM_LIVE != "YES":
             self.note("DRY_RUN=false but CONFIRM_LIVE is not YES - staying in PAPER mode", logging.WARNING)
         if self.live_note:
