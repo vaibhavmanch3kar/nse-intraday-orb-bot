@@ -264,3 +264,33 @@ def test_a_small_loss_in_your_own_trades_holds_nothing(live):
 def test_paper_has_no_manual_trades(monkeypatch):
     b = bot.Bot()
     assert not b.live and b.manual_pnl() == 0.0 and b.entry_hold() is None
+
+
+# ---------------------------------------------------------------- the dashboard
+def test_open_positions_show_your_shares():
+    import datetime as dt
+
+    import web
+    now = dt.datetime.now(dt.timezone(dt.timedelta(hours=5, minutes=30)))
+    s = {"mode": "live", "time": now.isoformat(), "manual_pnl": -12.5,
+         "positions": [{"symbol": "AXISBANK", "direction": "LONG", "qty": 1, "manual_qty": 9, "entry": 1389.3,
+                        "price": 1390.1, "stop": 1368.8, "unrealised": 0.8, "r_unreal": 0.04, "held_min": 37}],
+         "manual": [{"symbol": "ITC", "direction": "LONG", "qty": 5, "avg": 300.0, "price": 297.5, "pnl": -12.5}]}
+    page = web.live_positions(s, "zerodha")
+    assert "+9 YOURS" in page and "× 1 bot + 9 yours" in page
+    assert "ITC" in page and "not managed by the bot" in page and "▼ ₹12.50" in page
+    assert "counts toward the daily loss limit" in page
+    paper = {**s, "mode": "paper", "positions": [{k: v for k, v in s["positions"][0].items() if k != "manual_qty"}]}
+    assert web.live_positions(paper, "paper").count("YOURS") == 0       # the Kite list is real money only
+
+
+def test_health_counts_your_trades_in_the_daily_loss_line():
+    import datetime as dt
+
+    import health
+    now = dt.datetime(2026, 11, 20, 11, 0, tzinfo=dt.timezone(dt.timedelta(hours=5, minutes=30)))
+    s = {"time": (now - dt.timedelta(seconds=20)).isoformat(), "mode": "live", "equity": 10000.0, "day_pnl": -50.0,
+         "manual_pnl": -100.0, "recon": {"at": now.isoformat(), "ok": True, "problems": []}}
+    rows = health.checks(now, s, login=True, disk_free_gb=40.0, proxy={})
+    line = next(r for r in rows if r["key"] == "day_loss")
+    assert line["detail"].startswith("1.48% of the 2% limit") and "your own trades in Kite -100.00 included" in line["detail"]

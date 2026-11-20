@@ -242,6 +242,8 @@ def checks(now=None, status=None, login=None, disk_free_gb=None, store=None, pro
 
     # 8. the daily loss limit
     eq, day = s.get("equity"), float(s.get("day_pnl") or 0.0)
+    mine = float(s.get("manual_pnl") or 0.0) if live else 0.0      # your own trades in Kite count too
+    day += mine
     if not eq:
         out.append(_check("day_loss", "Daily loss limit", OFF, "no account figure yet"))
     else:
@@ -249,7 +251,8 @@ def checks(now=None, status=None, login=None, disk_free_gb=None, store=None, pro
         used = max(0.0, -day) / start * 100 if start else 0.0
         share = used / C.MAX_DAILY_LOSS_PCT * 100 if C.MAX_DAILY_LOSS_PCT else 0.0
         out.append(_check("day_loss", "Daily loss limit", BAD if share >= 100 else WARN if share >= 75 else OK,
-                          f"{used:.2f}% of the {C.MAX_DAILY_LOSS_PCT:g}% limit used today"))
+                          f"{used:.2f}% of the {C.MAX_DAILY_LOSS_PCT:g}% limit used today"
+                          + (f" (your own trades in Kite {mine:+,.2f} included)" if mine else "")))
 
     # 9. crash reports
     today = now.strftime("%Y-%m-%d")

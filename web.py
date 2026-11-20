@@ -528,10 +528,15 @@ def position_row(p):
     except (TypeError, ValueError):
         pass
     unreal = p.get("unrealised")
+    mine = int(p.get("manual_qty") or 0)
+    if mine:
+        badges += _badge(f"+{mine} YOURS", "warn", "Shares you bought in Kite in this stock: one stop-loss order covers "
+                                                   "all of them with the bot's, and the bot's exit closes them too")
+    qty_txt = f"× {p.get('qty')}" + (f" bot + {mine} yours" if mine else "")
     return (f"<div class='pos'>"
             f"<div class='sym'><b>{_fmt(p.get('symbol'))}</b><span class='side {'long' if long_ else 'short'}'>"
             f"{html.escape(str(p.get('direction')))}</span>{badges}"
-            f"<span class='lbl'>× {p.get('qty')} · in trade {_held(p.get('held_min'))}</span></div>"
+            f"<span class='lbl'>{qty_txt} · in trade {_held(p.get('held_min'))}</span></div>"
             f"<div><span class='lbl'>Entry → price</span>{_fmt(entry)} → <b>{_fmt(price)}</b></div>"
             f"<div><span class='lbl'>Open P&amp;L</span><b class='{_cls(unreal)}'>{_signed(unreal)}"
             f"{'' if r is None else f' · {r:+.2f}R'}</b></div>"
@@ -753,9 +758,35 @@ def live_positions(s, view):
         return ""   # the bot's positions are paper positions: they belong to the Paper view
     if view == "paper" and mode == "live":
         return ""
-    cards = "".join(position_row(p) for p in s.get("positions", [])) or webui.empty(T.ui("empty_positions"))
+    cards = "".join(position_row(p) for p in s.get("positions", []))
+    yours = s.get("manual") or [] if mode == "live" else []
+    cards += "".join(manual_row(m) for m in yours)
+    cards = cards or webui.empty(T.ui("empty_positions"))
+    note = ""
+    if mode == "live" and (yours or any(p.get("manual_qty") for p in s.get("positions", []))):
+        mp = s.get("manual_pnl")
+        note = (f"<div class='muted small warnline'>YOURS = shares you traded in Kite, from the bot's last comparison "
+                f"with Zerodha (every {C.RECON_EVERY_SEC // 60} min). In a stock the bot holds they are managed with "
+                f"its shares; in other stocks the bot leaves them alone. Your result today"
+                + (f" {_signed(mp)} (before charges)" if mp else "") + " counts toward the daily loss limit.</div>")
     return (f"<section class='card flush' id='positions'><div class='hd'><span class='theme'>{T.term('positions')}</span> <span class='end'><span class='tag'>held by the bot · "
-            f"{html.escape(T.mode_label(mode))}</span></span></div>{cards}</section>")
+            f"{html.escape(T.mode_label(mode))}</span></span></div>{cards}{note}</section>")
+
+
+def manual_row(m):
+    """Your own open shares in a stock the bot does not hold (status "manual"): read-only, not managed."""
+    long_ = m.get("direction") == "LONG"
+    pnl = m.get("pnl")
+    return (f"<div class='pos'>"
+            f"<div class='sym'><b>{_fmt(m.get('symbol'))}</b><span class='side {'long' if long_ else 'short'}'>"
+            f"{html.escape(str(m.get('direction')))}</span>"
+            + _badge("YOURS", "warn", "You traded this in Kite. The bot does not manage it: no stop and no exit from the bot")
+            + f"<span class='lbl'>× {m.get('qty')} · bought in Kite</span></div>"
+            f"<div><span class='lbl'>Average → price</span>{_fmt(m.get('avg'))} → <b>{_fmt(m.get('price'))}</b></div>"
+            f"<div><span class='lbl'>P&amp;L (Zerodha, before charges)</span><b class='{_cls(pnl)}'>{_signed(pnl)}</b></div>"
+            f"<div class='railbox'><div class='rail-t'>not managed by the bot</div></div>"
+            f"<div class='small'><span class='lbl'>Stop-loss and exit are yours to set in Kite. Zerodha closes MIS "
+            f"shares itself at about 15:20 if they are still open.</span></div></div>")
 
 
 def zerodha_positions():
