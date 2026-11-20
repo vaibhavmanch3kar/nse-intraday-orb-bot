@@ -294,6 +294,8 @@ class Bot:
         self.recon_hold = None            # why new entries are held after that comparison (None = not held)
         self.recon_missing = set()        # positions Zerodha does not show and no closing order explains
         self.clock_hold = None            # why new entries are held because this PC's clock is wrong (check_clock)
+        self.limit_hold = None            # why new entries are held: the daily loss limit, counting your own trades
+        self.manual_now = 0.0             # REAL MONEY: your own trades' result today (before charges)
         self.clock_checked = None         # when the clock was last compared with Zerodha's
         self.clock_skew = None            # seconds this PC is ahead of Zerodha (negative: behind), last reading
         self.recon_said = set()           # mismatches already said in the log
@@ -316,7 +318,7 @@ class Bot:
         unsure = getattr(self.broker, "uncertain", None)
         if unsure:
             return f"order state uncertain ({unsure})"
-        return self.recon_hold or self.clock_hold
+        return self.recon_hold or self.limit_hold or self.clock_hold
 
     def check_clock(self, now):
         """Every CLOCK_CHECK_SEC: compare this PC's clock with Zerodha's server. The bot times everything by the
@@ -621,7 +623,10 @@ class Bot:
         What "open" is valued at: in REAL MONEY the price read this round (a position without one counts at
         its entry price); in PAPER the close of the last finished candle since the position was opened, which
         is exactly what the backtest uses, so the two keep agreeing."""
-        if not self.state.positions:
+        mine = self.manual_pnl(now) if self.live else 0.0
+        self.manual_now = mine
+        if not self.state.positions and not mine:
+            self.limit_hold = None
             return
         marks = {}
         for sym, pos in self.state.positions.items():
@@ -634,12 +639,57 @@ class Bot:
                          if b["t"] + dt.timedelta(minutes=C.INTERVAL_MIN) > opened]
                 if since:
                     marks[sym] = since[-1]["c"]
-        if not self.state.daily_limit_hit(marks):
+        hit = bool(self.state.positions) and self.state.daily_limit_hit(marks)
+        if mine and not hit:
+            # your own trades in Kite count too: the limit is about the account, not only the bot's share of it
+            loss = self.state.d["day_pnl"] + self.state.open_pnl(marks) + mine
+            with_yours = loss <= -self.state.d["day_start_equity"] * C.MAX_DAILY_LOSS_PCT / 100
+            self.limit_hold = (f"daily loss limit {C.MAX_DAILY_LOSS_PCT:g}% reached counting your own trades in Kite "
+                               f"(₹{mine:,.2f} before charges)" if with_yours else None)
+            if not with_yours or not self.state.positions:
+                return
+        elif not hit:
+            self.limit_hold = None
             return
-        self.note(f"{T.WARN_ICON} Daily loss limit of {C.MAX_DAILY_LOSS_PCT}% reached (booked + open): closing "
+        self.note(f"{T.WARN_ICON} Daily loss limit of {C.MAX_DAILY_LOSS_PCT}% reached (booked + open"
+                  + (f", with your own trades in Kite ₹{mine:,.2f}" if mine else "") + f"): closing "
                   f"{len(self.state.positions)} open position(s). No new entry today.", logging.ERROR)
         for sym, pos in list(self.state.positions.items()):
             self.close_position(sym, marks.get(sym, self.prices.get(sym, pos["entry"])), "daily loss limit", now)
+
+    def manual_pnl(self, now=None):
+        """REAL MONEY: the result of your own trades in Kite today, booked and open, before charges, as of the last
+        comparison with Zerodha (every RECON_EVERY_SEC): Zerodha's P&L in each stock you traded, less the bot's
+        own part of it (its trades booked today in that stock and its open shares there). 0.0 when unknown."""
+        mb = self.manual_book or {}
+        syms = set(mb.get("manual") or {}) | {s for s, p in self.state.positions.items() if p.get("manual_qty")}
+        if not syms:
+            return 0.0
+        day = {p.get("tradingsymbol"): p for p in mb.get("day") or []}
+        booked = self._bot_gross_today((now or now_ist()).date())
+        total = 0.0
+        for s in syms:
+            z = day.get(s)
+            if not z or z.get("pnl") is None:
+                continue
+            part = float(z["pnl"]) - booked.get(s, 0.0)
+            pos = self.state.positions.get(s)
+            if pos and z.get("last_price"):
+                part -= costs.gross_pnl(pos["entry"], float(z["last_price"]), pos["qty"], pos["direction"])
+            total += part
+        return round(total, 2)
+
+    def _bot_gross_today(self, day):
+        """{symbol: gross result} of the bot's own trades closed on `day` (trade log of this mode)."""
+        out = {}
+        try:
+            with open(os.path.join(C.DATA_DIR, f"trades_{self.mode}.csv"), encoding="utf-8", newline="") as f:
+                for r in csv.DictReader(f):
+                    if str(r.get("closed") or "")[:10] == day.isoformat():
+                        out[r["symbol"]] = out.get(r["symbol"], 0.0) + float(r.get("gross") or 0.0)
+        except (OSError, ValueError):
+            pass
+        return out
 
     def book_round_trip(self, rt, when, count_trade=None):
         """REAL MONEY: book shares the broker bought and sold again by itself (see risk.book_round_trip). They
@@ -962,6 +1012,20 @@ class Bot:
         self.journal_round(now, candidates, square_off_time)
         self.write_status(now)
 
+    def manual_rows(self):
+        """Your own open shares in stocks the bot does not hold, for the dashboard (from the last comparison)."""
+        mb = self.manual_book or {}
+        day = {p.get("tradingsymbol"): p for p in mb.get("day") or []}
+        out = []
+        for sym, m in sorted((mb.get("manual") or {}).items()):
+            z = day.get(sym) or {}
+            qty = int(z.get("quantity") or 0)
+            if sym in self.state.positions or not qty or qty != int(m.get("qty") or 0):
+                continue
+            out.append({"symbol": sym, "direction": "LONG" if qty > 0 else "SHORT", "qty": abs(qty),
+                        "avg": m.get("avg"), "price": z.get("last_price"), "pnl": z.get("pnl"), "at": mb.get("at")})
+        return out
+
     def write_status(self, now):
         positions = []
         for sym, p in self.state.positions.items():
@@ -980,6 +1044,10 @@ class Bot:
             "positions": positions, "rows": self.rows, "events": self.events, "feed": self.feed,
             # REAL MONEY: the last comparison with Zerodha, and why new entries are on hold (None = they aren't)
             "recon": self.recon if self.live else None, "entry_hold": self.entry_hold() if self.live else self.clock_hold,
+            # REAL MONEY: your own trades in Kite (from the last comparison): result today before charges, and
+            # the shares open in stocks the bot does not hold
+            "manual_pnl": self.manual_now if self.live else None,
+            "manual": self.manual_rows() if self.live else [],
             "clock_skew_sec": self.clock_skew,
             "build": self.build,
             # Paper | Real Money (livemode.py): a switch waiting, whether this bot's own environment has both live

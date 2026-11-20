@@ -192,3 +192,75 @@ def test_the_brokers_own_closes_never_take_your_shares(live):
     done, _ = b.broker.exit("SBIN", {"direction": "LONG", "qty": 2}, 101.0, "late fill")
     sells = [o for o in z.sent("LIMIT") if o["transaction_type"] == "SELL"]
     assert done == 2 and sells[-1]["quantity"] == 2
+
+
+# ---------------------------------------------------------------- the daily loss limit counts your trades
+class KiteWithPnl(Kite):
+    """Zerodha's positions with last price and P&L (before charges), as the real one gives them."""
+
+    def __init__(self):
+        super().__init__()
+        self.px = {}
+
+    def positions(self):
+        day = []
+        for s, q in self.net.items():
+            ltp, pnl = self.px.get(s, (None, None))
+            day.append({"tradingsymbol": s, "product": "MIS", "exchange": "NSE", "quantity": q,
+                        "last_price": ltp, "pnl": pnl})
+        return {"day": day}
+
+
+def wired_pnl(live):
+    b, _ = live
+    z = KiteWithPnl()
+    b.kite, b.broker.kite = z, z
+    return b, z
+
+
+def test_your_result_is_zerodhas_pnl_less_the_bots_part(live):
+    b, z = wired_pnl(live)
+    b.cycle()
+    pos = b.state.positions["SBIN"]
+    q, e = int(pos["qty"]), float(pos["entry"])
+    you_buy(z, "SBIN", 9, 100.9)
+    z.net = {"SBIN": q + 9}
+    z.px = {"SBIN": (100.0, round(q * (100.0 - e) + 9 * (100.0 - 100.9), 2))}
+    b.reconcile(startup=False)
+    assert abs(b.manual_pnl() - (-8.1)) < 0.02
+
+
+def test_a_big_loss_in_your_own_trades_holds_entries_and_closes_the_bots(live):
+    b, z = wired_pnl(live)
+    b.cycle()
+    q = int(b.state.positions["SBIN"]["qty"])
+    you_buy(z, "ITC", 50, 300.0)
+    z.net = {"SBIN": q, "ITC": 50}
+    z.px = {"SBIN": (None, None), "ITC": (250.0, -2500.0)}           # 2.5% of the Rs 1,00,000 day start
+    b.reconcile(startup=False)
+    b.enforce_daily_limit({}, bot.now_ist())
+    assert "SBIN" not in b.state.positions
+    assert b.entry_hold().startswith("daily loss limit 2% reached counting your own trades")
+    assert any("with your own trades in Kite" in e for e in b.events)
+    itc_sells = [o for o in z.sent() if o["tradingsymbol"] == "ITC" and str(o.get("tag") or "").startswith("orb")]
+    assert itc_sells == []                                           # your shares in other stocks: yours
+
+
+def test_a_small_loss_in_your_own_trades_holds_nothing(live):
+    b, z = wired_pnl(live)
+    b.cycle()
+    q = int(b.state.positions["SBIN"]["qty"])
+    you_buy(z, "ITC", 5, 300.0)
+    z.net = {"SBIN": q, "ITC": 5}
+    z.px = {"ITC": (295.0, -25.0)}
+    b.reconcile(startup=False)
+    b.enforce_daily_limit({}, bot.now_ist())
+    assert "SBIN" in b.state.positions and b.entry_hold() is None and b.manual_now == -25.0
+    rows = b.manual_rows()
+    assert rows == [{"symbol": "ITC", "direction": "LONG", "qty": 5, "avg": 300.0, "price": 295.0, "pnl": -25.0,
+                     "at": b.manual_book["at"]}]
+
+
+def test_paper_has_no_manual_trades(monkeypatch):
+    b = bot.Bot()
+    assert not b.live and b.manual_pnl() == 0.0 and b.entry_hold() is None
