@@ -24,7 +24,7 @@ This report states what the evidence shows. It is not advice on whether to trade
 - **FAIL** one-year backtest of the present rules: 298 trades, -15.36%, average -0.22R (range -0.27 to -0.17)
 - **FAIL** lab: 7 ideas tested by walk-forward, none passed
 - **FAIL** forward test on unseen data: nothing has passed (2 registered)
-- **OPEN** real-money record: 3 closed trade(s), net ₹-8.92; the checkpoint needs 30 trades and even then is not proof
+- **OPEN** real-money record: not written to this file, because it is the owner's own account; it is on the dashboard's Readiness page. The checkpoint needs 30 real trades, and even then is not proof.
 
 ### Operations
 
@@ -95,7 +95,7 @@ The real trading loop (`bot.Bot.cycle`) was driven through 239 archived trading 
 | orb_regime | 84 | -0.15 | FAIL |
 | orb_retest | 68 | -0.65 | FAIL |
 | vwap_pullback | 162 | -0.42 | FAIL |
-- Real money trade log: 3 closed trade(s), net ₹-8.92.
+- Real money trade log: not written to this file, because it is the owner's own account; it is on the dashboard's Readiness page. The checkpoint needs 30 real trades, and even then is not proof.
 - Paper trade log: 3 closed trade(s), net ₹118.15.
 
 ## Rules for trading through the Kite API

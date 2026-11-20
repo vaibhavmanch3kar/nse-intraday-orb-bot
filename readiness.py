@@ -364,6 +364,10 @@ HEADLINES = {
 }
 
 
+PRIVATE_LIVE = ("not written to this file, because it is the owner's own account; it is on the dashboard's Readiness "
+                "page. The checkpoint needs 30 real trades, and even then is not proof.")
+
+
 def markdown(res):
     v = res["verdicts"]
     t = res["tests"]
@@ -377,11 +381,13 @@ def markdown(res):
     for k in ("platform", "strategy", "operations"):
         L.append(f"| {names[k]} | **{WORDS[v[k]['state']]}** | {HEADLINES[(k, v[k]['state'])]} |")
     # The report file can be shared (the repository is public). Items that describe this one PC, such as where
-    # its secrets are kept, stay on the dashboard's Readiness page and are only counted here.
+    # its secrets are kept, stay on the dashboard's Readiness page and are only counted here. So does the owner's
+    # real-money record (trades and result of a real account): it is personal, not evidence about the software.
     hidden = set(v["operations"].get("local") or [])
     for k in ("platform", "strategy", "operations"):
         L += ["", f"### {names[k].split(':')[0].title()}", ""]
-        L += [f"- **{WORDS[s]}** {text}" for s, text in v[k]["reasons"] if text not in hidden]
+        L += [f"- **{WORDS[s]}** " + ("real-money record: " + PRIVATE_LIVE if text.startswith("real-money record:") else text)
+              for s, text in v[k]["reasons"] if text not in hidden]
         if k == "operations" and hidden:
             L.append(f"- **OPEN** {len(hidden)} more item(s) about this PC's own set-up are listed on the dashboard's "
                      f"Readiness page and are not written to this file.")
@@ -419,9 +425,9 @@ def markdown(res):
         L += ["| Idea tested in the lab | Walk-forward trades | Average R | Verdict |", "|---|---|---|---|"]
         L += [f"| {x['strategy']} | {x['trades']} | {x['avg_r']:+.2f} | {x['verdict']} |" if x.get("avg_r") is not None
               else f"| {x['strategy']} | {x['trades']} | - | {x['verdict']} |" for x in s["lab"]]
-    for mode, name in (("live", "Real money"), ("paper", "Paper")):
-        g = s["logs"][mode]
-        L.append(f"- {name} trade log: {g['trades']} closed trade(s), net ₹{g['net']:,.2f}.")
+    L.append(f"- Real money trade log: {PRIVATE_LIVE}")
+    g = s["logs"]["paper"]
+    L.append(f"- Paper trade log: {g['trades']} closed trade(s), net ₹{g['net']:,.2f}.")
     L += ["", "## Rules for trading through the Kite API", "", "| Rule | How the bot stands | Checked |", "|---|---|---|"]
     L += [f"| {c['name']} | {c['text']} | {c['checked'] or '**not yet**'} |" for c in res["compliance"]]
     st = res["state"]

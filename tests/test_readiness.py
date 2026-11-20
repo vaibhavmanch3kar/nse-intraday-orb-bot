@@ -133,6 +133,10 @@ def test_build_writes_the_result_and_the_report_and_changes_nothing_else(isolate
     # the report file can be shared: what describes this one PC stays on the dashboard
     assert "plain text" not in md and "KITE_API_KEY" not in md and "only on this PC" not in md and "s3cr3t" not in md
     assert "2 more item(s) about this PC's own set-up are listed on the dashboard's Readiness page" in md
+    # the owner's real-money result is personal: never in the file (the repository is public), still on the page
+    assert "Real money trade log: not written to this file" in md and "OPEN** real-money record: not written" in md
+    assert not any(line.startswith("- Real money trade log:") and "closed trade" in line for line in md.splitlines())
+    assert any(t.startswith("real-money record:") and "closed trade" in t for _, t in R.latest()["verdicts"]["strategy"]["reasons"])
     assert len(res["verdicts"]["operations"]["local"]) == 2
     assert any("KITE_API_KEY" in t for _, t in R.latest()["verdicts"]["operations"]["reasons"])     # still on the page
 
