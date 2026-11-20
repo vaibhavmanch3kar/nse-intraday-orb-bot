@@ -100,10 +100,14 @@ def test_strategy_needs_a_lab_pass_and_unseen_data_never_a_nice_backtest_alone()
     assert v["strategy"]["state"] == "fail" and v["platform"]["state"] == "pass"   # the two never mask each other
 
 
-def test_operations_lists_what_the_owner_still_has_to_decide():
+def test_operations_lists_what_the_owner_still_has_to_decide(monkeypatch):
     text = " | ".join(t for _, t in verdict()["operations"]["reasons"])
     assert "1 secret(s) are kept as plain text" in text and "KITE_API_KEY" in text and "40 commits exist only on this PC" in text
-    assert "7 Dec 2026" in text and "phone" in text
+    assert "phone" in text
+    assert "7 Dec 2026" not in text                            # checked on 20 Nov 2026: no longer an open item
+    # a rule that has not been checked yet is still listed as open
+    monkeypatch.setattr(R, "COMPLIANCE", list(R.COMPLIANCE) + [("A new rule", "not yet checked", None)])
+    assert "A new rule" in " | ".join(t for _, t in verdict()["operations"]["reasons"])
     assert "cool-down count" not in text                       # settled findings are not open items...
     assert all(len(f) == 4 for f in R.FINDINGS) and R.FINDINGS[0][3].startswith("Settled 2026-11-18")
     clean = " | ".join(t for _, t in verdict(st=state(plain=(), unpushed=0))["operations"]["reasons"])
@@ -122,7 +126,8 @@ def test_build_writes_the_result_and_the_report_and_changes_nothing_else(isolate
     for text in ("# Ayodhya ORB 2.0: production-readiness report", "It is not advice on whether to trade.",
                  "| PLATFORM: is the software safe and correct? | **PASS** |", "| STRATEGY: do the trading rules have a proven edge? | **FAIL** |",
                  "There is NO evidence that the present trading rules make money.", "## Paper replay of the trading loop",
-                 "| K1 | Capital protection (Kavach) |", "Closing session change on 7 Dec 2026", "**not yet**", "## How to repeat this",
+                 "| K1 | Capital protection (Kavach) |", "Closing session change on 7 Dec 2026", "regular trading runs to 3:30 PM",
+                 "| 2026-11-20 |", "## How to repeat this",
                  "## What the testing itself found", "counted losses first"):     # ...but stay in the report
         assert text in md, text
     # the report file can be shared: what describes this one PC stays on the dashboard

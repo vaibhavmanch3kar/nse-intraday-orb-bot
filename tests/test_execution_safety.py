@@ -1006,3 +1006,20 @@ def test_a_price_from_an_earlier_round_does_not_trip_the_daily_limit(live, monke
     monkeypatch.setattr(data_yahoo, "fetch", lambda s, i, r, **kw: (_ for _ in ()).throw(data_yahoo.DataError("down")))
     b.cycle()                                                 # ... but this round's price request failed
     assert "SBIN" in b.state.positions and len(z.book) == n   # valued at its entry price: nothing is closed
+
+
+def test_a_comparison_that_fails_during_the_day_is_said_once_and_its_recovery_too(live):
+    # 20 Nov 2026: a proxy reset at 09:15 made the comparison fail, and only the dashboard showed it
+    b, z = live
+    b.reconcile(startup=True)
+    z.book_down = True
+    for _ in range(3):
+        b.reconcile(startup=False)
+    said = [e for e in b.events if "could not compare the bot's positions with Zerodha (" in e]
+    assert len(said) == 1 and "tried again every" in said[0] and b.recon["ok"] is False
+    z.book_down = False
+    b.reconcile(startup=False)
+    assert any("the comparison with Zerodha works again" in e for e in b.events) and b.recon_failing is None
+    z.book_down = True
+    b.reconcile(startup=False)
+    assert sum("could not compare the bot's positions with Zerodha (" in e for e in b.events) == 2   # a new run of failures

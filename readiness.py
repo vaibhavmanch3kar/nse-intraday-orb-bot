@@ -99,7 +99,7 @@ COMPLIANCE = [
     ("No market orders from an algo", "The bot sends LIMIT entries and exits and SL (stop-loss limit) protection only.", "2026-11-18"),
     ("Order tags", "Every bot order carries a tag of at most 20 letters and digits.", "2026-11-18"),
     ("Zerodha MIS square-off", "Zerodha closes MIS positions in F&O stocks at 3:12 PM for a fee; the bot closes at 3:00 PM.", "2026-11-18"),
-    ("Closing session change on 7 Dec 2026", "NOT yet verified: trading hours and MIS timings change that day and must be checked again before it.", None),
+    ("Closing session change on 7 Dec 2026", "From 7 Dec 2026 regular trading runs to 3:30 PM for all stocks and the closing auction moves to 3:30-3:40 PM (Zerodha update of 16 Oct 2026, after SEBI's October circular). The bot closes at 3:00 PM, so it is not affected. Zerodha has not yet published its MIS square-off time from that day: check its bulletin in the first week of December.", "2026-11-20"),
 ]
 
 

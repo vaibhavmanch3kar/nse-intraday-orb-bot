@@ -323,6 +323,7 @@ class Bot:
         self.clock_checked = None         # when the clock was last compared with Zerodha's
         self.clock_skew = None            # seconds this PC is ahead of Zerodha (negative: behind), last reading
         self.recon_said = set()           # mismatches already said in the log
+        self.recon_failing = None         # since when the comparison with Zerodha has been failing (None = it works)
         self.last_recon = None            # when the record was last compared with Zerodha
         self.launcher_gone = lambda: False   # main() sets this when run_bot.ps1 passes --launcher-pid
         try:                    # what this bot runs: version and file/setting hashes, for the dashboard
@@ -540,7 +541,19 @@ class Bot:
             if startup:
                 self.note(f"could not compare the bot's positions with Zerodha at the start ({type(e).__name__}) "
                           f"- it will be tried again", logging.WARNING)
+            elif self.recon_failing is None:
+                # A failed comparison during the day used to show only on the dashboard (20 Nov 2026: a proxy
+                # reset at 09:15 left no line in the log). Said once per run of failures, not every round.
+                self.note(f"could not compare the bot's positions with Zerodha ({type(e).__name__}) - tried again "
+                          f"every {max(1, C.RECON_EVERY_SEC // 60)} min; nothing is changed meanwhile",
+                          logging.WARNING)
+            if self.recon_failing is None:
+                self.recon_failing = now
             return
+        if self.recon_failing is not None:
+            mins = int((now - self.recon_failing).total_seconds() // 60)
+            self.note(f"the comparison with Zerodha works again (it had failed for {mins} min)")
+            self.recon_failing = None
         dropped, self.recon_missing = [], set()
         for sym in rep["drop"]:
             pos = self.state.positions[sym]
