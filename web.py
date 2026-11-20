@@ -479,6 +479,26 @@ def _held(m):
     return "-" if m is None else (f"{m} min" if m < 60 else f"{m // 60} h {m % 60:02d} min")
 
 
+def giveback(p):
+    """The best open profit an open position has had and how much of it has been given back, in R and rupees:
+    {"best_r", "best_inr", "back_r", "back_inr"} or None when it can't be worked out. From the best price the bot
+    records for every position (best_price). Information only: nothing trades on it."""
+    try:
+        entry, stop, price, best = float(p["entry"]), float(p["stop"]), float(p["price"]), float(p["best_price"])
+        qty = int(p["qty"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    risk = abs(entry - stop)
+    if not risk or not qty:
+        return None
+    sign = 1 if p.get("direction") == "LONG" else -1
+    now_move = (price - entry) * sign
+    best_move = max(0.0, (best - entry) * sign, now_move)                    # the price now can be the best
+    # given back = the part of the best open profit that is gone; a loss beyond that is not "given back"
+    back = best_move - min(best_move, max(0.0, now_move))
+    return {"best_r": best_move / risk, "best_inr": best_move * qty, "back_r": back / risk, "back_inr": back * qty}
+
+
 def position_row(p):
     """One open position as a card: P&L in ₹ and R, where the price sits between the stop and the
     target (or +2R when the trade has no fixed target), the EMA trail, the time-stop check, time in trade."""
@@ -528,6 +548,14 @@ def position_row(p):
     except (TypeError, ValueError):
         pass
     unreal = p.get("unrealised")
+    gb = giveback(p)
+    gb_txt = ""
+    if gb:
+        gb_txt = (f"<span class='lbl' title='The best open profit this position has had, and how much of it the "
+                  f"price has given back since. Information only: the bot does not trade on it.'>Best so far "
+                  f"{gb['best_r']:+.2f}R ({_inr(gb['best_inr'])})"
+                  + (f" · given back {gb['back_r']:.2f}R ({_inr(gb['back_inr'])})" if gb["back_r"] >= 0.005
+                     else " · at its best now" if gb["best_r"] >= 0.005 else "") + "</span>")
     mine = int(p.get("manual_qty") or 0)
     if mine:
         badges += _badge(f"+{mine} YOURS", "warn", "Shares you bought in Kite in this stock: one stop-loss order covers "
@@ -539,7 +567,7 @@ def position_row(p):
             f"<span class='lbl'>{qty_txt} · in trade {_held(p.get('held_min'))}</span></div>"
             f"<div><span class='lbl'>Entry → price</span>{_fmt(entry)} → <b>{_fmt(price)}</b></div>"
             f"<div><span class='lbl'>Open P&amp;L</span><b class='{_cls(unreal)}'>{_signed(unreal)}"
-            f"{'' if r is None else f' · {r:+.2f}R'}</b></div>"
+            f"{'' if r is None else f' · {r:+.2f}R'}</b>{gb_txt}</div>"
             f"<div class='railbox'>{rail}</div>"
             f"<div class='small'><span class='lbl'>{T.term('time_stop')}</span>{time_txt}"
             f"<span class='lbl' style='margin-top:4px'>{T.term('trail')} · {trail}</span>"
