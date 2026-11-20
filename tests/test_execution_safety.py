@@ -271,7 +271,10 @@ def test_ensure_stop_every_state():
     z.refuse = None
     z.book[new].update(status="COMPLETE", filled_quantity=10)
     assert b.ensure_stop("SBIN", pos) == ("filled", None)
-    assert b.ensure_stop("SBIN", {**pos, "sl_order_id": None})[0] == "replaced"  # no stop on record: place one
+    # the stop sold every share: nothing is open, so no new stop (one used to be placed for shares that were gone)
+    assert b.ensure_stop("SBIN", {**pos, "sl_order_id": None})[0] == "none_open"
+    z.book[new].update(status="CANCELLED", filled_quantity=0)                    # shares open, no stop on record
+    assert b.ensure_stop("SBIN", {**pos, "sl_order_id": None})[0] == "replaced"   # place one
 
 
 def test_exit_is_postponed_when_the_stop_cant_be_asked_about():

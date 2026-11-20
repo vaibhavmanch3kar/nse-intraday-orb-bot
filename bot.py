@@ -563,11 +563,17 @@ class Bot:
                 self.note(f"{sym}: a position from an earlier day is not at Zerodha any more - dropped from the "
                           f"bot's record (its closing price is not in today's order book, so no result is booked)",
                           logging.WARNING)
+                if pos.get("sl_order_id"):
+                    self.broker.cancel(pos["sl_order_id"])    # nothing is left for it to protect
                 self.state.positions.pop(sym, None)
                 dropped.append(sym)
                 continue
             got, price, how = self.closed_at_zerodha(sym, pos, qty)
             if got >= qty:
+                if pos.get("sl_order_id"):
+                    # it used to stay working until the next comparison (up to 5 minutes), where a trigger would
+                    # have opened a position on the other side (review, 20 Nov 2026)
+                    self.broker.cancel(pos["sl_order_id"])
                 row = self.book_closed(sym, qty, price, how, now)
                 icon = T.EXIT_WIN if row["net"] > 0 else T.EXIT_LOSS
                 self.note(f"{icon} EXIT {row['direction']} {sym} x{qty} @ {price:.2f} ({how}: found closed at "
@@ -581,19 +587,31 @@ class Bot:
         for sym, qty in rep["resize"].items():
             pos = self.state.positions[sym]
             closed = int(pos["qty"]) - int(qty)
-            if pos.get("sl_order_id"):
-                self.broker.cancel(pos["sl_order_id"])
+            # The old stop is cancelled and the cancel CONFIRMED before a new one may be placed. It used to be
+            # cancelled without checking: a cancel that failed left two stops working for the rest of the day
+            # (review, 20 Nov 2026). If it is not confirmed, the old stop stays on record and ensure_stop sets it
+            # to the new size instead (or closes the position if it has been triggered).
+            sl = pos.get("sl_order_id")
+            gone = True
+            if sl:
+                gone = (self.broker.cancel_confirmed(sl) is not None if hasattr(self.broker, "cancel_confirmed")
+                        else (self.broker.cancel(sl) or True))
+            how_stop = (f"the stop-loss is placed again for {qty}" if gone else
+                        f"the old stop-loss could not be cancelled yet, so it is set to {qty} instead")
             got, price, how = self.closed_at_zerodha(sym, {**pos, "sl_order_id": None}, closed)
             if got >= closed:
-                row = self.book_closed(sym, closed, price, how, now)    # the other `qty` shares stay, without a stop
+                row = self.book_closed(sym, closed, price, how, now)    # the other `qty` shares stay
+                if not gone:
+                    self.state.positions[sym]["sl_order_id"] = sl
                 self.note(f"{sym}: Zerodha holds {qty} shares, the bot had {qty + closed} on record - the other "
-                          f"{closed} were closed at Zerodha @ {price:.2f} (net ₹{row['net']:.2f}), and the stop-loss "
-                          f"is placed again for {qty}", logging.WARNING)
+                          f"{closed} were closed at Zerodha @ {price:.2f} (net ₹{row['net']:.2f}), and {how_stop}",
+                          logging.WARNING)
             else:
                 self.note(f"{sym}: Zerodha holds {qty} shares, the bot had {pos['qty']} on record - corrected, and "
-                          f"the stop-loss is placed again for {qty} (the closing order of the other {closed} was "
-                          f"not found, so their result is not booked)", logging.WARNING)
-                pos.update(qty=qty, sl_order_id=None)   # ensure_stop places a stop for the new size this round
+                          f"{how_stop} (the closing order of the other {closed} was not found, so their result is not "
+                          f"booked)", logging.WARNING)
+                pos.update(qty=qty, sl_order_id=None if gone else sl)
+            self.state.save()
         for sym, mine in (rep.get("manual_in") or {}).items():
             pos = self.state.positions.get(sym)
             if pos is None or int(pos.get("manual_qty") or 0) == int(mine):
@@ -692,6 +710,11 @@ class Bot:
                   + (f", with your own trades in Kite ₹{mine:,.2f}" if mine else "") + f"): closing "
                   f"{len(self.state.positions)} open position(s). No new entry today.", logging.ERROR)
         for sym, pos in list(self.state.positions.items()):
+            if self.live and (sym in self.recon_missing or (hasattr(self.broker, "closing_pending")
+                                                          and self.broker.closing_pending(sym))):
+                # its closing order is still working, or Zerodha does not explain it: another sale now could
+                # sell the same shares twice (review, 20 Nov 2026). The main loop deals with it as before.
+                continue
             self.close_position(sym, marks.get(sym, self.prices.get(sym, pos["entry"])), "daily loss limit", now)
 
     def manual_avg(self, sym):
@@ -922,6 +945,13 @@ class Bot:
             if self.live and hasattr(self.broker, "ensure_stop"):
                 # the position's stop-loss must exist at the exchange on every round, not only when it was placed
                 stop_state, new_id = self.broker.ensure_stop(sym, pos)
+                if stop_state == "none_open":
+                    # Zerodha's order book shows none of these shares open (sold in Kite?): no stop is placed for
+                    # them, and the record is compared with Zerodha at once (it books and drops what was closed)
+                    self.note(f"{sym}: Zerodha's order book shows none of this position's shares open - no stop-loss "
+                              f"is placed, and the record is compared with Zerodha now", logging.WARNING)
+                    self.reconcile(startup=False)
+                    continue
                 if stop_state == "replaced":
                     pos["sl_order_id"] = new_id
                     self.state.save()
