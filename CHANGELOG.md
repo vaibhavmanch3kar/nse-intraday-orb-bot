@@ -6,6 +6,63 @@ Every version is on the [Releases page](https://github.com/vaibhavmanch3kar/nse-
 with a ZIP you can download. To go back to an older version, download that version's ZIP.
 Your settings (Windows user environment variables) and your `data` folder are not part of the ZIP, so keep them.
 
+## 19 Nov 2026 (on `main` and `release/ayodhya-orb-2.0`, no new release yet): real-money fixes and two stricter limits
+
+**The entry rules are unchanged. Two risk limits are now stricter** (the cool-down and the daily loss limit,
+below). On the one-year candle archive to 19 Nov 2026 the backtest was 337 trades, −16.43% before these changes
+and is 298 trades, −15.36% after them; the whole difference comes from the cool-down. The rules still lose money
+after costs and no idea in the lab has passed. Paper trading stays the default. 928 offline tests pass, and the
+paper replay of the trading loop still agrees with the backtest on every trade (292 of 292).
+
+### Real money
+
+- **Fixed:** Zerodha refused a BHARTIARTL entry with "Tick size for this script is 0.10". Every price was rounded
+  to 0.05, but NSE sets the price step per stock (7 of the 12 watchlist stocks use 0.10). Entries, stop-losses
+  and closing orders now use each stock's own step, read from Kite once a day. If a stock's step is not known,
+  no entry is sent; stops and exits then round to 0.10, so a closing order is never held back.
+- **A stop that triggers but cannot fill** is no longer treated as protection. The exchange stop is a stop-limit
+  order: when the price falls through its limit it rests unfilled. The bot now closes the position in the same
+  round, when Zerodha shows the stop as triggered, or when this round's Kite price is past the stop's limit.
+- **An exit counts what the stop already sold** and waits for Zerodha to confirm the stop's cancel before sending
+  a closing order. Before, it could sell the full quantity next to a stop that had already sold part of it.
+- **A position found closed at Zerodha is booked** (at its stop's fill price or the closing order's), so the
+  loss reaches the daily loss limit, the losing streak and the trade log. One empty answer from Zerodha no longer
+  makes the bot forget a position: it is kept, new entries are held, and it is checked again every round.
+- **A closing order that fills late is booked**, and while a position's closing order is unresolved the bot
+  sends no new stop and no second closing order.
+- **A start after a crash keeps the stop** of shares Zerodha shows but the bot had not yet recorded, instead of
+  cancelling it as a leftover.
+- Every exit attempt is priced from a fresh Zerodha quote, not from the price at the start of the round.
+- Shares the broker closes by itself (an entry whose stop could not be placed, or a late entry fill) are booked
+  as trades of the day.
+
+### Kavach
+
+- **The cool-down after three losses is counted in trading days.** It was counted in calendar days, so three
+  losses on a Friday meant Saturday and Sunday off and trading on Monday.
+- **The daily loss limit also closes open positions.** At −2% (booked and open) the bot already stopped new
+  entries; now it closes what is open as well, in real money, in paper and in the backtest. On the one-year
+  archive it never fires.
+- **A wrong PC clock holds new entries.** Every 5 minutes the bot compares the PC's clock with Zerodha's server
+  time; more than 30 seconds apart, no new entry is taken until the clock is right. Open positions are still
+  managed.
+
+### Dashboard and records
+
+- **Fixed:** "Log out of Zerodha" and every other button that asks first (Close all positions, Start bot, Apply
+  Now and the others) went out without asking and were then refused. They ask again as they should.
+- The trade logs have four new columns: `best_price`, `worst_price`, `best_r` and `worst_r`, how far each trade
+  went for and against you while it was open. Record-keeping only; nothing trades on them.
+- Kavach page, README and STRATEGY.md describe the two stricter limits.
+- All README and guide screenshots retaken on the current code (made-up paper figures).
+
+### Lab and tests
+
+- New lab idea `orb_late`: a breakout refused only for low volume may be bought up to two candles later. It does
+  not help on the one-year archive (−0.17R a trade) and is being forward-tested on paper from 20 Nov; the bot
+  does not use it.
+- No test can start the real bot or dashboard any more, and two tests no longer depend on the PC's time zone.
+
 ## v2.0 (18 Nov 2026, branch `release/ayodhya-orb-2.0`): safety, research and readiness
 
 Step-by-step guide with screenshots: [docs/GUIDE-2.0.md](docs/GUIDE-2.0.md).
