@@ -90,3 +90,15 @@ def test_nothing_in_the_bot_or_dashboard_writes_the_pins():
         code = open(os.path.join(os.path.dirname(C.__file__), name), encoding="utf-8").read()
         assert "set_pin(" not in code and "import pins" not in code, name
     assert "pins.py" not in {os.path.basename(p) for p in buildinfo.bot_files()}
+
+
+def test_the_report_shows_the_setting_from_before_the_pin(fresh):
+    # 20 Nov 2026: after the pins were applied the report read the setting again and showed the pinned value
+    # as the "normal setting" (1 instead of 4).
+    write(fresh, {"MAX_TRADES_PER_DAY": 1})
+    C.apply_pins()                                   # as every program does at its start
+    assert C.MAX_TRADES_PER_DAY == 1
+    assert pins.report() == ["MAX_TRADES_PER_DAY: pinned 1, normal setting 4 -> in force 1"]
+    pins.set_pin("COOLDOWN_DAYS", 3)                 # pinned now, applied at the next start
+    assert pins.report()[1] == "COOLDOWN_DAYS: pinned 3, normal setting 2 -> in force 3"
+    assert C.COOLDOWN_DAYS == 2                      # showing the pins applies nothing

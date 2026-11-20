@@ -77,13 +77,18 @@ def report():
     if not pins:
         return ["No limit is pinned."]
     out = []
-    now = C.apply_pins()
     for name, pin in pins.items():
-        got = now.get(name)
-        if got:
-            out.append(f"{name}: pinned {got['pin']:g}, normal setting {got['setting']:g} -> in force {got['used']:g}")
-        else:
+        # The normal setting is the value BEFORE any pin: config.py kept it when it applied the pins at the
+        # start of this program. (Reading the setting again after that would show the pinned value.)
+        normal = C.PINNED[name]["setting"] if name in C.PINNED else getattr(C, name)
+        try:
+            p = type(normal)(pin)
+        except (TypeError, ValueError):
+            p = 0
+        if p <= 0:
             out.append(f"{name}: pinned {pin!r} is not a usable value - ignored")
+        else:
+            out.append(f"{name}: pinned {p:g}, normal setting {normal:g} -> in force {C.stricter(name, normal, p):g}")
     return out
 
 
