@@ -16,8 +16,15 @@ BG = _c["bg"]
 
 
 def _fmt_inr(v):
+    """An amount such as an equity balance: ₹1,234 / -₹1,234."""
     sign = "-" if v < 0 else ""
     return f"{sign}₹{abs(v):,.0f}"
+
+
+def _fmt_pnl(v, nd=0):
+    """A profit or loss: ▲ ₹1,234 / ▼ ₹1,234 / ● ₹0 - an arrow and the absolute amount, never a +/- sign."""
+    x = round(v, nd)
+    return f"{'▲' if x > 0 else '▼' if x < 0 else '●'} ₹{abs(v):,.{nd}f}"
 
 
 def _scale(lo, hi, top, bottom):
@@ -111,12 +118,12 @@ def pnl_bars(values, labels=None, w=900, h=180, title="P&L per trade"):
     slot = (w - pad_l - pad_r) / len(values)
     bw = max(1.0, slot * 0.7)
     parts = [f"<line x1='{pad_l}' x2='{w - pad_r}' y1='{y(0):.1f}' y2='{y(0):.1f}' stroke='{MUTED}' stroke-width='1'/>",
-             f"<text x='{pad_l - 6}' y='{y(m) + 4:.1f}' fill='{MUTED}' font-size='11' text-anchor='end'>{_fmt_inr(m)}</text>",
-             f"<text x='{pad_l - 6}' y='{y(-m) + 4:.1f}' fill='{MUTED}' font-size='11' text-anchor='end'>{_fmt_inr(-m)}</text>"]
+             f"<text x='{pad_l - 6}' y='{y(m) + 4:.1f}' fill='{MUTED}' font-size='11' text-anchor='end'>{_fmt_pnl(m)}</text>",
+             f"<text x='{pad_l - 6}' y='{y(-m) + 4:.1f}' fill='{MUTED}' font-size='11' text-anchor='end'>{_fmt_pnl(-m)}</text>"]
     for i, v in enumerate(values):
         x0 = pad_l + i * slot + (slot - bw) / 2
         y0, y1 = sorted((y(0), y(v)))
-        tip = f"Trade {i + 1}: {_fmt_inr(v)}" + (f" · {labels[i]}" if labels else "")
+        tip = f"Trade {i + 1}: {_fmt_pnl(v)}" + (f" · {labels[i]}" if labels else "")
         parts.append(f"<rect x='{x0:.1f}' y='{y0:.1f}' width='{bw:.1f}' height='{max(1.0, y1 - y0):.1f}' "
                      f"fill='{UP if v > 0 else DN}'><title>{html.escape(tip)}</title></rect>")
     return _svg(w, h, "".join(parts), title)

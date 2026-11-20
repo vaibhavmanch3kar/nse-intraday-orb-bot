@@ -39,7 +39,10 @@ JS = r"""
   var NS='http://www.w3.org/2000/svg';
   function cv(n){return getComputedStyle(document.documentElement).getPropertyValue(n).trim()||'#888'}
   function money(v,dp){dp=dp==null?0:dp;return (v<0?'-':'')+'₹'+Math.abs(v).toLocaleString('en-US',{minimumFractionDigits:dp,maximumFractionDigits:dp})}
-  function signed(v){return (v>0?'▲ +':v<0?'▼ ':'')+money(v,2)}
+  // a profit or loss: ▲ / ▼ / ● and the absolute amount, never a +/- sign (as web.pnl_text)
+  function dir(v){var r=Math.round(v*100);return r>0?1:r<0?-1:0}
+  function pnl(v,dp){return (dir(v)>0?'▲ ':dir(v)<0?'▼ ':'● ')+money(Math.abs(v),dp==null?2:dp)}
+  function pcol(v,up,dn,mu){return dir(v)>0?up:dir(v)<0?dn:mu}
   function esc(s){return String(s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
   function mk(tag,a,parent){var e=document.createElementNS(NS,tag);for(var k in a)e.setAttribute(k,a[k]);if(parent)parent.appendChild(e);return e}
   function txt(parent,x,y,s,anchor,col,size){var t=mk('text',{x:x,y:y,'font-size':size||12,'text-anchor':anchor||'start',fill:col||cv('--muted')},parent);t.textContent=s;return t}
@@ -101,17 +104,17 @@ JS = r"""
       txt(svg,x(0),H-6,off?(d.firstLabel||'start'):pts[0][0],'start');
       txt(svg,x(series.length-1),H-6,pts[pts.length-1][0],'end');
       pts.forEach(function(p,i){xs.push(x(i+off));hit.push([function(){var df=p[1]-ref;
-        return '<b>'+esc(p[0])+'</b> · '+money(p[1],2)+' <span style="color:'+(df>=0?up:dn)+'">'+signed(df)+'</span>'+(p[3]?'<br>'+esc(p[3]):'')},
+        return '<b>'+esc(p[0])+'</b> · '+money(p[1],2)+' <span style="color:'+pcol(df,up,dn,mu)+'">'+pnl(df)+'</span>'+(p[3]?'<br>'+esc(p[3]):'')},
         y(p[1])])});
     } else if(d.type==='bars'){
       var pts=d.pts||[]; if(!pts.length){txt(svg,L,H/2,'No data yet');return}
       var m=Math.max.apply(null,pts.map(function(p){return Math.abs(p[1])}))||1;
       var y=function(val){return T+(m-val)/(2*m)*(H-T-B)}, slot=(W-L-R)/pts.length, bw=Math.max(1.5,Math.min(28,slot*0.7));
       mk('line',{x1:L,x2:W-R,y1:y(0),y2:y(0),stroke:mu},svg);
-      txt(svg,L-6,y(m)+4,money(m),'end');txt(svg,L-6,y(-m)+4,money(-m),'end');
+      txt(svg,L-6,y(m)+4,pnl(m,0),'end');txt(svg,L-6,y(-m)+4,pnl(-m,0),'end');
       pts.forEach(function(p,i){var cx=L+i*slot+slot/2, a=y(0), b=y(p[1]);
         mk('rect',{x:cx-bw/2,y:Math.min(a,b),width:bw,height:Math.max(1,Math.abs(b-a)),fill:p[1]>=0?up:dn,rx:Math.min(3,bw/4)},svg);
-        xs.push(cx);hit.push([function(){return '<b>'+esc(p[0])+'</b> · <span style="color:'+(p[1]>=0?up:dn)+'">'+signed(p[1])+'</span>'+(p[2]?'<br>'+esc(p[2]):'')},b])});
+        xs.push(cx);hit.push([function(){return '<b>'+esc(p[0])+'</b> · <span style="color:'+pcol(p[1],up,dn,mu)+'">'+pnl(p[1])+'</span>'+(p[2]?'<br>'+esc(p[2]):'')},b])});
       txt(svg,L,H-6,pts[0][0]);txt(svg,W-R,H-6,pts[pts.length-1][0],'end');
     } else if(d.type==='candles'){
       var bars=d.bars||[]; if(!bars.length){txt(svg,L,H/2,'No price data');return}
