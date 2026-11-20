@@ -2963,6 +2963,40 @@ def journal_card(mode, view, period):
     return head + table + notes + saved + "</div>"
 
 
+def manual_closed_card(mode):
+    """Shares YOU bought in Kite that the bot closed with its own position (data\\trades_manual_<mode>.csv): a
+    record of their own, apart from the bot's trade log. Empty string when there are none."""
+    import csv
+    path = os.path.join(C.DATA_DIR, f"trades_manual_{mode}.csv")
+    try:
+        with open(path, encoding="utf-8", newline="") as f:
+            rows = list(csv.DictReader(f))
+    except OSError:
+        return ""
+    if not rows:
+        return ""
+
+    def num(x):
+        try:
+            return float(x)
+        except (TypeError, ValueError):
+            return None
+    body = "".join(
+        f"<tr><td>{html.escape(str(r.get('closed') or '')[:16])}</td><td><b>{html.escape(r.get('symbol') or '')}</b></td>"
+        f"<td>{html.escape(r.get('direction') or '')}</td><td class='r'>{html.escape(str(r.get('qty') or ''))}</td>"
+        f"<td class='r'>{_fmt(num(r.get('your_avg')))}</td><td class='r'>{_fmt(num(r.get('exit')))}</td>"
+        f"<td class='r {_cls(num(r.get('gross')))}'>{_signed(num(r.get('gross')))}</td>"
+        f"<td>{html.escape(r.get('how') or '')}</td></tr>" for r in reversed(rows[-50:]))
+    return (f"<section class='card flush' id='manual-closed'><div class='hd'>Your shares the bot closed "
+            f"<span class='end'><span class='tag'>bought by you in Kite · not in the bot's results</span></span></div>"
+            f"<table class='rt'><tr><th>Closed</th><th>Stock</th><th>Side</th><th class='r'>Shares</th>"
+            f"<th class='r'>Your average</th><th class='r'>Exit</th><th class='r'>Result before charges</th>"
+            f"<th>How</th></tr>{body}</table>"
+            f"<div class='muted small warnline'>Shares you added in Kite in a stock the bot held, closed by the "
+            f"bot together with its own. They are kept out of the bot's trade log, win rate and R figures. "
+            f"File: data\\trades_manual_{mode}.csv</div></section>")
+
+
 def render_trades(q=None):
     s = read_status()
     view = current_view(q or {}, s)
@@ -2987,7 +3021,7 @@ def render_trades(q=None):
                 + (trade_breakdowns(rows) if rows else "") + edge_card(rows, f"{mode.title()} trading"))
     panels = [("overview", "Overview", overview),
               ("journal", "Journal", journal_card(mode, view, (q or {}).get("period", ["day"])[0])),
-              ("log", "Trade log", trade_log(rows, mode, label) if rows else empty)]
+              ("log", "Trade log", (trade_log(rows, mode, label) if rows else empty) + manual_closed_card(mode))]
     bt = trade_rows("backtest")
     if bt:
         first, last = bt[0].get("opened", "")[:10], max(r.get("closed", "")[:10] for r in bt)

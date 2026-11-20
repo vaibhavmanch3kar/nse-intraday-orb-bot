@@ -192,6 +192,30 @@ def _upgrade_trade_log(path, cols):
         w.writerows(rows)
 
 
+MANUAL_COLS = ["closed", "symbol", "direction", "qty", "your_avg", "exit", "gross", "how"]
+
+
+def log_manual_close(mode, when, symbol, direction, qty, your_avg, exit_price, how):
+    """One line in data\\trades_manual_<mode>.csv for shares YOU bought in Kite that the bot closed with its own
+    position. Kept apart from the bot's trade log, so the bot's record stays the bot's. `gross` is before
+    charges and is empty when your average price is not known. Never raises: a record problem must not stop
+    the trading loop."""
+    try:
+        path = os.path.join(C.DATA_DIR, f"trades_manual_{mode}.csv")
+        new = not os.path.exists(path)
+        gross = ""
+        if your_avg:
+            gross = round((float(exit_price) - float(your_avg)) * int(qty) * (1 if direction == "LONG" else -1), 2)
+        with open(path, "a", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=MANUAL_COLS)
+            if new:
+                w.writeheader()
+            w.writerow({"closed": str(when), "symbol": symbol, "direction": direction, "qty": int(qty),
+                        "your_avg": your_avg or "", "exit": round(float(exit_price), 2), "gross": gross, "how": how})
+    except Exception as e:  # noqa: BLE001
+        log.warning("%s: the record of your shares closed by the bot could not be written (%s)", symbol, type(e).__name__)
+
+
 def log_trade(row, mode):
     path = os.path.join(C.DATA_DIR, f"trades_{mode}.csv")
     new = not os.path.exists(path)
@@ -657,6 +681,11 @@ class Bot:
         for sym, pos in list(self.state.positions.items()):
             self.close_position(sym, marks.get(sym, self.prices.get(sym, pos["entry"])), "daily loss limit", now)
 
+    def manual_avg(self, sym):
+        """The average price of your own shares in a stock, from the last comparison with Zerodha (None if not
+        known)."""
+        return ((self.manual_book or {}).get("manual") or {}).get(sym, {}).get("avg") or None
+
     def manual_pnl(self, now=None):
         """REAL MONEY: the result of your own trades in Kite today, booked and open, before charges, as of the last
         comparison with Zerodha (every RECON_EVERY_SEC): Zerodha's P&L in each stock you traded, less the bot's
@@ -760,6 +789,9 @@ class Bot:
         self.note(f"{icon} EXIT {row['direction']} {sym} x{qty} @ {price:.2f} ({T.reason_label(reason)}) "
                   f"net ₹{row['net']:.2f} ({row['r']:+.2f}R)"
                   + (f"; {mine} of your own share(s) in this stock closed with it" if mine else ""))
+        if mine:
+            log_manual_close(self.mode, when, sym, row["direction"], mine, self.manual_avg(sym), price,
+                             f"closed with the bot's exit ({reason})")
 
     # -- one cycle
     def cycle(self):
@@ -871,6 +903,8 @@ class Bot:
                     if rest:
                         self.note(f"{sym}: {rest} more share(s) in this stock (yours) were closed after the stop",
                                   logging.WARNING)
+                        log_manual_close(self.mode, now, sym, pos["direction"], rest, self.manual_avg(sym),
+                                         filled_stop, "closed after the bot's stop was hit")
                 continue
             if self.live and hasattr(self.broker, "ensure_stop"):
                 # the position's stop-loss must exist at the exchange on every round, not only when it was placed

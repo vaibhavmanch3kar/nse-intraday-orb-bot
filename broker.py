@@ -450,8 +450,23 @@ class LiveBroker:
                 self._match_stop_size(symbol, oid, pos)
                 return "ok", None
             self._say(f"{symbol}: the exchange stop-loss order {oid} is {status} - placing it again", logging.ERROR)
-        new = self._protect(symbol, pos["direction"], shares_in_stock(pos), pos["stop"])
+        new = self._protect(symbol, pos["direction"], self._stop_size(symbol, pos) or int(pos["qty"]), pos["stop"])
         return ("replaced", new) if new else ("missing", None)
+
+    def _stop_size(self, symbol, pos):
+        """How many shares the bot's stop-loss order should cover in this stock: the bot's own, plus yours
+        (manual_qty) that no working exit order of YOUR OWN already covers, and never more than are open. If you
+        placed your own stop or sell order for your shares, the bot's stop leaves those shares to it: two
+        orders for the same shares could sell them twice. None when you have shares here and Zerodha's order
+        book can't be read (then nothing is changed)."""
+        own, mine = int(pos["qty"]), int(pos.get("manual_qty") or 0)
+        if mine <= 0:
+            return own
+        now = self._stock_now(symbol, pos["direction"])
+        if now is None:
+            return None
+        open_now, theirs = now
+        return max(own, min(own + max(0, mine - theirs), max(open_now, own)))
 
     def _match_stop_size(self, symbol, oid, pos):
         """The stop-loss order covers every share in this stock: the bot's and yours (bought in Kite, the
@@ -459,8 +474,8 @@ class LiveBroker:
         another size, it is set to the full quantity here, at its own trigger and limit. Only a stop that has
         not been triggered is changed (ensure_stop checks that first)."""
         last = self.order_last.get(oid) or {}
-        have, want = int(last.get("quantity") or 0), shares_in_stock(pos)
-        if not have or have == want:
+        have, want = int(last.get("quantity") or 0), self._stop_size(symbol, pos)
+        if not have or want is None or have == want:
             return
         mine = int(pos.get("manual_qty") or 0)
         try:
@@ -525,31 +540,59 @@ class LiveBroker:
                 self._say(f"{symbol}: the stop-loss order had already sold {stop_qty} of {shares_in_stock(pos)} "
                           f"shares @ {stop_avg:.2f} - closing only the other {shares_in_stock(pos) - stop_qty}",
                           logging.WARNING)
-        # what is still open in this stock, read from Zerodha now (yours included); the record if it can't be read
-        expected = max(0, shares_in_stock(pos) - stop_qty)
-        seen = self._open_now(symbol, pos["direction"]) if whole_stock else None
-        remaining = expected if seen is None else seen
-        if seen is not None and seen != expected:
-            self._say(f"{symbol}: Zerodha shows {seen} shares open in this stock, the record expected {expected} - "
-                      f"closing all {seen}", logging.WARNING)
+        own_left = max(0, int(pos["qty"]) - stop_qty)               # the bot's own shares still to close
+        remaining = own_left
+        now = self._stock_now(symbol, pos["direction"]) if whole_stock else None
+        if whole_stock and now is None:
+            # No count of what is open: close the bot's own shares only. Selling "the record's" quantity could
+            # sell shares you have already sold or covered yourself.
+            if int(pos.get("manual_qty") or 0):
+                self._say(f"{symbol}: Zerodha's order book can't be read - closing only the bot's own {own_left} "
+                          f"share(s); your {int(pos['manual_qty'])} stay open: check Kite", logging.ERROR)
+        elif now is not None:
+            open_now, theirs = now
+            remaining = max(0, open_now - theirs)
+            if theirs:
+                self._say(f"{symbol}: {min(theirs, open_now)} share(s) are covered by your own working order(s) in "
+                          f"Kite and are left to them; the bot closes the other {remaining}", logging.WARNING)
+            expected = max(0, shares_in_stock(pos) - stop_qty)
+            if open_now != expected:
+                self._say(f"{symbol}: Zerodha shows {open_now} shares open in this stock, the record expected "
+                          f"{expected} - the count from Zerodha is used", logging.WARNING)
         mine = max(0, stop_qty + remaining - int(pos["qty"]))       # shares beyond the bot's own: yours
         done_qty, value = self._close_shares(symbol, pos["direction"], remaining, ref_price, stop_qty,
                                              stop_qty * stop_avg)
         bot_done = min(int(pos["qty"]), max(0, done_qty - mine))
         self.manual_sold[symbol] = done_qty - bot_done
+        if whole_stock and now is not None:
+            self._check_not_oversold(symbol, pos["direction"])
         return bot_done, (value / done_qty if done_qty else 0.0)
 
-    def _open_now(self, symbol, direction):
-        """Shares open at Zerodha in this stock on the position's side, read now (0 if none or the other side);
-        None if Zerodha can't be read or has no order in the stock today.
+    def _check_not_oversold(self, symbol, direction):
+        """After closing a stock: the fills must not add up to a position on the other side. If they do, say it
+        at once: nothing is sent to "fix" it, because that would be an order nobody asked for."""
+        net = self._net_now(symbol, direction)
+        if net is not None and net[0] < 0:
+            self._say(f"{symbol}: Zerodha's fills now add up to {abs(net[0])} share(s) on the OTHER side - the "
+                      f"account may be {'short' if direction == 'LONG' else 'long'} {abs(net[0])}. Check Kite now.",
+                      logging.ERROR)
 
-        Counted from today's filled orders in the stock (the bot's and yours), not from Zerodha's positions list:
-        the order book is where the stop's own status was just read, so a fill seen there is counted here too.
-        The positions list can lag a moment behind a fill, and reading it right after a stop filled could make
-        the bot sell shares that are already gone (and leave you short)."""
+    def _net_now(self, symbol, direction):
+        """(net shares in this stock on the position's side, shares your own working exit orders cover), read now;
+        None if Zerodha can't be read or has no order in the stock today. The net is negative when the fills add
+        up to a position on the other side.
+
+        Counted from today's orders in the stock (the bot's and yours), not from Zerodha's positions list: the
+        order book is where the stop's own status was just read, so a fill seen there is counted here too. The
+        positions list can lag a moment behind a fill, and reading it right after a stop filled could make the
+        bot sell shares that are already gone (and leave you short).
+
+        "Your own working exit orders" are orders without the bot's tag, not yet final, on the closing side (a
+        stop-loss or a sell you placed for your shares): what they have not filled yet is theirs to close."""
+        closing = "SELL" if direction == "LONG" else "BUY"
         try:
             book = self.kite.orders() or []
-            q, seen = 0, False
+            q, theirs, seen = 0, 0, False
             for o in book:
                 if (o.get("tradingsymbol") != symbol or o.get("product", "MIS") != "MIS"
                         or o.get("exchange", "NSE") != "NSE"):
@@ -557,22 +600,35 @@ class LiveBroker:
                 seen = True
                 f = int(o.get("filled_quantity") or 0)
                 q += f if o.get("transaction_type") == "BUY" else -f
+                if (not orders.is_ours(o.get("tag")) and o.get("status") not in FINAL
+                        and o.get("transaction_type") == closing):
+                    theirs += max(0, int(o.get("quantity") or 0) - f)
         except Exception as e:  # noqa: BLE001
-            log.warning("%s: Zerodha's order book could not be read before the exit (%s)", symbol, type(e).__name__)
+            log.warning("%s: Zerodha's order book could not be read (%s)", symbol, type(e).__name__)
             return None
         if not seen:
             return None
-        return abs(q) if q and (q > 0) == (direction == "LONG") else 0
+        return (q if direction == "LONG" else -q), theirs
+
+    def _stock_now(self, symbol, direction):
+        """(shares open on the position's side, shares your own working exit orders cover) or None."""
+        net = self._net_now(symbol, direction)
+        return None if net is None else (max(0, net[0]), net[1])
 
     def close_rest(self, symbol, direction, ref_price):
         """After the bot's position was closed by its exchange stop: close what is still open in this stock on
-        the same side (your shares, when the stop did not cover them). Returns the shares closed."""
-        seen = self._open_now(symbol, direction)
-        if not seen:
+        the same side (your shares, when the stop did not cover them), except shares your own working orders
+        cover. Returns the shares closed."""
+        now = self._stock_now(symbol, direction)
+        if not now:
             return 0
-        self._say(f"{symbol}: the stop closed the bot's shares; {seen} more are open in this stock (yours) - "
+        rest = max(0, now[0] - now[1])
+        if not rest:
+            return 0
+        self._say(f"{symbol}: the stop closed the bot's shares; {rest} more are open in this stock (yours) - "
                   f"closing them too", logging.WARNING)
-        done, _ = self._close_shares(symbol, direction, seen, ref_price, 0, 0.0)
+        done, _ = self._close_shares(symbol, direction, rest, ref_price, 0, 0.0)
+        self._check_not_oversold(symbol, direction)
         return done
 
     def _close_shares(self, symbol, direction, remaining, ref_price, done_qty, value):

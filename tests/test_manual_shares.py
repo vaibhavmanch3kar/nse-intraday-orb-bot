@@ -153,15 +153,18 @@ def test_shares_you_added_after_the_last_comparison_are_closed_too(live):
     assert sells[0]["quantity"] == q + 9 and int(trades()[-1]["qty"]) == q
 
 
-def test_if_zerodha_cant_be_read_the_exit_closes_what_the_record_knows(live):
+def test_if_zerodha_cant_be_read_the_exit_closes_only_the_bots_own_shares(live):
+    # no count of what is open: selling the record's quantity could sell shares you already sold yourself
     b, z, pos, q = entered(live)
     you_buy(z, "SBIN", 9, 100.9)
     z.net = {"SBIN": q + 9}
     b.reconcile(startup=False)
     z.book_down = True
     b.close_position("SBIN", 101.0, "time stop", bot.now_ist())
+    z.book_down = False
     sells = [o for o in z.sent("LIMIT") if o["transaction_type"] == "SELL"]
-    assert sells[0]["quantity"] == q + 9
+    assert len(sells) == 1 and sells[0]["quantity"] == q and "SBIN" not in b.state.positions
+    assert any("closing only the bot's own" in t and "your 9 stay open" in t for _, t in b.broker.messages)
 
 
 def test_what_could_not_be_sold_stays_on_the_bots_record(live):
@@ -294,3 +297,120 @@ def test_health_counts_your_trades_in_the_daily_loss_line():
     rows = health.checks(now, s, login=True, disk_free_gb=40.0, proxy={})
     line = next(r for r in rows if r["key"] == "day_loss")
     assert line["detail"].startswith("1.48% of the 2% limit") and "your own trades in Kite -100.00 included" in line["detail"]
+
+
+# ---------------------------------------------------------------- audits against overselling (20 Nov 2026)
+def your_stop(z, sym, qty, trigger, oid="ys1", filled=0, status="TRIGGER PENDING"):
+    """A stop-loss order YOU placed in Kite for your own shares (no bot tag)."""
+    z.book[oid] = {"order_id": oid, "tag": None, "status": status, "tradingsymbol": sym, "product": "MIS",
+                   "exchange": "NSE", "transaction_type": "SELL", "quantity": qty, "order_type": "SL",
+                   "trigger_price": trigger, "price": trigger - 0.5, "filled_quantity": filled, "average_price": 0.0}
+
+
+def test_the_bots_stop_leaves_shares_your_own_stop_already_covers(live):
+    b, z, pos, q = entered(live)
+    you_buy(z, "SBIN", 9, 100.9)
+    your_stop(z, "SBIN", 9, 99.0)                    # you protect your 9 yourself
+    z.net = {"SBIN": q + 9}
+    b.reconcile(startup=False)
+    assert pos["manual_qty"] == 9                    # still tracked as yours
+    assert b.broker.ensure_stop("SBIN", pos)[0] == "ok"
+    assert z.modified == [] and z.book[pos["sl_order_id"]]["quantity"] == q      # no second cover for the same shares
+
+
+def test_a_stop_you_placed_for_part_of_your_shares_is_allowed_for(live):
+    b, z, pos, q = entered(live)
+    you_buy(z, "SBIN", 9, 100.9)
+    your_stop(z, "SBIN", 4, 99.0)
+    z.net = {"SBIN": q + 9}
+    b.reconcile(startup=False)
+    b.broker.ensure_stop("SBIN", pos)
+    assert z.book[pos["sl_order_id"]]["quantity"] == q + 5       # the bot's own and the 5 of yours without a stop
+    # you then cover all 9 yourself: the bot's stop goes back down, so no share has two stops
+    z.book["ys1"]["quantity"] = 9
+    b.broker.ensure_stop("SBIN", pos)
+    assert z.book[pos["sl_order_id"]]["quantity"] == q
+
+
+def test_the_exit_leaves_shares_your_own_order_is_closing(live):
+    b, z, pos, q = entered(live)
+    you_buy(z, "SBIN", 9, 100.9)
+    your_stop(z, "SBIN", 9, 99.0)
+    z.net = {"SBIN": q + 9}
+    b.reconcile(startup=False)
+    b.close_position("SBIN", 101.0, "time stop", bot.now_ist())
+    sells = [o for o in z.sent("LIMIT") if o["transaction_type"] == "SELL"]
+    assert len(sells) == 1 and sells[0]["quantity"] == q         # only the bot's: yours are left to your order
+    assert z.book["ys1"]["status"] == "TRIGGER PENDING" and "ys1" not in z.cancelled
+    assert any("covered by your own working order(s) in Kite" in t for _, t in b.broker.messages)
+
+
+def test_shares_you_already_sold_are_not_sold_again(live):
+    b, z, pos, q = entered(live)
+    you_buy(z, "SBIN", 9, 100.9)
+    z.net = {"SBIN": q + 9}
+    b.reconcile(startup=False)                       # the record says 9 of yours are open
+    you_buy(z, "SBIN", 9, 101.4, side="SELL")        # you sell them in Kite before the next comparison
+    b.close_position("SBIN", 101.0, "time stop", bot.now_ist())
+    sells = [o for o in z.sent("LIMIT") if o["transaction_type"] == "SELL" and str(o.get("tag") or "").startswith("orb")]
+    assert len(sells) == 1 and sells[0]["quantity"] == q
+    assert not any("OTHER side" in t for _, t in b.broker.messages)
+
+
+def test_an_oversold_stock_is_said_at_once(live):
+    b, z, pos, q = entered(live)
+    b.broker._check_not_oversold("SBIN", "LONG")
+    assert not any("OTHER side" in t for _, t in b.broker.messages)
+    you_buy(z, "SBIN", q + 3, 101.0, side="SELL")    # more sold than was ever bought
+    b.broker._check_not_oversold("SBIN", "LONG")
+    assert any("3 share(s) on the OTHER side" in t and "short 3" in t for _, t in b.broker.messages)
+
+
+def test_a_stop_is_never_larger_than_the_shares_that_are_open(live):
+    b, z, pos, q = entered(live)
+    you_buy(z, "SBIN", 9, 100.9)
+    z.net = {"SBIN": q + 9}
+    b.reconcile(startup=False)
+    you_buy(z, "SBIN", 6, 101.2, side="SELL")        # you sold 6 of yours; the record still says 9
+    b.broker.ensure_stop("SBIN", pos)
+    assert z.book[pos["sl_order_id"]]["quantity"] == q + 3
+
+
+# ---------------------------------------------------------------- a separate record of your shares
+def manual_log():
+    p = os.path.join(C.DATA_DIR, "trades_manual_live.csv")
+    if not os.path.exists(p):
+        return []
+    with open(p, encoding="utf-8") as f:
+        return list(csv.DictReader(f))
+
+
+def test_your_shares_closed_by_the_bot_get_their_own_record(live):
+    b, z, pos, q = entered(live)
+    assert manual_log() == []
+    you_buy(z, "SBIN", 9, 100.9)
+    z.net = {"SBIN": q + 9}
+    b.reconcile(startup=False)
+    b.close_position("SBIN", 101.0, "time stop", bot.now_ist())
+    (row,) = manual_log()
+    assert (row["symbol"], row["direction"], row["qty"], row["your_avg"]) == ("SBIN", "LONG", "9", "100.9")
+    assert "closed with the bot's exit (time stop)" in row["how"] and float(row["gross"]) == round((float(row["exit"]) - 100.9) * 9, 2)
+    assert all(int(t["qty"]) == q for t in trades())           # the bot's own log has only the bot's shares
+
+
+def test_a_record_problem_never_stops_the_bot(monkeypatch, live):
+    b, z, pos, q = entered(live)
+    monkeypatch.setattr(bot.csv, "DictWriter", lambda *a, **k: (_ for _ in ()).throw(OSError("disk full")))
+    bot.log_manual_close("live", bot.now_ist(), "SBIN", "LONG", 9, 100.9, 101.0, "x")      # must not raise
+
+
+def test_the_trades_page_lists_your_shares_the_bot_closed(live):
+    import web
+    assert web.manual_closed_card("live") == ""
+    bot.log_manual_close("live", "2026-11-20 10:45:10+05:30", "KOTAKBANK", "LONG", 5, 504.86, 505.10, "closed with the bot's exit (time stop)")
+    bot.log_manual_close("live", "2026-11-20 11:00:00+05:30", "ITC", "LONG", 2, None, 300.0, "closed after the bot's stop was hit")
+    card = web.manual_closed_card("live")
+    for text in ("Your shares the bot closed", "KOTAKBANK", "504.86", "505.10", "▲ ₹1.20", "not in the bot's results",
+                 "closed after the bot&#x27;s stop was hit", "trades_manual_live.csv"):
+        assert text in card, text
+    assert web.manual_closed_card("paper") == ""
