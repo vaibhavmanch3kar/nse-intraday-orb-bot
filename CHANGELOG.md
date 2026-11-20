@@ -6,6 +6,75 @@ Every version is on the [Releases page](https://github.com/vaibhavmanch3kar/nse-
 with a ZIP you can download. To go back to an older version, download that version's ZIP.
 Your settings (Windows user environment variables) and your `data` folder are not part of the ZIP, so keep them.
 
+## v3.0.0 (20 Nov 2026): your own trades next to the bot, pinned limits, and a scoreboard against just holding
+
+**The entry and exit rules are unchanged.** On the one-year candle archive to 19 Nov 2026 the backtest is
+identical to v2.0.1 (298 trades, −15.36%). The rules still lose money after costs and no idea tested in the lab
+has passed: paper trading stays the default, and real money stays off unless you set it up yourself
+([docs/LIVE-TRADING.md](docs/LIVE-TRADING.md)). Of 988 offline tests, 986 pass; the other 2 run only while the bot is stopped and were skipped, because it was running.
+
+It is a major version because the real-money bot now does three things it did not do before: it manages shares
+you add in Kite in a stock it holds, it changes the quantity of its stop-loss order, and it counts your own
+trades in the daily loss limit.
+
+### Real money: shares you trade yourself in Kite
+
+Before, buying more of a stock the bot held made the bot report a mismatch and hold its new entries for the rest
+of the day, and its exit cancelled the stop order and sold only its own shares.
+
+- **In a stock the bot holds, on the bot's side, your shares are managed with the bot's.** The comparison with
+  Zerodha counts them as yours (orders without the bot's tag), so nothing is held.
+- **One stop-loss order covers the bot's shares and yours.** If you add shares and leave the stop order as it
+  was, the bot sets it to the right quantity at its own trigger and limit. If that fails it says so loudly.
+- **The bot's exit closes the combined position.** The quantity is counted at that moment from today's filled
+  orders, so shares added in the last minutes are closed too. It is counted from the order book, not from the
+  positions list, which can lag behind a fill.
+- **Guards against selling shares twice:**
+  - Orders you place yourself are allowed for. If you put your own stop-loss or sell order on your shares, the
+    bot's stop does not cover those shares as well and the bot's exit leaves them to your order. Your own
+    orders are never changed or cancelled.
+  - The bot's stop is never larger than the shares open in the stock.
+  - If Zerodha's order book can't be read at an exit, only the bot's own shares are closed.
+  - After closing a stock the fills are added up again, and a position on the other side is said at once.
+- **Separate records.** The bot's trade log, win rate and R figures contain only the bot's shares. Your shares
+  that the bot closed are written to `data\trades_manual_<mode>.csv` and listed on the Trades page.
+- **In any other stock your shares are yours:** shown, counted, never traded by the bot.
+- The broker's own closes (a late entry fill, an entry whose stop could not be placed) still close only their
+  own shares.
+
+### Kavach
+
+- **The daily loss limit counts your own trades too.** Your result today (Zerodha's P&L in each stock you
+  traded, less the bot's own part, before charges) is added to the bot's. At the limit the bot holds new entries
+  and closes what it manages. Your shares in other stocks are not touched.
+- **Pinned limits (`pins.py`).** A risk limit you pin is saved in `data\owner_limits.json`, and every program
+  uses the stricter of the pin and the normal setting. A pin can never loosen a limit, and it holds through
+  restarts, updates and a lost Windows setting. The Kavach page marks it "pinned by you".
+
+### Dashboard
+
+- **Static-IP proxy** line in System health: while the bot trades real money the dashboard checks the proxy in
+  the background every 5 minutes (every minute after a failure) and shows working / needs a look / NOT working.
+- **Open positions** shows "+N YOURS" on a bot position with shares you added, and lists your open shares in
+  other stocks as YOURS, with Zerodha's P&L and a note that the bot does not manage them.
+- **Best so far and given back** on every open position: the best open profit it has had and how much of it the
+  price has given back. Information only.
+- **Bot vs just holding** on the Trades page: the bot's result next to holding the watchlist and the Nifty 50
+  over the same completed days, with a warning while there are too few days to judge. A yardstick, not advice.
+
+### Research since v2.0.1 (no rule was changed by it)
+
+Each was fixed in advance and judged on unseen data; all failed: 5-minute candles, a stop beyond the prior day's
+high or low, ten profit-booking rules (fixed and ATR targets, breakeven, partial booking, an ATR trail, a
+2-hour time stop, a giveback exit), six numerology and calendar inputs, and monthly momentum on daily prices.
+The audit behind them: before costs the trades are close to a coin flip (−0.03R, a range that includes zero),
+and charges plus slippage take about 0.19R from each one.
+
+### Upgrading
+
+Your settings and your `data` folder are kept. The built-in limits are unchanged (4 new trades a day, a
+cool-down of 2 trading days).
+
 ## v2.0.1 (20 Nov 2026): real-money fixes and two stricter limits
 
 The first release of 2.0: it also contains everything in v2.0, the section below.
