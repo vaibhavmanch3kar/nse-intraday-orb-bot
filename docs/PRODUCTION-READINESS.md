@@ -1,6 +1,6 @@
 # Ayodhya ORB 2.0: production-readiness report
 
-Built 2026-11-19 16:36 by `readiness.py` from the evidence listed here. Code version `v1.9.0-78-g41bde58`.
+Built 2026-11-20 14:33 by `readiness.py` from the evidence listed here. Code version `v3.0.0-4-g03f04ed`.
 
 This report states what the evidence shows. It is not advice on whether to trade.
 
@@ -24,18 +24,17 @@ This report states what the evidence shows. It is not advice on whether to trade
 - **FAIL** one-year backtest of the present rules: 298 trades, -15.36%, average -0.22R (range -0.27 to -0.17)
 - **FAIL** lab: 7 ideas tested by walk-forward, none passed
 - **FAIL** forward test on unseen data: nothing has passed (2 registered)
-- **OPEN** real-money record: 1 closed trade(s), net ₹-3.96; the checkpoint needs 30 trades and even then is not proof
+- **OPEN** real-money record: 3 closed trade(s), net ₹-8.92; the checkpoint needs 30 trades and even then is not proof
 
 ### Operations
 
-- **OPEN** Closing session change on 7 Dec 2026: NOT yet verified: trading hours and MIS timings change that day and must be checked again before it.
 - **OPEN** alerts reach only the dashboard; nothing reaches a phone when the PC is unattended
 - **OPEN** prices are polled as 15-minute candles; Kite's live tick stream is not used
 - **OPEN** 1 more item(s) about this PC's own set-up are listed on the dashboard's Readiness page and are not written to this file.
 
 ## Tests
 
-928 passed, 0 failed, 0 skipped, in 76 test files.
+1016 passed, 0 failed, 2 skipped, in 82 test files.
 
 | | Area | Requirement | Tests passed | Result |
 |---|---|---|---|---|
@@ -44,9 +43,9 @@ This report states what the evidence shows. It is not advice on whether to trade
 | K3 | Capital protection (Kavach) | No real-money entry on delayed, stale, missing or invalid prices | 23 | PASS |
 | K4 | Capital protection (Kavach) | Positions are sized from the real balance and skipped when not even one share is affordable | 30 | PASS |
 | E1 | Execution | Paper and real money are separate; real money needs both Windows settings and the day's arming | 81 | PASS |
-| E2 | Execution | Every order is recorded before it is sent, carries its own tag and is never sent twice; an order ID is not treated as a fill | 71 | PASS |
-| E3 | Execution | The bot's record is compared with Zerodha at start and every few minutes; a mismatch holds new entries | 67 | PASS |
-| E4 | Execution | Every open position keeps an exchange stop-loss, checked on every round | 69 | PASS |
+| E2 | Execution | Every order is recorded before it is sent, carries its own tag and is never sent twice; an order ID is not treated as a fill | 72 | PASS |
+| E3 | Execution | The bot's record is compared with Zerodha at start and every few minutes; a mismatch holds new entries | 68 | PASS |
+| E4 | Execution | Every open position keeps an exchange stop-loss, checked on every round | 68 | PASS |
 | E5 | Execution | Only one module can send or cancel an order; the dashboard and the analysis pages cannot reach it | 31 | PASS |
 | E6 | Execution | Positions are closed before the broker's own square-off | 7 | PASS |
 | D1 | Market data | Candles are validated; delays and gaps are measured and shown | 37 | PASS |
@@ -61,7 +60,7 @@ This report states what the evidence shows. It is not advice on whether to trade
 | U2 | Dashboard | Start, Pause, Resume, Stop and Zerodha logout ask first and accept only the dashboard's own forms | 21 | PASS |
 | U3 | Dashboard | Apply Changes checks the new code, restarts only when safe, verifies the result and can go back | 30 | PASS |
 | H1 | Security and self-healing | The login is stored protected and no secret reaches a log | 27 | PASS |
-| H2 | Security and self-healing | Health checks and alerts | 27 | PASS |
+| H2 | Security and self-healing | Health checks and alerts | 39 | PASS |
 | H3 | Security and self-healing | A crashed or stuck bot is detected, recorded and restarted; files are saved safely | 44 | PASS |
 | H4 | Security and self-healing | Daily backups, the trade journal and the candle archive | 21 | PASS |
 
@@ -96,7 +95,7 @@ The real trading loop (`bot.Bot.cycle`) was driven through 239 archived trading 
 | orb_regime | 84 | -0.15 | FAIL |
 | orb_retest | 68 | -0.65 | FAIL |
 | vwap_pullback | 162 | -0.42 | FAIL |
-- Real money trade log: 1 closed trade(s), net ₹-3.96.
+- Real money trade log: 3 closed trade(s), net ₹-8.92.
 - Paper trade log: 3 closed trade(s), net ₹118.15.
 
 ## Rules for trading through the Kite API
@@ -108,12 +107,12 @@ The real trading loop (`bot.Bot.cycle`) was driven through 239 archived trading 
 | No market orders from an algo | The bot sends LIMIT entries and exits and SL (stop-loss limit) protection only. | 2026-11-18 |
 | Order tags | Every bot order carries a tag of at most 20 letters and digits. | 2026-11-18 |
 | Zerodha MIS square-off | Zerodha closes MIS positions in F&O stocks at 3:12 PM for a fee; the bot closes at 3:00 PM. | 2026-11-18 |
-| Closing session change on 7 Dec 2026 | NOT yet verified: trading hours and MIS timings change that day and must be checked again before it. | **not yet** |
+| Closing session change on 7 Dec 2026 | From 7 Dec 2026 regular trading runs to 3:30 PM for all stocks and the closing auction moves to 3:30-3:40 PM (Zerodha update of 16 Oct 2026, after SEBI's October circular). The bot closes at 3:00 PM, so it is not affected. Zerodha has not yet published its MIS square-off time from that day: check its bulletin in the first week of December. | 2026-11-20 |
 
 ## The running system when this was built
 
-- Health: warn; needs a look: watchdog, login.
-- Zerodha login on disk: none.
+- Health: ok.
+- Zerodha login on disk: protected.
 - Risk limits looser than built: none.
 - Where this PC keeps its secrets is shown on the dashboard's Readiness page, not in this file.
 
