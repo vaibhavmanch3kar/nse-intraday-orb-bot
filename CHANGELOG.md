@@ -6,7 +6,9 @@ Every version is on the [Releases page](https://github.com/vaibhavmanch3kar/nse-
 with a ZIP you can download. To go back to an older version, download that version's ZIP.
 Your settings (Windows user environment variables) and your `data` folder are not part of the ZIP, so keep them.
 
-## 19 Nov 2026 (on `main` and `release/ayodhya-orb-2.0`, no new release yet): real-money fixes and two stricter limits
+## v2.0.1 (20 Nov 2026): real-money fixes and two stricter limits
+
+The first release of 2.0: it also contains everything in v2.0, the section below.
 
 **The entry rules are unchanged. Two risk limits are now stricter** (the cool-down and the daily loss limit,
 below). On the one-year candle archive to 19 Nov 2026 the backtest was 337 trades, −16.43% before these changes
@@ -63,7 +65,7 @@ paper replay of the trading loop still agrees with the backtest on every trade (
   does not use it.
 - No test can start the real bot or dashboard any more, and two tests no longer depend on the PC's time zone.
 
-## v2.0 (18 Nov 2026, branch `release/ayodhya-orb-2.0`): safety, research and readiness
+## v2.0 (18 Nov 2026, branch `release/ayodhya-orb-2.0`; not released on its own, included in v2.0.1): safety, research and readiness
 
 Step-by-step guide with screenshots: [docs/GUIDE-2.0.md](docs/GUIDE-2.0.md).
 What the evidence shows: [docs/PRODUCTION-READINESS.md](docs/PRODUCTION-READINESS.md).
