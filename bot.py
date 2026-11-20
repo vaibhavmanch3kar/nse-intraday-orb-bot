@@ -732,8 +732,11 @@ class Bot:
 
     def close_position(self, sym, ref_price, reason, when):
         pos = self.state.positions[sym]
-        qty, price = (self.broker.exit(sym, pos, ref_price, reason, whole_stock=True) if self.live else
-                      self.broker.exit(sym, pos, ref_price, reason))
+        # the real-money broker closes every share in the stock (yours too); the paper broker only its own.
+        # Asked of the broker itself: after a switch back to paper the bot can still be live while the broker
+        # in use is the paper one (and the other way round).
+        qty, price = (self.broker.exit(sym, pos, ref_price, reason, whole_stock=True)
+                      if getattr(self.broker, "live", False) else self.broker.exit(sym, pos, ref_price, reason))
         if qty <= 0:
             self.note(f"{T.WARN_ICON} {sym}: exit FAILED ({reason}) - check Kite", logging.ERROR)
             return

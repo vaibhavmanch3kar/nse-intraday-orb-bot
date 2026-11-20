@@ -56,7 +56,8 @@ def reaches(name, target, seen=None):
 
 def test_only_the_broker_module_can_send_change_or_cancel_an_order():
     callers = {n: order_calls(n) for n in project_files() if order_calls(n)}
-    assert callers == {"broker.py": ["cancel_order", "place_order"]}
+    # modify_order (20 Nov 2026): the stop-loss order is set to cover every share in the stock (yours too)
+    assert callers == {"broker.py": ["cancel_order", "modify_order", "place_order"]}
 
 
 def test_only_the_bot_loads_the_broker_module():
