@@ -2781,6 +2781,47 @@ def trade_section(rows, src, label, start_cash, show_log=True):
     return out + (trade_log(rows, src, label, limit=500) if show_log else "")
 
 
+def _pct_arrow(v):
+    """▲ 1.23% / ▼ 1.23% / 0.00%: the arrow carries the sign, as _signed does for rupees."""
+    if v is None:
+        return "-"
+    return f"{'▲ ' if v > 0.004 else '▼ ' if v < -0.004 else ''}{abs(v):.2f}%"
+
+
+def scoreboard_card(mode):
+    """Bot vs just holding (scoreboard.py): the bot's result next to holding the watchlist and the Nifty 50 over
+    the same completed days. A yardstick only: it recommends nothing and nothing trades on it."""
+    import scoreboard
+    sb = scoreboard.build(mode)
+    head = ("<h2>Bot vs just holding <span class='muted small'>the same days · the bot after all charges · "
+            "a yardstick, not advice</span></h2>")
+    if sb.get("reason"):
+        return f"<section class='card' id='scoreboard'>{head}<div class='muted'>{html.escape(scoreboard.sentence(sb))}</div></section>"
+    cells = (_kpi("The bot", _pct_arrow(sb["bot_pct"]), f"its trades on {sb['bot_days']} day(s), after all charges",
+                  _cls(round(sb["bot_pct"], 2)))
+             + _kpi("Holding the watchlist", _pct_arrow(sb["hold_pct"]),
+                    f"{sb['stocks']} stocks bought once and held, less {sb['buy_cost_pct']:g}% to buy",
+                    _cls(round(sb["hold_pct"], 2)))
+             + _kpi("Nifty 50", _pct_arrow(sb["index_pct"]), "price change of the index", _cls(round(sb["index_pct"], 2))))
+    rows = "".join(f"<tr><td>{html.escape(_day_label(r['day']))}</td><td class='{_cls(round(r['bot_pct'], 2))}'>"
+                   f"{_pct_arrow(r['bot_pct'])}{'' if r['bot_ran'] else ' <span class=muted>(bot off)</span>'}</td>"
+                   f"<td class='{_cls(round(r['hold_pct'], 2))}'>{_pct_arrow(r['hold_pct'])}</td>"
+                   f"<td class='{_cls(round(r['index_pct'], 2))}'>{_pct_arrow(r['index_pct'])}</td></tr>"
+                   for r in sb["rows"][-10:])
+    few = (f"<div class='warn small warnline'>⚠ {sb['market_days']} market day(s) is far too few to judge: this "
+           f"line starts to mean something after a few months.</div>" if sb["few_days"] else "")
+    note = (f"<div class='muted small warnline'>From {html.escape(_day_label(sb['from']))} to "
+            f"{html.escape(_day_label(sb['to']))} (completed days; today is added after the close). The bot: each "
+            f"day's trades as a share of that day's starting balance, compounded; money added or withdrawn is not "
+            f"a result. Holding: equal rupees in each watchlist stock at the close of "
+            f"{html.escape(_day_label(sb['base_day']))}; selling later would cost about the same again plus "
+            f"₹15.34 a stock. No dividends are counted. Figures are cumulative since the start.</div>")
+    return (f"<section class='card' id='scoreboard'>{head}<div class='kgrid'>{cells}</div>"
+            f"<div class='small' style='margin:10px 0 6px'><b>{html.escape(scoreboard.sentence(sb))}</b></div>{few}"
+            f"<table class='rt'><thead><tr><th>Up to</th><th>The bot</th><th>Holding the watchlist</th>"
+            f"<th>Nifty 50</th></tr></thead><tbody>{rows}</tbody></table>{note}</section>")
+
+
 def daily_pnl_card(mode):
     """Net P&L per trading day from the daily journal, as bars."""
     import chartjs
@@ -2941,7 +2982,8 @@ def render_trades(q=None):
              if mode == "paper" else
              "<section class='card muted'>No real-money trades: the bot has only traded on paper. This list shows "
              "trades the bot places in live mode (data\\trades_live.csv), not your whole Zerodha tradebook.</section>")
-    overview = (empty + (trade_charts(rows, st, label, start) if rows else "") + daily_pnl_card(mode)
+    overview = (scoreboard_card(mode) + empty + (trade_charts(rows, st, label, start) if rows else "")
+                + daily_pnl_card(mode)
                 + (trade_breakdowns(rows) if rows else "") + edge_card(rows, f"{mode.title()} trading"))
     panels = [("overview", "Overview", overview),
               ("journal", "Journal", journal_card(mode, view, (q or {}).get("period", ["day"])[0])),
